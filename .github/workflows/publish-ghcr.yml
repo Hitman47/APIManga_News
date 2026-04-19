@@ -1,4 +1,4 @@
-name: publish
+name: publish-ghcr
 
 on:
   push:
@@ -28,7 +28,8 @@ jobs:
         shell: bash
         run: |
           owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          repo="$(echo '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')"
+          # GHCR image names must be lowercase. Requested name: APIManga_News -> apimanga_news
+          repo="apimanga_news"
           image="${{ env.REGISTRY }}/${owner}/${repo}"
           echo "owner=${owner}" >> "$GITHUB_OUTPUT"
           echo "repo=${repo}" >> "$GITHUB_OUTPUT"
