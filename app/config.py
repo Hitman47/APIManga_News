@@ -37,8 +37,19 @@ class Settings(BaseSettings):
         return '/redoc' if self.enable_docs else None
 
 
+def _resolve_writable_db_path(db_path: Path) -> Path:
+    candidate = db_path.expanduser()
+    try:
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        return candidate
+    except OSError:
+        fallback = Path.cwd() / '.data' / candidate.name
+        fallback.parent.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     settings = Settings()
-    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.db_path = _resolve_writable_db_path(settings.db_path)
     return settings
