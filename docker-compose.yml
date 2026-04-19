@@ -1,6 +1,7 @@
 services:
   manga-news-api:
-    build: .
+    image: ${GHCR_IMAGE:-ghcr.io/owner/manga-news-api:latest}
+    pull_policy: always
     container_name: manga-news-api
     ports:
       - "8017:8000"
@@ -9,7 +10,7 @@ services:
       LOG_LEVEL: INFO
       MANGA_NEWS_BASE_URL: https://www.manga-news.com
       USER_AGENT: MangaNewsPrivateAPI/0.1 (+private-selfhosted)
-      API_TOKEN: ""
+      API_TOKEN: "${API_TOKEN:-}"
       DB_PATH: /data/cache.sqlite3
       REQUEST_TIMEOUT_SECONDS: 20
       CACHE_STALE_GRACE_SECONDS: 604800
@@ -21,7 +22,7 @@ services:
       SEARCH_SCORE_THRESHOLD: 60
       DEFAULT_LIMIT: 10
       MAX_LIMIT: 50
-      ENABLE_DOCS: "true"
+      ENABLE_DOCS: "${ENABLE_DOCS:-true}"
     volumes:
       - ./data:/data
     restart: unless-stopped
