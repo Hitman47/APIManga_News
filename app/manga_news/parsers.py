@@ -7,12 +7,17 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from app.exceptions import ParseError
-from app.models import NewsItem, SearchResult, SeriesData, SeriesStats, EditionStatus, VolumeData
+from app.models import EditionStatus, NewsItem, PlanningItem, PlanningPage, SearchResult, SeriesData, SeriesStats, VolumeData
 from app.utils import clean_ws, ensure_absolute_url, normalize_text, parse_french_date, score_match, slugify, unique_list
 
 DATE_LINE_RE = re.compile(
     r'^(Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi|Dimanche),?\s+(\d{1,2}\s+[A-Za-zéûîôàèùçÉÛÎÔÀÈÙÇ]+\s+\d{4})(?:\s+(.*))?$'
 )
+PLANNING_ITEM_RE = re.compile(
+    r'^(?P<title>.+?)(?:\s+à ne pas manquer !)?\s+Sortie le\s+(?P<release_date>\d{2}/\d{2}/\d{4})(?:\s+Auteurs?\(s\):\s*(?P<authors>.+?))?(?:\s+Editeur:\s*(?P<publisher>.+))$',
+    flags=re.IGNORECASE,
+)
+PLANNING_HEADER_RE = re.compile(r'^Planning des sorties(?:\s+[A-Za-z]+)?\s+(?P<year>\d{4})/(?P<month>\d{1,2})$', flags=re.IGNORECASE)
 VALUE_LABELS = {
     'title_vo': ['Titre VO', 'Titre VO :'],
     'translated_title': ['Titre traduit', 'Titre traduit :'],
@@ -380,3 +385,116 @@ def parse_search_page(html: str, page_url: str, base_url: str, query: str, kind:
         )
     results.sort(key=lambda item: item.score, reverse=True)
     return results[:limit]
+
+
+
+def _infer_planning_section(page_url: str) -> str:
+    normalized = page_url.lower()
+    if '/planning/mangas-vo' in normalized:
+        return 'manga-vo'
+    return 'manga-vf'
+
+
+def _extract_planning_header(lines: list[str]) -> tuple[int | None, int | None]:
+    for line in lines:
+        match = PLANNING_HEADER_RE.match(line)
+        if match:
+            return int(match.group('year')), int(match.group('month'))
+    return None, None
+
+
+def parse_planning_page(html: str, page_url: str, base_url: str) -> PlanningPage:
+    soup = _soup(html)
+    lines = _lines(soup)
+    year, month = _extract_planning_header(lines)
+
+    candidate_lines: list[tuple[int, str]] = []
+    for idx, line in enumerate(lines):
+        normalized_line = normalize_text(line)
+        if 'sortie le' not in normalized_line or 'editeur' not in normalized_line:
+            continue
+        if 'auteur' not in normalized_line:
+            continue
+        candidate_lines.append((idx, line))
+
+    urls_in_order: list[str] = []
+    for anchor in soup.find_all('a', href=True):
+        href = anchor.get('href', '')
+        absolute_url = ensure_absolute_url(base_url, href)
+        if not absolute_url:
+            continue
+        if '/index.php/manga/' not in absolute_url:
+            continue
+        if any(excluded in absolute_url for excluded in ['/manga/news/', '/manga/critique/', '/manga/avis/', '/manga/extrait/']):
+            continue
+        text = clean_ws(anchor.get_text(' ', strip=True))
+        normalized_text = normalize_text(text)
+        if not text or normalized_text in GENERIC_ANCHOR_TEXTS or normalized_text in {'fiche detaillee'}:
+            continue
+        if absolute_url not in urls_in_order:
+            urls_in_order.append(absolute_url)
+
+    items: list[PlanningItem] = []
+    for index, (_, line) in enumerate(candidate_lines):
+        match = PLANNING_ITEM_RE.match(line)
+        if not match:
+            continue
+        release_date = parse_french_date(match.group('release_date'))
+        authors_raw = clean_ws(match.group('authors') or '')
+        authors = unique_list(re.split(r'\s*/\s*|\s*,\s*', authors_raw)) if authors_raw else []
+        publisher = clean_ws(match.group('publisher')) or None
+        title = clean_ws(match.group('title'))
+        featured = 'à ne pas manquer !' in line.lower()
+        summary = None
+        if index + 1 < len(candidate_lines):
+            next_line_index = candidate_lines[index + 1][0]
+        else:
+            next_line_index = len(lines)
+        for cursor in range(candidate_lines[index][0] + 1, next_line_index):
+            candidate = lines[cursor]
+            normalized_candidate = normalize_text(candidate)
+            if not candidate:
+                continue
+            if normalized_candidate in {'fiche detaillee'}:
+                continue
+            if 'sortie le' in normalized_candidate and 'editeur' in normalized_candidate:
+                break
+            if normalized_candidate.startswith('mois suivant') or normalized_candidate.startswith('mois precedent'):
+                continue
+            if normalized_candidate.startswith('tous les editeurs'):
+                continue
+            summary = candidate
+            break
+
+        url = urls_in_order[index] if index < len(urls_in_order) else None
+        series_slug = None
+        volume_slug = None
+        if url:
+            parsed_path = [part for part in urlparse(url).path.split('/') if part]
+            if len(parsed_path) >= 4 and parsed_path[-3] == 'manga':
+                series_slug = parsed_path[-2]
+                volume_slug = parsed_path[-1]
+
+        items.append(
+            PlanningItem(
+                title=title,
+                url=url,
+                release_date=release_date,
+                authors=authors,
+                publisher=publisher,
+                summary=summary,
+                featured=featured,
+                series_slug=series_slug,
+                volume_slug=volume_slug,
+            )
+        )
+
+    if not items:
+        raise ParseError('Unable to parse the planning list.')
+
+    return PlanningPage(
+        section=_infer_planning_section(page_url),
+        year=year,
+        month=month,
+        items=items,
+    )

@@ -1,4 +1,4 @@
-from app.manga_news.parsers import parse_news_page, parse_series_page, parse_volume_page
+from app.manga_news.parsers import parse_news_page, parse_planning_page, parse_series_page, parse_volume_page
 
 
 SERIES_HTML = '''
@@ -135,3 +135,42 @@ def test_parse_news_page():
     assert parsed[0].published_at == '2026-03-10'
     assert parsed[0].comments == 0
     assert parsed[1].category == 'Produits dérivés'
+
+
+PLANNING_HTML = '''
+<html>
+  <body>
+    <h1>Planning des sorties manga 2026/04</h1>
+    <div class="planning-item">
+      <a href="/index.php/manga/One-Piece/vol-110">One Piece Vol.110</a>
+      <p>One Piece Vol.110 à ne pas manquer ! Sortie le 27/04/2026 Auteur(s): Eiichirô ODA Editeur: Glénat</p>
+      <p>Le retour des Mugiwara dans un nouveau volume.</p>
+      <a href="/index.php/manga/One-Piece/vol-110">Fiche détaillée</a>
+    </div>
+    <div class="planning-item">
+      <a href="/index.php/manga/Kagurabachi/vol-2">Kagurabachi Vol.2</a>
+      <p>Kagurabachi Vol.2 Sortie le 03/04/2026 Auteur(s): Takeru HOKAZONO Editeur: Kana</p>
+      <p>Chihiro poursuit sa traque.</p>
+      <a href="/index.php/manga/Kagurabachi/vol-2">Fiche détaillée</a>
+    </div>
+  </body>
+</html>
+'''
+
+
+def test_parse_planning_page():
+    parsed = parse_planning_page(
+        PLANNING_HTML,
+        'https://www.manga-news.com/index.php/planning/?p_month=4&p_year=2026',
+        'https://www.manga-news.com',
+    )
+    assert parsed.section == 'manga-vf'
+    assert parsed.year == 2026
+    assert parsed.month == 4
+    assert len(parsed.items) == 2
+    assert parsed.items[0].title == 'One Piece Vol.110'
+    assert parsed.items[0].release_date == '2026-04-27'
+    assert parsed.items[0].publisher == 'Glénat'
+    assert parsed.items[0].featured is True
+    assert parsed.items[0].series_slug == 'One-Piece'
+    assert parsed.items[0].volume_slug == 'vol-110'

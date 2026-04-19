@@ -104,3 +104,23 @@ class VolumeData(BaseModel):
     editorial_score: float | None = None
     reader_score: float | None = None
     source_url: str
+
+
+class PlanningItem(BaseModel):
+    title: str
+    url: str | None = None
+    release_date: str | None = None
+    authors: list[str] = Field(default_factory=list)
+    publisher: str | None = None
+    summary: str | None = None
+    featured: bool = False
+    series_slug: str | None = None
+    volume_slug: str | None = None
+
+
+class PlanningPage(BaseModel):
+    section: str
+    year: int | None = None
+    month: int | None = None
+    page: int | None = None
+    items: list[PlanningItem] = Field(default_factory=list)

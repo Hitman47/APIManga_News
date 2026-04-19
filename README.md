@@ -10,15 +10,16 @@ API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d
 - récupération des news globales via RSS ;
 - récupération des news d'une série ;
 - récupération des news d'un volume ;
+- récupération du planning manga VF et manga VO ;
+- filtres locaux sur le planning : éditeur, plage de dates, recherche textuelle, tri ;
 - cache SQLite persistant avec fallback sur cache périmé si l'upstream casse temporairement ;
 - docs OpenAPI natives de FastAPI sur `/docs` et `/redoc`.
 
 ## Ce que cette V1 ne fait pas encore
 
-- planning des sorties ;
 - provider anime séparé ;
 - enrichissement cross-source ;
-- pagination côté upstream.
+- pagination multi-pages automatisée côté upstream.
 
 ## Variables d'environnement principales
 
@@ -105,3 +106,17 @@ curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/search?q=one%20
 - L'API repose sur le HTML public et le flux RSS de Manga News. C'est un usage privé ; ne t'en sers pas pour republier massivement leur contenu.
 - Le cache persistant limite les appels et réduit le risque de casser ton automatisation sur une panne temporaire du site.
 - Les parsers sont volontairement tolérants : beaucoup de logique est basée sur les libellés textuels visibles plutôt que sur des sélecteurs CSS trop fragiles.
+
+
+### Planning manga VF
+
+```bash
+curl --get "http://localhost:8017/planning" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "year=2026" \
+  --data-urlencode "month=4" \
+  --data-urlencode "publisher=Glénat" \
+  --data-urlencode "date_from=2026-04-01" \
+  --data-urlencode "date_to=2026-04-30" \
+  --data-urlencode "sort=date_asc"
+```

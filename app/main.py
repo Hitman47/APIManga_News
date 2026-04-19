@@ -146,3 +146,31 @@ async def get_volume_news_by_url(
     service: MangaNewsService = Depends(get_service),
 ):
     return await service.get_volume_news(url=url, limit=limit)
+
+
+@app.get('/planning', dependencies=[Depends(auth_dependency)])
+async def get_planning(
+    section: Literal['manga-vf', 'manga-vo'] = Query(default='manga-vf'),
+    year: int | None = Query(default=None, ge=1900, le=2100),
+    month: int | None = Query(default=None, ge=1, le=12),
+    page: int = Query(default=1, ge=1, le=100),
+    publisher: str | None = Query(default=None),
+    q: str | None = Query(default=None, min_length=1),
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
+    sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'] = Query(default='date_asc'),
+    limit: int = Query(default=25, ge=1, le=100),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.get_planning(
+        section=section,
+        year=year,
+        month=month,
+        page=page,
+        publisher=publisher,
+        query=q,
+        date_from=date_from,
+        date_to=date_to,
+        sort=sort,
+        limit=limit,
+    )

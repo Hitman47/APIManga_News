@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Literal
 from urllib.parse import urlencode
 
@@ -11,8 +12,8 @@ from app.config import Settings
 from app.exceptions import ParseError, ResourceNotFound, UpstreamError
 from app.http import AsyncFetcher
 from app.models import Envelope, NewsItem
-from app.manga_news.parsers import parse_news_page, parse_search_page, parse_series_page, parse_volume_page
-from app.utils import clean_ws, ensure_absolute_url, is_manga_news_url, make_cache_key, now_utc, parse_french_date
+from app.manga_news.parsers import parse_news_page, parse_planning_page, parse_search_page, parse_series_page, parse_volume_page
+from app.utils import clean_ws, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,137 @@ class MangaNewsService:
             raise ParseError('Unable to infer the volume route from the provided URL.')
         news_url = f'{self.base_url}/index.php/manga/news/{parts[0]}/{parts[1]}'
         return await self._get_news_page(target_url=news_url, cache_namespace='news-volume', ttl=self.settings.cache_ttl_news_series_seconds, limit=limit)
+
+    async def get_planning(
+        self,
+        *,
+        section: Literal['manga-vf', 'manga-vo'],
+        year: int | None,
+        month: int | None,
+        page: int,
+        publisher: str | None,
+        query: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'],
+        limit: int,
+    ) -> Envelope:
+        path = '/index.php/planning/' if section == 'manga-vf' else '/index.php/planning/mangas-vo'
+        params: dict[str, object] = {}
+        if year is not None:
+            params['p_year'] = year
+        if month is not None:
+            params['p_month'] = month
+        if page > 1:
+            params['page'] = page
+        query_string = urlencode(params)
+        target_url = f'{self.base_url}{path}'
+        if query_string:
+            target_url = f'{target_url}?{query_string}'
+        cache_key = make_cache_key('planning', target_url)
+
+        async def loader():
+            result = await self.fetcher.get_text(target_url)
+            parsed = parse_planning_page(result.text, result.url, self.base_url)
+            parsed.page = page
+            return parsed.model_dump(), result.url
+
+        payload, entry, cached, partial, warnings = await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_planning_seconds,
+            loader=loader,
+        )
+
+        planning = payload.get('data', {}) or {}
+        items = list(planning.get('items', []))
+
+        if publisher:
+            normalized_publisher = normalize_text(publisher)
+            items = [
+                item for item in items
+                if normalized_publisher in normalize_text(item.get('publisher'))
+            ]
+
+        if query:
+            normalized_query = clean_ws(query)
+            items = [
+                item for item in items
+                if score_match(
+                    normalized_query,
+                    ' '.join([
+                        item.get('title', ''),
+                        ' / '.join(item.get('authors', [])),
+                        item.get('publisher', '') or '',
+                    ]),
+                ) >= self.settings.search_score_threshold
+            ]
+
+        parsed_date_from = self._parse_iso_date(date_from, 'date_from')
+        parsed_date_to = self._parse_iso_date(date_to, 'date_to')
+        if parsed_date_from or parsed_date_to:
+            filtered_items = []
+            for item in items:
+                raw_date = item.get('release_date')
+                if not raw_date:
+                    continue
+                release_date = date.fromisoformat(raw_date)
+                if parsed_date_from and release_date < parsed_date_from:
+                    continue
+                if parsed_date_to and release_date > parsed_date_to:
+                    continue
+                filtered_items.append(item)
+            items = filtered_items
+
+        if sort == 'date_asc':
+            items.sort(key=lambda item: (item.get('release_date') or '9999-99-99', normalize_text(item.get('title'))))
+        elif sort == 'date_desc':
+            items.sort(key=lambda item: (item.get('release_date') or '0000-00-00', normalize_text(item.get('title'))), reverse=True)
+        elif sort == 'title_asc':
+            items.sort(key=lambda item: normalize_text(item.get('title')))
+        elif sort == 'title_desc':
+            items.sort(key=lambda item: normalize_text(item.get('title')), reverse=True)
+
+        total_items = len(items)
+        items = items[:limit]
+        data = {
+            'section': planning.get('section') or section,
+            'year': planning.get('year') or year,
+            'month': planning.get('month') or month,
+            'page': planning.get('page') or page,
+            'filters': {
+                'publisher': publisher,
+                'query': query,
+                'date_from': date_from,
+                'date_to': date_to,
+            },
+            'sort': sort,
+            'total_items': total_items,
+            'items': items,
+        }
+
+        return Envelope(
+            ok=True,
+            found=bool(items),
+            source='manga_news',
+            source_url=payload.get('source_url'),
+            cached=cached,
+            fetched_at=entry.fetched_at.isoformat(),
+            cache_expires_at=entry.expires_at.isoformat(),
+            partial=partial,
+            warnings=warnings,
+            data=data,
+        )
+
+    def _parse_iso_date(self, value: str | None, field_name: str) -> date | None:
+        if value is None:
+            return None
+        parsed = parse_french_date(value)
+        if not parsed:
+            raise ParseError(f'{field_name} must be a valid date.')
+        try:
+            return date.fromisoformat(parsed)
+        except ValueError as exc:
+            raise ParseError(f'{field_name} must be a valid date.') from exc
 
     async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> Envelope:
         cache_key = make_cache_key(cache_namespace, target_url, str(limit))
