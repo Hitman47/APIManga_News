@@ -1,0 +1,69 @@
+name: manifest
+
+on:
+  workflow_run:
+    workflows:
+      - publish
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Full image name without tag (for example ghcr.io/owner/repo)
+        required: false
+        type: string
+      tag:
+        description: Tag to inspect
+        required: false
+        default: latest
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  inspect:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Prepare image reference
+        id: vars
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.image }}" ]; then
+            image="${{ inputs.image }}"
+          else
+            owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+            repo="$(echo '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')"
+            image="${{ env.REGISTRY }}/${owner}/${repo}"
+          fi
+          tag="${{ inputs.tag || 'latest' }}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Inspect manifest
+        shell: bash
+        run: |
+          docker buildx imagetools inspect --raw "${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}" > manifest.json
+          docker buildx imagetools inspect "${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}"
+
+      - name: Upload manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghcr-manifest-${{ steps.vars.outputs.tag }}
+          path: manifest.json
