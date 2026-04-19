@@ -50,6 +50,39 @@ docker compose up -d --build
 
 L'API sera alors disponible sur `http://localhost:8017`.
 
+## GitHub / GHCR
+
+Fichiers ajoutés pour un dépôt GitHub propre et une publication GHCR automatique :
+
+- `.github/workflows/ci.yml` : lance les tests sur push / pull request ;
+- `.github/workflows/publish.yml` : build multi-arch `linux/amd64` + `linux/arm64` et push vers GHCR ;
+- `.github/workflows/manifest.yml` : inspecte le manifest publié et stocke `manifest.json` en artifact ;
+- `.dockerignore` : évite d'envoyer les fichiers inutiles au build Docker ;
+- `.gitignore` : ignore l'environnement local, le cache et la base SQLite.
+
+Image publiée par défaut : `ghcr.io/<owner>/<repo>` en minuscules.
+
+Tags générés automatiquement par le workflow de publication :
+
+- `latest` sur la branche par défaut ;
+- tag de branche ;
+- tag Git ;
+- semver (`1.2.3`, `1.2`) si le tag Git suit `v1.2.3` ;
+- tag SHA court.
+
+### Secrets et permissions
+
+Pour publier vers GHCR depuis GitHub Actions, aucun secret supplémentaire n'est nécessaire tant que le package est publié par le dépôt lui-même : le workflow utilise `GITHUB_TOKEN`.
+
+Pour **pull une image privée depuis Portainer, Docker Compose ou une autre machine**, prévois en revanche un **PAT GitHub classic** avec au minimum `read:packages`.
+
+### Déclenchement conseillé
+
+- push sur `main` : publication continue ;
+- tag `vX.Y.Z` : publication versionnée ;
+- `workflow_dispatch` : exécution manuelle.
+
+
 ## Exemples curl
 
 ### Health
@@ -120,3 +153,7 @@ curl --get "http://localhost:8017/planning" \
   --data-urlencode "date_to=2026-04-30" \
   --data-urlencode "sort=date_asc"
 ```
+
+### Manifest GHCR
+
+Après publication, le workflow `manifest.yml` peut inspecter l'image publiée et produire un `manifest.json` téléchargeable depuis les artifacts GitHub Actions. C'est utile pour vérifier qu'un manifest multi-arch a bien été généré.
