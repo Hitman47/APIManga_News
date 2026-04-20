@@ -4,11 +4,11 @@ import re
 from typing import Iterable
 from urllib.parse import urlparse
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from app.exceptions import ParseError
 from app.models import EditionStatus, NewsItem, PlanningItem, PlanningPage, SearchResult, SeriesData, SeriesStats, VolumeData
-from app.utils import clean_ws, ensure_absolute_url, normalize_text, parse_french_date, score_match, slugify, unique_list
+from app.utils import clean_ws, ensure_absolute_url, normalize_text, parse_french_date, score_match, unique_list
 
 DATE_LINE_RE = re.compile(
     r'^(Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi|Dimanche),?\s+(\d{1,2}\s+[A-Za-zéûîôàèùçÉÛÎÔÀÈÙÇ]+\s+\d{4})(?:\s+(.*))?$'
@@ -38,7 +38,9 @@ VALUE_LABELS = {
 }
 SECTION_STOP_WORDS = {
     'video youtube', 'thèmes', 'themes', 'les points forts de la série', 'manga en relation', 'dossier',
-    'univers', 'signaler', 'liens', 'les volumes', 'personnages', 'les images de', 'donner votre avis',
+    'univers', 'liens', 'signaler', 'les volumes', 'personnages', 'les images de', 'donner votre avis',
+    'critique', 'series en relation', 'si vous avez aime vous aimerez', 'series liees', 'dossiers',
+    'jeux video', 'goodies', 'chez notre partenaire', 'actus precedentes', 'volume suivant', 'volume precedent',
 }
 NEWS_STOP_WORDS = {'actus précédentes', 'actus precedentes', 'univers', 'liens', 'signaler', 'chez notre partenaire'}
 NEWS_CATEGORY_HINTS = {'manga', 'anime', 'webtoon', 'presse', 'drama', 'japon', 'produits dérivés', 'produits derives'}
@@ -46,6 +48,13 @@ GENERIC_ANCHOR_TEXTS = {
     'manga news', 'facebook', 'twitter', 'instagram', 'youtube', 'dailymotion', 'pinterest',
     'voir le produit', 'voir toutes les figurines', 'lire le dossier', 'partie 1', 'partie 2',
     'partie 3', 'mot de la fin', 's inscrire', 'connexion', 'j ai oublié mes identifiants !',
+    'acheter en numérique', 'fiche detaillee', 'voir les goodies associes', 'voir les jeux video associes',
+}
+KNOWN_HEADINGS = {
+    'résumé', 'resume', 'thèmes', 'themes', 'critique', 'les points forts de la série', 'les points forts de la serie',
+    'séries en relation', 'series en relation', 'si vous avez aimé ... vous aimerez', 'si vous avez aime vous aimerez',
+    'dossier', 'dossiers', 'les volumes', 'univers', 'séries liées', 'series liees', 'anime', 'série vo', 'serie vo',
+    'drama', 'jeux video', 'goodies', 'liens', 'signaler', 'chez notre partenaire', 'donner votre avis', 'votre avis',
 }
 
 
@@ -148,14 +157,137 @@ def _extract_vf_vo(lines: list[str]) -> tuple[EditionStatus | None, EditionStatu
     return vf_status, vo_status, last_release, next_release
 
 
-def _collect_anchor_texts(tag) -> list[str]:
-    if tag is None:
-        return []
-    return unique_list(a.get_text(' ', strip=True) for a in tag.find_all('a'))
-
-
 def _find_cover_image(soup: BeautifulSoup) -> str | None:
     return _meta(soup, 'og:image', 'twitter:image')
+
+
+def _find_heading_tag(soup: BeautifulSoup, *headings: str) -> Tag | None:
+    normalized_targets = {normalize_text(heading) for heading in headings}
+    for tag in soup.find_all(True):
+        text = clean_ws(tag.get_text(' ', strip=True))
+        if not text:
+            continue
+        if normalize_text(text) in normalized_targets and (re.fullmatch(r'h[1-6]', tag.name or '') or tag.name in {'div', 'p', 'span', 'strong'}):
+            return tag
+    return None
+
+
+def _is_heading_like(tag: Tag, *, allow_subheadings: bool = False) -> bool:
+    text = clean_ws(tag.get_text(' ', strip=True))
+    if not text:
+        return False
+    if re.fullmatch(r'h[1-6]', tag.name or ''):
+        if allow_subheadings and tag.name in {'h3', 'h4', 'h5', 'h6'}:
+            return False
+        return True
+    normalized = normalize_text(text)
+    if normalized in KNOWN_HEADINGS:
+        if allow_subheadings and normalized in {'anime', 'serie vo', 'drama'}:
+            return False
+        return True
+    if any(normalized == normalize_text(prefix.rstrip(' :')) for prefixes in VALUE_LABELS.values() for prefix in prefixes):
+        return True
+    if normalized.startswith('vf ') or normalized.startswith('vo ') or normalized in {
+        'dernier paru', 'a paraitre', 'a paraître', "j aime", 'dans ma collection', "dans ma liste d achat", 'achat vente', 'redaction', 'lecteurs'
+    }:
+        return True
+    return False
+
+
+def _section_nodes(soup: BeautifulSoup, *headings: str, allow_subheadings: bool = False) -> list[Tag]:
+    heading_tag = _find_heading_tag(soup, *headings)
+    if heading_tag is None:
+        return []
+    nodes: list[Tag] = []
+    for sibling in heading_tag.find_next_siblings():
+        if isinstance(sibling, Tag) and _is_heading_like(sibling, allow_subheadings=allow_subheadings):
+            break
+        if isinstance(sibling, Tag):
+            nodes.append(sibling)
+    return nodes
+
+
+def _section_text(soup: BeautifulSoup, *headings: str, allow_subheadings: bool = False) -> str | None:
+    chunks: list[str] = []
+    for node in _section_nodes(soup, *headings, allow_subheadings=allow_subheadings):
+        text = clean_ws(node.get_text(' ', strip=True))
+        if text:
+            chunks.append(text)
+    if not chunks:
+        return None
+    return clean_ws(' '.join(chunks)) or None
+
+
+def _section_anchor_texts(soup: BeautifulSoup, *headings: str, allow_subheadings: bool = False) -> list[str]:
+    values: list[str] = []
+    for node in _section_nodes(soup, *headings, allow_subheadings=allow_subheadings):
+        anchors = node.find_all('a', href=True)
+        if not anchors:
+            text = clean_ws(node.get_text(' ', strip=True))
+            normalized_text = normalize_text(text)
+            if text and normalized_text not in KNOWN_HEADINGS and not _is_heading_like(node, allow_subheadings=False):
+                values.append(text)
+            continue
+        for anchor in anchors:
+            text = clean_ws(anchor.get_text(' ', strip=True))
+            normalized = normalize_text(text)
+            if not text or normalized in GENERIC_ANCHOR_TEXTS:
+                continue
+            values.append(text)
+    return unique_list(values)
+
+
+def _section_urls(soup: BeautifulSoup, base_url: str, *headings: str, allow_subheadings: bool = False) -> list[str]:
+    values: list[str] = []
+    for node in _section_nodes(soup, *headings, allow_subheadings=allow_subheadings):
+        for anchor in node.find_all('a', href=True):
+            url = ensure_absolute_url(base_url, anchor.get('href'))
+            if url:
+                values.append(url)
+    return unique_list(values)
+
+
+def _find_action_url(soup: BeautifulSoup, base_url: str, text_hint: str) -> str | None:
+    normalized_hint = normalize_text(text_hint)
+    for anchor in soup.find_all('a', href=True):
+        text = clean_ws(anchor.get_text(' ', strip=True))
+        if normalize_text(text) == normalized_hint:
+            return ensure_absolute_url(base_url, anchor.get('href'))
+    return None
+
+
+def _parse_illustration_details(illustration: str | None) -> tuple[int | None, bool | None]:
+    if not illustration:
+        return None, None
+    page_count = None
+    has_color_pages = None
+    page_match = re.search(r'(\d+)\s*pages?', illustration, flags=re.IGNORECASE)
+    if page_match:
+        page_count = int(page_match.group(1))
+    normalized = normalize_text(illustration)
+    if 'couleurs' in normalized or 'couleur' in normalized:
+        has_color_pages = True
+    elif 'n b' in normalized or 'nb' in normalized:
+        has_color_pages = False
+    return page_count, has_color_pages
+
+
+def _extract_volume_number(title: str) -> int | None:
+    match = re.search(r'vol\.?\s*(\d+)', title, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _extract_stats(lines: list[str]) -> SeriesStats:
+    return SeriesStats(
+        likes=_extract_number_after(lines, "J'aime"),
+        in_collection=_extract_number_after(lines, 'Dans ma collection'),
+        in_wishlist=_extract_number_after(lines, "Dans ma liste d'achat"),
+        marketplace=_extract_number_after(lines, 'Achat/vente'),
+        editorial_score=_extract_score_after(lines, 'Rédaction'),
+        reader_score=_extract_score_after(lines, 'Lecteurs'),
+    )
 
 
 def parse_series_page(html: str, page_url: str) -> SeriesData:
@@ -166,8 +298,9 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
         raise ParseError('Unable to extract the series title.')
 
     title_clean = re.sub(r'\s*-\s*Manga.*$', '', title, flags=re.IGNORECASE)
-    summary = _extract_section(lines, 'Résumé') or _meta(soup, 'description')
-    strengths = _extract_section(lines, 'Les points forts de la série')
+    summary = _section_text(soup, 'Résumé') or _extract_section(lines, 'Résumé') or _meta(soup, 'description')
+    strengths = _section_text(soup, 'Les points forts de la série') or _extract_section(lines, 'Les points forts de la série')
+    critique_excerpt = _section_text(soup, 'Critique') or _extract_section(lines, 'Critique')
 
     title_vo = _extract_line_value(lines, VALUE_LABELS['title_vo'])
     translated_title = _extract_line_value(lines, VALUE_LABELS['translated_title'])
@@ -175,29 +308,18 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
     authors_art = unique_list((_extract_line_value(lines, VALUE_LABELS['art']) or '').split(','))
     translators = unique_list((_extract_line_value(lines, VALUE_LABELS['translator']) or '').split(','))
     genres = unique_list((_extract_line_value(lines, VALUE_LABELS['genre']) or '').split(','))
-    themes = []
-    for index, line in enumerate(lines):
-        if normalize_text(line) in {'thèmes', 'themes'}:
-            cursor = index + 1
-            while cursor < len(lines):
-                candidate = lines[cursor]
-                normalized_candidate = normalize_text(candidate)
-                if normalized_candidate in SECTION_STOP_WORDS:
-                    break
-                if normalized_candidate.startswith('serie '):
-                    candidate = candidate.split(' ', 1)[1]
-                themes.extend(unique_list(candidate.split('   ')))
-                cursor += 1
-            break
+    illustration = _extract_line_value(lines, VALUE_LABELS['illustration'])
+    page_count, has_color_pages = _parse_illustration_details(illustration)
+
+    themes = _section_anchor_texts(soup, 'Thèmes', 'Themes')
+    if not themes:
+        raw_themes = _extract_section(lines, 'Thèmes') or _extract_section(lines, 'Themes')
+        if raw_themes:
+            themes = unique_list(re.split(r'\s{2,}|\s*/\s*|\s*,\s*', raw_themes))
+
     vf, vo, last_release_date, next_release_date = _extract_vf_vo(lines)
-    stats = SeriesStats(
-        likes=_extract_number_after(lines, "J'aime"),
-        in_collection=_extract_number_after(lines, 'Dans ma collection'),
-        in_wishlist=_extract_number_after(lines, "Dans ma liste d'achat"),
-        marketplace=_extract_number_after(lines, 'Achat/vente'),
-        editorial_score=_extract_score_after(lines, 'Rédaction'),
-        reader_score=_extract_score_after(lines, 'Lecteurs'),
-    )
+    stats = _extract_stats(lines)
+    base_from_page = f'{urlparse(page_url).scheme}://{urlparse(page_url).netloc}'
 
     return SeriesData(
         title=title_clean,
@@ -214,18 +336,31 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
         genres=genres,
         prepublication=_extract_line_value(lines, VALUE_LABELS['prepublication']),
         origin=_extract_line_value(lines, VALUE_LABELS['origin']),
-        illustration=_extract_line_value(lines, VALUE_LABELS['illustration']),
+        illustration=illustration,
+        page_count=page_count,
+        has_color_pages=has_color_pages,
         advisory_age=_extract_number_after(lines, 'Age conseillé') and str(_extract_number_after(lines, 'Age conseillé')) + '+',
         cover_image=_find_cover_image(soup),
         vf=vf,
         vo=vo,
         last_release_date=last_release_date,
         next_release_date=next_release_date,
+        buy_digital_url=_find_action_url(soup, base_from_page, 'Acheter en numérique'),
         stats=stats,
-        themes=unique_list(themes),
+        themes=themes,
+        critique_excerpt=critique_excerpt,
         strengths=strengths,
+        related_series=_section_anchor_texts(soup, 'Séries en relation', 'Series en relation'),
+        recommended_series=_section_anchor_texts(soup, 'Si vous avez aimé ... vous aimerez', 'Si vous avez aime vous aimerez'),
+        related_media=_section_anchor_texts(soup, 'Séries Liées', 'Series liees', allow_subheadings=True),
+        dossiers=_section_anchor_texts(soup, 'Dossier', 'Dossiers'),
+        universe=_section_text(soup, 'Univers') or _extract_section(lines, 'Univers'),
+        games_url=_find_action_url(soup, base_from_page, 'Voir les jeux video associés'),
+        goodies_url=_find_action_url(soup, base_from_page, 'Voir les goodies associés'),
+        external_links=_section_urls(soup, base_from_page, 'Liens'),
         source_url=page_url,
     )
+
 
 
 def parse_volume_page(html: str, page_url: str) -> VolumeData:
@@ -242,12 +377,24 @@ def parse_volume_page(html: str, page_url: str) -> VolumeData:
         possible_series = parsed_path[2].replace('-', ' ')
         series_title = clean_ws(possible_series.title())
 
+    illustration = _extract_line_value(lines, VALUE_LABELS['illustration'])
+    page_count, has_color_pages = _parse_illustration_details(illustration)
+    stats = _extract_stats(lines)
+    base_from_page = f'{urlparse(page_url).scheme}://{urlparse(page_url).netloc}'
+
+    themes = _section_anchor_texts(soup, 'Thèmes', 'Themes')
+    if not themes:
+        raw_themes = _section_text(soup, 'Thèmes', 'Themes') or _extract_section(lines, 'Thèmes') or _extract_section(lines, 'Themes')
+        if raw_themes:
+            themes = unique_list(re.split(r'\s{2,}|\s*/\s*|\s*,\s*', raw_themes))
+
     return VolumeData(
         title=title_clean,
         series_title=series_title,
+        volume_number=_extract_volume_number(title_clean),
         title_vo=_extract_line_value(lines, VALUE_LABELS['title_vo']),
         translated_title=_extract_line_value(lines, VALUE_LABELS['translated_title']),
-        summary=_extract_section(lines, 'Résumé') or _meta(soup, 'description'),
+        summary=_section_text(soup, 'Résumé') or _extract_section(lines, 'Résumé') or _meta(soup, 'description'),
         authors_story=unique_list((_extract_line_value(lines, VALUE_LABELS['story']) or '').split(',')),
         authors_art=unique_list((_extract_line_value(lines, VALUE_LABELS['art']) or '').split(',')),
         translators=unique_list((_extract_line_value(lines, VALUE_LABELS['translator']) or '').split(',')),
@@ -258,16 +405,32 @@ def parse_volume_page(html: str, page_url: str) -> VolumeData:
         genres=unique_list((_extract_line_value(lines, VALUE_LABELS['genre']) or '').split(',')),
         prepublication=_extract_line_value(lines, VALUE_LABELS['prepublication']),
         origin=_extract_line_value(lines, VALUE_LABELS['origin']),
-        illustration=_extract_line_value(lines, VALUE_LABELS['illustration']),
+        illustration=illustration,
+        page_count=page_count,
+        has_color_pages=has_color_pages,
         advisory_age=_extract_number_after(lines, 'Age conseillé') and str(_extract_number_after(lines, 'Age conseillé')) + '+',
         publication_date=parse_french_date(_extract_line_value(lines, VALUE_LABELS['publication_date'])),
         isbn_ean=_extract_line_value(lines, VALUE_LABELS['isbn_ean']),
         price_code=_extract_line_value(lines, VALUE_LABELS['price_code']),
         cover_image=_find_cover_image(soup),
-        editorial_score=_extract_score_after(lines, 'Rédaction'),
-        reader_score=_extract_score_after(lines, 'Lecteurs'),
+        stats=stats,
+        editorial_score=stats.editorial_score,
+        reader_score=stats.reader_score,
+        themes=themes,
+        critique_excerpt=_section_text(soup, 'Critique') or _extract_section(lines, 'Critique'),
+        strengths=_section_text(soup, 'Les points forts de la série') or _extract_section(lines, 'Les points forts de la série'),
+        related_series=_section_anchor_texts(soup, 'Séries en relation', 'Series en relation'),
+        recommended_series=_section_anchor_texts(soup, 'Si vous avez aimé ... vous aimerez', 'Si vous avez aime vous aimerez'),
+        related_media=_section_anchor_texts(soup, 'Séries Liées', 'Series liees', allow_subheadings=True),
+        dossiers=_section_anchor_texts(soup, 'Dossier', 'Dossiers'),
+        universe=_section_text(soup, 'Univers') or _extract_section(lines, 'Univers'),
+        games_url=_find_action_url(soup, base_from_page, 'Voir les jeux video associés'),
+        goodies_url=_find_action_url(soup, base_from_page, 'Voir les goodies associés'),
+        external_links=_section_urls(soup, base_from_page, 'Liens'),
+        buy_digital_url=_find_action_url(soup, base_from_page, 'Acheter en numérique'),
         source_url=page_url,
     )
+
 
 
 def _guess_article_url(soup: BeautifulSoup, title: str, base_url: str) -> str | None:
@@ -280,6 +443,7 @@ def _guess_article_url(soup: BeautifulSoup, title: str, base_url: str) -> str | 
         if normalize_text(text) == normalized_title:
             return ensure_absolute_url(base_url, href)
     return None
+
 
 
 def parse_news_page(html: str, page_url: str, base_url: str, limit: int) -> list[NewsItem]:
@@ -332,6 +496,7 @@ def parse_news_page(html: str, page_url: str, base_url: str, limit: int) -> list
     if not items:
         raise ParseError('Unable to parse the news list.')
     return items
+
 
 
 def parse_search_page(html: str, page_url: str, base_url: str, query: str, kind: str, score_threshold: int, limit: int) -> list[SearchResult]:
@@ -395,12 +560,14 @@ def _infer_planning_section(page_url: str) -> str:
     return 'manga-vf'
 
 
+
 def _extract_planning_header(lines: list[str]) -> tuple[int | None, int | None]:
     for line in lines:
         match = PLANNING_HEADER_RE.match(line)
         if match:
             return int(match.group('year')), int(match.group('month'))
     return None, None
+
 
 
 def parse_planning_page(html: str, page_url: str, base_url: str) -> PlanningPage:

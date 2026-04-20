@@ -13,13 +13,27 @@ API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d
 - récupération du planning manga VF et manga VO ;
 - filtres locaux sur le planning : éditeur, plage de dates, recherche textuelle, tri ;
 - cache SQLite persistant avec fallback sur cache périmé si l'upstream casse temporairement ;
-- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc`.
+- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc`, avec schémas de réponse détaillés visibles dans Swagger/ReDoc.
 
 ## Ce que cette V1 ne fait pas encore
 
 - provider anime séparé ;
 - enrichissement cross-source ;
 - pagination multi-pages automatisée côté upstream.
+
+
+## Champs détaillés désormais exposés
+
+Les fiches série et volume documentent maintenant explicitement dans l'OpenAPI :
+
+- les champs bibliographiques classiques ;
+- les stats (`likes`, collection, wishlist, notes rédaction/lecteurs) ;
+- les détails d'illustration (`page_count`, `has_color_pages`) ;
+- les thèmes ;
+- l'extrait de critique ;
+- les séries liées / recommandations ;
+- les dossiers, l'univers, les liens externes ;
+- les URL utiles (`buy_digital_url`, `games_url`, `goodies_url`).
 
 ## Variables d'environnement principales
 

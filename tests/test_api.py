@@ -10,6 +10,22 @@ def test_health_endpoint():
     assert response.json() == {'ok': True}
 
 
+
+def test_openapi_exposes_series_and_volume_schemas():
+    with TestClient(app) as client:
+        response = client.get('/openapi.json')
+    assert response.status_code == 200
+    payload = response.json()
+    schemas = payload['components']['schemas']
+    assert 'SeriesResponse' in schemas
+    assert 'SeriesData' in schemas
+    assert 'VolumeResponse' in schemas
+    assert 'VolumeData' in schemas
+    assert 'related_series' in schemas['SeriesData']['properties']
+    assert 'stats' in schemas['VolumeData']['properties']
+
+
+
 def test_planning_endpoint_with_stubbed_service():
     class DummyService:
         async def get_planning(self, **kwargs):
