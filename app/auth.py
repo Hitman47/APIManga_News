@@ -18,3 +18,19 @@ async def require_api_token(
             detail='Missing or invalid bearer token.',
             headers={'WWW-Authenticate': 'Bearer'},
         )
+
+
+async def require_admin_token(
+    settings: Settings,
+    authorization: str | None = Header(default=None),
+) -> None:
+    token = settings.admin_token or settings.api_token
+    if not token:
+        return
+    expected = f'Bearer {token}'
+    if authorization != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail='Missing or invalid bearer token.',
+            headers={'WWW-Authenticate': 'Bearer'},
+        )

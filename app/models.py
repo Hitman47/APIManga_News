@@ -116,6 +116,10 @@ class SearchResult(BaseModel):
     series_slug: str | None = None
     volume_slug: str | None = None
     number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
 
 
 class SearchResponse(BaseEnvelope):
@@ -131,6 +135,10 @@ class ResolveResult(BaseModel):
     series_slug: str | None = None
     volume_slug: str | None = None
     number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
 
 
 class ResolveData(BaseModel):
@@ -279,6 +287,11 @@ class PlanningItem(BaseModel):
     featured: bool = False
     series_slug: str | None = None
     volume_slug: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
 
 
 class PlanningPage(BaseModel):
@@ -303,6 +316,9 @@ class SeriesEditionItem(BaseModel):
     volume_slug: str | None = None
     number: str | None = None
     number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
     publication_date: str | None = None
     cover_image: str | None = None
 

@@ -236,7 +236,17 @@ def _extract_page_title(soup: BeautifulSoup, lines: list[str], *, kind: str) -> 
 
     fallback = clean_ws(lines[0] if lines else '')
     normalized_fallback = normalize_text(fallback)
-    if fallback and normalized_fallback not in RAW_SECTION_HEADINGS and normalized_fallback not in SECTION_STOP_WORDS:
+    looks_like_value_line = any(
+        normalize_text(fallback).startswith(normalize_text(prefix))
+        for prefix_list in VALUE_LABELS.values()
+        for prefix in prefix_list
+    ) or ':' in fallback
+    if (
+        fallback
+        and normalized_fallback not in RAW_SECTION_HEADINGS
+        and normalized_fallback not in SECTION_STOP_WORDS
+        and not looks_like_value_line
+    ):
         return fallback
 
     raise ParseError(f'Unable to extract the {kind} title.')

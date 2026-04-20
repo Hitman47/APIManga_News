@@ -237,3 +237,59 @@ def format_output_data(data: dict, output_format: str = 'nested') -> dict:
 def fingerprint_data(data: object) -> str:
     raw = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+
+def parse_volume_number_int(number: str | None) -> int | None:
+    if number is None:
+        return None
+    try:
+        if '.' in number:
+            value = float(number)
+            return int(value) if value.is_integer() else None
+        return int(number)
+    except (TypeError, ValueError):
+        return None
+
+
+SPECIAL_VOLUME_KEYWORDS = {
+    'guidebook', 'fan book', 'fanbook', 'artbook', 'art book', 'roman', 'novel', 'light novel',
+    'databook', 'anime comics', 'anime comic', 'special', 'hors serie', 'hors-série', 'spinoff',
+    'spin off', 'spécial', 'special edition', 'collector', 'deluxe'
+}
+
+
+def infer_volume_edition_label(*values: str | None) -> str | None:
+    normalized = ' '.join(normalize_text(value) for value in values if value)
+    if not normalized:
+        return None
+    label_checks = [
+        ('edition_originale', {'edition originale', 'ed originale'}),
+        ('collector', {'collector'}),
+        ('deluxe', {'deluxe'}),
+        ('perfect', {'perfect'}),
+        ('ultimate', {'ultimate'}),
+        ('kanzenban', {'kanzenban'}),
+        ('double', {'double'}),
+        ('triple', {'triple'}),
+        ('grand_format', {'grand format'}),
+        ('roman', {'roman', 'novel', 'light novel'}),
+    ]
+    for label, patterns in label_checks:
+        if any(pattern in normalized for pattern in patterns):
+            return label
+    return None
+
+
+
+def infer_volume_flags(*values: str | None) -> tuple[bool, bool | None]:
+    normalized = ' '.join(normalize_text(value) for value in values if value)
+    if not normalized:
+        return False, None
+    is_special = any(keyword in normalized for keyword in SPECIAL_VOLUME_KEYWORDS)
+    is_one_shot = None
+    if 'one shot' in normalized or 'oneshot' in normalized:
+        is_one_shot = True
+    elif 'en cours' in normalized or 'termine' in normalized or 'terminee' in normalized or 'tome' in normalized or 'vol' in normalized:
+        is_one_shot = False
+    return is_special, is_one_shot
