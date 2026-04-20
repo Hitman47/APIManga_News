@@ -1,0 +1,73 @@
+{
+  "advisory_age": "8+",
+  "authors_art": [
+    "Eiichirô ODA"
+  ],
+  "authors_story": [
+    "Eiichirô ODA"
+  ],
+  "collection": "Shonen",
+  "cover_image": "https://www.manga-news.com/public/images/series/one-piece.jpg",
+  "genres": [
+    "Aventure",
+    "Fantastique"
+  ],
+  "illustration": "n&b + couleurs",
+  "last_release_date": "2026-04-08",
+  "next_release_date": "2026-05-06",
+  "origin": "Japon - 1997",
+  "prepublication": "Shônen Jump",
+  "publisher_fr": "Glénat",
+  "publisher_vo": "Shûeisha",
+  "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
+  "stats": {
+    "editorial_score": 16.23,
+    "in_collection": 7053,
+    "in_wishlist": 984,
+    "likes": 531,
+    "marketplace": 2,
+    "reader_score": 16.5
+  },
+  "strengths": "Un énorme succès populaire. VF:112 (En cours) VO : 114 (En cours) Dernier paru 08/04/2026 A paraître 06/05/2026 J'aime 531 Dans ma collection 7053 Dans ma liste d'achat 984 Achat/vente 2 Rédaction 16.23 /20 Lecteurs 16.5/20",
+  "summary": "Résumé principal de la série.",
+  "themes": [
+    "manga incontournable",
+    "aventure fantastique pirates",
+    "Les points forts de la série",
+    "Un énorme succès populaire.",
+    "VF:112 (En cours)",
+    "VO : 114 (En cours)",
+    "Dernier paru",
+    "08/04/2026",
+    "A paraître",
+    "06/05/2026",
+    "J'aime",
+    "531",
+    "Dans ma collection",
+    "7053",
+    "Dans ma liste d'achat",
+    "984",
+    "Achat/vente",
+    "2",
+    "Rédaction",
+    "16.23 /20",
+    "Lecteurs",
+    "16.5/20"
+  ],
+  "title": "One Piece",
+  "title_vo": "ワンピース",
+  "translated_title": "One Piece",
+  "translators": [
+    "Djamel RABAHI",
+    "Julien FAVEREAU"
+  ],
+  "type": "Shonen",
+  "vf": {
+    "status": "En cours",
+    "volumes": 112
+  },
+  "vo": {
+    "status": "En cours",
+    "volumes": 114
+  }
+}

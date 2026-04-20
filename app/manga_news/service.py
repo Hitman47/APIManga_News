@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import Any, Literal
+from typing import Literal
 from urllib.parse import urlencode
 
 import feedparser
@@ -11,10 +11,23 @@ from app.cache import SQLiteCache
 from app.config import Settings
 from app.exceptions import ParseError
 from app.http import AsyncFetcher
-from app.logging_utils import log_event
-from app.models import Envelope, NewsItem
+from app.models import (
+    BaseEnvelope,
+    NewsItem,
+    NewsResponse,
+    PlanningData,
+    PlanningFilters,
+    PlanningResponse,
+    ResolveData,
+    ResolveResponse,
+    SCHEMA_VERSION,
+    SearchResponse,
+    SearchResult,
+    SeriesResponse,
+    VolumeResponse,
+)
 from app.manga_news.parsers import parse_news_page, parse_planning_page, parse_search_page, parse_series_page, parse_volume_page
-from app.utils import clean_ws, is_manga_news_url, make_cache_key, make_fingerprint, normalize_text, now_utc, parse_french_date, score_match
+from app.utils import clean_ws, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +38,11 @@ class MangaNewsService:
         self.fetcher = fetcher
         self.cache = cache
         self.base_url = settings.manga_news_base_url.rstrip('/')
-        self._json_logs = settings.log_format.lower() == 'json'
 
-    async def _cached_payload(self, *, namespace: str, cache_key: str, ttl_seconds: int, loader):
+    async def _cached_payload(self, *, cache_key: str, ttl_seconds: int, loader):
         entry = self.cache.get(cache_key)
         if entry and entry.is_fresh:
-            log_event(logger, logging.INFO, 'cache_hit', json_mode=self._json_logs, namespace=namespace, cache_key=cache_key, resource_url=entry.resource_url)
-            return entry.payload, entry, True, False, [], 'fresh_hit'
+            return entry.payload, entry, True, False, []
         try:
             payload, source_url = await loader()
             cached_entry = self.cache.set(
@@ -39,93 +50,30 @@ class MangaNewsService:
                 payload={'data': payload, 'source_url': source_url},
                 ttl_seconds=ttl_seconds,
                 stale_grace_seconds=self.settings.cache_stale_grace_seconds,
-                namespace=namespace,
-                resource_url=source_url,
             )
-            log_event(logger, logging.INFO, 'cache_refresh', json_mode=self._json_logs, namespace=namespace, cache_key=cache_key, resource_url=source_url)
-            return cached_entry.payload, cached_entry, False, False, [], 'refreshed'
+            return cached_entry.payload, cached_entry, False, False, []
         except Exception as exc:
             if entry and entry.is_stale_usable:
                 warning = f'Using stale cached data because the upstream fetch failed: {exc}'
-                log_event(
-                    logger,
-                    logging.WARNING,
-                    'cache_stale_fallback',
-                    json_mode=self._json_logs,
-                    namespace=namespace,
-                    cache_key=cache_key,
-                    resource_url=entry.resource_url,
-                    reason=str(exc),
-                )
-                return entry.payload, entry, True, True, [warning], 'stale_fallback'
+                logger.warning(warning)
+                return entry.payload, entry, True, True, [warning]
             raise
 
-    def _assess_parse(self, resource_kind: str, data: Any) -> tuple[bool, list[str], list[str]]:
-        missing_fields: list[str] = []
-        warnings: list[str] = []
+    def _base_envelope_kwargs(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool = True) -> dict:
+        return {
+            'schema_version': SCHEMA_VERSION,
+            'ok': True,
+            'found': found,
+            'source': 'manga_news',
+            'source_url': payload.get('source_url'),
+            'cached': cached,
+            'fetched_at': entry.fetched_at.isoformat() if entry else now_utc().isoformat(),
+            'cache_expires_at': entry.expires_at.isoformat() if entry else None,
+            'partial': partial,
+            'warnings': warnings,
+        }
 
-        if resource_kind == 'series' and isinstance(data, dict):
-            important = ['title', 'summary', 'cover_image', 'publisher_fr']
-            missing_fields = [field for field in important if not data.get(field)]
-        elif resource_kind == 'volume' and isinstance(data, dict):
-            important = ['title', 'publication_date', 'cover_image', 'isbn_ean']
-            missing_fields = [field for field in important if not data.get(field)]
-        elif resource_kind == 'planning' and isinstance(data, dict):
-            items = data.get('items', []) or []
-            malformed = [item for item in items if not item.get('title') or not item.get('release_date')]
-            if malformed:
-                missing_fields.append('items[*].title/release_date')
-                warnings.append(f'{len(malformed)} planning item(s) are missing a title or release date.')
-        elif resource_kind == 'news' and isinstance(data, list):
-            malformed = [item for item in data if not item.get('title') or not item.get('published_at')]
-            if malformed:
-                missing_fields.append('items[*].title/published_at')
-                warnings.append(f'{len(malformed)} news item(s) are missing a title or publication date.')
-        elif resource_kind == 'search' and isinstance(data, list):
-            malformed = [item for item in data if not item.get('title') or not item.get('url')]
-            if malformed:
-                missing_fields.append('items[*].title/url')
-                warnings.append(f'{len(malformed)} search result(s) are missing a title or URL.')
-
-        partial = bool(missing_fields)
-        if partial and resource_kind in {'series', 'volume'}:
-            warnings.append('Some important fields are missing. The upstream page layout may have changed or the resource is incomplete.')
-        return partial, missing_fields, warnings
-
-    def _envelope(
-        self,
-        payload: dict,
-        entry,
-        *,
-        cached: bool,
-        partial: bool,
-        warnings: list[str],
-        cache_state: str,
-        resource_kind: str,
-        found: bool = True,
-    ) -> Envelope:
-        data = payload.get('data')
-        parse_partial, missing_fields, parse_warnings = self._assess_parse(resource_kind, data)
-        combined_partial = partial or parse_partial
-        combined_warnings = warnings + [warning for warning in parse_warnings if warning not in warnings]
-        return Envelope(
-            ok=True,
-            found=found,
-            source='manga_news',
-            source_url=payload.get('source_url'),
-            cached=cached,
-            cache_state=cache_state,
-            fetched_at=entry.fetched_at.isoformat() if entry else now_utc().isoformat(),
-            cache_expires_at=entry.expires_at.isoformat() if entry else None,
-            partial=combined_partial,
-            parse_status='partial' if combined_partial else 'complete',
-            missing_fields=missing_fields,
-            fingerprint=make_fingerprint(data),
-            warnings=combined_warnings,
-            data=data,
-        )
-
-    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> Envelope:
+    async def _search_results(self, query: str, kind: Literal['series', 'volume', 'all'], limit: int) -> tuple[list[SearchResult], str]:
         query = clean_ws(query)
         if not query:
             raise ParseError('The search query cannot be empty.')
@@ -140,44 +88,88 @@ class MangaNewsService:
                 f'{self.base_url}/index.php/recherche/?cat=manga-volume-vf&q={query}',
                 f'{self.base_url}/index.php/recherche/?cat=manga-volume-vo&q={query}',
             ])
-        cache_key = make_cache_key('search', query, kind, mode, str(limit), *search_urls)
+        aggregated: list[SearchResult] = []
+        for url in search_urls:
+            result = await self.fetcher.get_text(url)
+            aggregated.extend(
+                parse_search_page(
+                    html=result.text,
+                    page_url=result.url,
+                    base_url=self.base_url,
+                    query=query,
+                    kind=kind,
+                    score_threshold=self.settings.search_score_threshold,
+                    limit=max(limit, self.settings.max_limit),
+                )
+            )
+        deduped: dict[str, SearchResult] = {}
+        for item in aggregated:
+            existing = deduped.get(item.url)
+            if existing is None or item.score > existing.score:
+                deduped[item.url] = item
+        results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)
+        return results[:limit], search_urls[0] if search_urls else self.base_url
+
+    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> SearchResponse:
+        query = clean_ws(query)
+        if not query:
+            raise ParseError('The search query cannot be empty.')
+        cache_key = make_cache_key('search', query, kind, mode, str(limit))
 
         async def loader():
-            aggregated = []
-            for url in search_urls:
-                result = await self.fetcher.get_text(url)
-                aggregated.extend(
-                    parse_search_page(
-                        html=result.text,
-                        page_url=result.url,
-                        base_url=self.base_url,
-                        query=query,
-                        kind=kind,
-                        score_threshold=self.settings.search_score_threshold,
-                        limit=max(limit, self.settings.max_limit),
-                    )
-                )
-            deduped: dict[str, object] = {}
-            for item in aggregated:
-                existing = deduped.get(item.url)
-                if existing is None or item.score > existing.score:
-                    deduped[item.url] = item
-            results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)
+            results, source_url = await self._search_results(query=query, kind=kind, limit=max(limit, self.settings.max_limit))
             if mode == 'best' and results:
                 results = [results[0]]
-            results = results[:limit]
-            return [item.model_dump() for item in results], search_urls[0] if search_urls else self.base_url
+            return [item.model_dump() for item in results[:limit]], source_url
 
-        payload, entry, cached, partial, warnings, cache_state = await self._cached_payload(
-            namespace='search',
+        payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_search_seconds,
             loader=loader,
         )
-        found = bool(payload.get('data'))
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, cache_state=cache_state, resource_kind='search', found=found)
+        data = [SearchResult.model_validate(item) for item in payload.get('data', [])]
+        return SearchResponse(
+            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(data)),
+            data=data,
+        )
 
-    async def get_series(self, *, slug: str | None = None, url: str | None = None) -> Envelope:
+    async def resolve_search(self, query: str, kind: Literal['series', 'volume', 'all']) -> ResolveResponse:
+        query = clean_ws(query)
+        if not query:
+            raise ParseError('The search query cannot be empty.')
+        cache_key = make_cache_key('search-resolve', query, kind)
+
+        async def loader():
+            results, source_url = await self._search_results(query=query, kind=kind, limit=self.settings.max_limit)
+            best = results[0] if results else None
+            if best is None:
+                confidence = 'none'
+            elif best.score >= 90:
+                confidence = 'high'
+            elif best.score >= 75:
+                confidence = 'medium'
+            else:
+                confidence = 'low'
+            data = ResolveData(
+                query=query,
+                result=best,
+                confidence=confidence,
+                alternatives_count=max(len(results) - 1, 0),
+            )
+            return data.model_dump(), source_url
+
+        payload, entry, cached, partial, warnings = await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_search_seconds,
+            loader=loader,
+        )
+        data = ResolveData.model_validate(payload.get('data', {}))
+        return ResolveResponse(
+            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=data.result is not None),
+            data=data,
+        )
+
+    async def get_series(self, *, slug: str | None = None, url: str | None = None) -> SeriesResponse:
         target_url = self._resolve_series_url(slug=slug, url=url)
         cache_key = make_cache_key('series', target_url)
 
@@ -186,15 +178,17 @@ class MangaNewsService:
             parsed = parse_series_page(result.text, result.url)
             return parsed.model_dump(), result.url
 
-        payload, entry, cached, partial, warnings, cache_state = await self._cached_payload(
-            namespace='series',
+        payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_series_seconds,
             loader=loader,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, cache_state=cache_state, resource_kind='series')
+        return SeriesResponse(
+            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings),
+            data=payload.get('data'),
+        )
 
-    async def get_volume(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None) -> Envelope:
+    async def get_volume(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None) -> VolumeResponse:
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
         cache_key = make_cache_key('volume', target_url)
 
@@ -203,15 +197,17 @@ class MangaNewsService:
             parsed = parse_volume_page(result.text, result.url)
             return parsed.model_dump(), result.url
 
-        payload, entry, cached, partial, warnings, cache_state = await self._cached_payload(
-            namespace='volume',
+        payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_volume_seconds,
             loader=loader,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, cache_state=cache_state, resource_kind='volume')
+        return VolumeResponse(
+            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings),
+            data=payload.get('data'),
+        )
 
-    async def get_global_news(self, *, limit: int) -> Envelope:
+    async def get_global_news(self, *, limit: int) -> NewsResponse:
         rss_url = f'{self.base_url}/index.php/feed/news'
         cache_key = make_cache_key('news-global', rss_url, str(limit))
 
@@ -231,19 +227,22 @@ class MangaNewsService:
                 )
             return [item.model_dump() for item in items], result.url
 
-        payload, entry, cached, partial, warnings, cache_state = await self._cached_payload(
-            namespace='news-global',
+        payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_news_global_seconds,
             loader=loader,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, cache_state=cache_state, resource_kind='news')
+        data = [NewsItem.model_validate(item) for item in payload.get('data', [])]
+        return NewsResponse(
+            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(data)),
+            data=data,
+        )
 
-    async def get_series_news(self, *, slug: str, limit: int) -> Envelope:
+    async def get_series_news(self, *, slug: str, limit: int) -> NewsResponse:
         target_url = f'{self.base_url}/index.php/serie/news/{slug}'
         return await self._get_news_page(target_url=target_url, cache_namespace='news-series', ttl=self.settings.cache_ttl_news_series_seconds, limit=limit)
 
-    async def get_volume_news(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None, limit: int) -> Envelope:
+    async def get_volume_news(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None, limit: int) -> NewsResponse:
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
         if '/index.php/manga/' not in target_url:
             raise ParseError('The provided volume URL is not a Manga News volume page.')
@@ -253,7 +252,20 @@ class MangaNewsService:
         news_url = f'{self.base_url}/index.php/manga/news/{parts[0]}/{parts[1]}'
         return await self._get_news_page(target_url=news_url, cache_namespace='news-volume', ttl=self.settings.cache_ttl_news_series_seconds, limit=limit)
 
-    async def _load_planning_source(self, *, section: Literal['manga-vf', 'manga-vo'], year: int | None, month: int | None, page: int):
+    async def get_planning(
+        self,
+        *,
+        section: Literal['manga-vf', 'manga-vo'],
+        year: int | None,
+        month: int | None,
+        page: int,
+        publisher: str | None,
+        query: str | None,
+        date_from: str | None,
+        date_to: str | None,
+        sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'],
+        limit: int,
+    ) -> PlanningResponse:
         path = '/index.php/planning/' if section == 'manga-vf' else '/index.php/planning/mangas-vo'
         params: dict[str, object] = {}
         if year is not None:
@@ -274,24 +286,14 @@ class MangaNewsService:
             parsed.page = page
             return parsed.model_dump(), result.url
 
-        return await self._cached_payload(
-            namespace='planning',
+        payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_planning_seconds,
             loader=loader,
         )
 
-    def _filter_planning_items(
-        self,
-        planning: dict[str, Any],
-        *,
-        publisher: str | None,
-        query: str | None,
-        date_from: str | None,
-        date_to: str | None,
-        sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'],
-    ) -> list[dict[str, Any]]:
-        items = list(planning.get('items', []) or [])
+        planning = payload.get('data', {}) or {}
+        items = list(planning.get('items', []))
 
         if publisher:
             normalized_publisher = normalize_text(publisher)
@@ -335,247 +337,28 @@ class MangaNewsService:
             items.sort(key=lambda item: normalize_text(item.get('title')))
         elif sort == 'title_desc':
             items.sort(key=lambda item: normalize_text(item.get('title')), reverse=True)
-        return items
 
-    async def get_planning(
-        self,
-        *,
-        section: Literal['manga-vf', 'manga-vo'],
-        year: int | None,
-        month: int | None,
-        page: int,
-        publisher: str | None,
-        query: str | None,
-        date_from: str | None,
-        date_to: str | None,
-        sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'],
-        limit: int,
-    ) -> Envelope:
-        payload, entry, cached, partial, warnings, cache_state = await self._load_planning_source(section=section, year=year, month=month, page=page)
-        planning = payload.get('data', {}) or {}
-        full_items = self._filter_planning_items(planning, publisher=publisher, query=query, date_from=date_from, date_to=date_to, sort=sort)
-        total_items = len(full_items)
-        limited_items = full_items[:limit]
-        data = {
-            'section': planning.get('section') or section,
-            'year': planning.get('year') or year,
-            'month': planning.get('month') or month,
-            'page': planning.get('page') or page,
-            'filters': {
-                'publisher': publisher,
-                'query': query,
-                'date_from': date_from,
-                'date_to': date_to,
-            },
-            'sort': sort,
-            'total_items': total_items,
-            'items': limited_items,
-        }
-        return self._envelope(
-            {'data': data, 'source_url': payload.get('source_url')},
-            entry,
-            cached=cached,
-            partial=partial,
-            warnings=warnings,
-            cache_state=cache_state,
-            resource_kind='planning',
-            found=bool(full_items),
+        total_items = len(items)
+        items = items[:limit]
+        data = PlanningData(
+            section=planning.get('section') or section,
+            year=planning.get('year') or year,
+            month=planning.get('month') or month,
+            page=planning.get('page') or page,
+            filters=PlanningFilters(
+                publisher=publisher,
+                query=query,
+                date_from=date_from,
+                date_to=date_to,
+            ),
+            sort=sort,
+            total_items=total_items,
+            items=items,
         )
 
-    async def get_planning_watch(
-        self,
-        *,
-        section: Literal['manga-vf', 'manga-vo'],
-        year: int | None,
-        month: int | None,
-        page: int,
-        publisher: str | None,
-        query: str | None,
-        date_from: str | None,
-        date_to: str | None,
-        sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'],
-        limit: int,
-        watch_id: str | None,
-        previous_fingerprint: str | None,
-        commit_snapshot: bool,
-        preview_limit: int,
-    ) -> Envelope:
-        payload, entry, cached, partial, warnings, cache_state = await self._load_planning_source(section=section, year=year, month=month, page=page)
-        planning = payload.get('data', {}) or {}
-        full_items = self._filter_planning_items(planning, publisher=publisher, query=query, date_from=date_from, date_to=date_to, sort=sort)
-        full_items = full_items[:limit]
-        current_fingerprint = make_fingerprint(full_items)
-        scope = {
-            'section': section,
-            'year': year,
-            'month': month,
-            'page': page,
-            'publisher': publisher,
-            'query': query,
-            'date_from': date_from,
-            'date_to': date_to,
-            'sort': sort,
-            'limit': limit,
-        }
-        scope_hash = make_fingerprint(scope)
-
-        previous_items: list[dict[str, Any]] = []
-        has_previous_snapshot = False
-        scope_changed = False
-        prior_fingerprint = previous_fingerprint
-
-        if watch_id:
-            snapshot = self.cache.get_watch_snapshot(f'planning:{watch_id}')
-            if snapshot:
-                if snapshot.scope_hash == scope_hash:
-                    has_previous_snapshot = True
-                    previous_items = list(snapshot.payload.get('items', []))
-                    prior_fingerprint = snapshot.fingerprint
-                else:
-                    scope_changed = True
-                    prior_fingerprint = snapshot.fingerprint
-            if commit_snapshot:
-                self.cache.upsert_watch_snapshot(
-                    f'planning:{watch_id}',
-                    scope_hash=scope_hash,
-                    payload={'items': full_items, 'scope': scope},
-                    fingerprint=current_fingerprint,
-                )
-
-        previous_index = {self._planning_item_identity(item): item for item in previous_items}
-        current_index = {self._planning_item_identity(item): item for item in full_items}
-        added_items = [item for key, item in current_index.items() if key not in previous_index]
-        removed_items = [item for key, item in previous_index.items() if key not in current_index]
-        changed = False
-        if has_previous_snapshot:
-            changed = bool(added_items or removed_items or prior_fingerprint != current_fingerprint)
-        elif previous_fingerprint is not None:
-            changed = previous_fingerprint != current_fingerprint
-
-        if scope_changed:
-            warnings = warnings + ['The stored watch scope changed. The previous snapshot was ignored for diff computation.']
-
-        data = {
-            'section': section,
-            'year': planning.get('year') or year,
-            'month': planning.get('month') or month,
-            'watch_id': watch_id,
-            'has_previous_snapshot': has_previous_snapshot,
-            'scope_changed': scope_changed,
-            'changed': changed,
-            'previous_fingerprint': prior_fingerprint,
-            'current_fingerprint': current_fingerprint,
-            'total_items': len(full_items),
-            'added_count': len(added_items),
-            'removed_count': len(removed_items),
-            'added_items': added_items[:preview_limit],
-            'removed_items': removed_items[:preview_limit],
-            'current_items_preview': full_items[:preview_limit],
-            'filters': scope,
-        }
-        log_event(
-            logger,
-            logging.INFO,
-            'planning_watch',
-            json_mode=self._json_logs,
-            changed=changed,
-            watch_id=watch_id,
-            total_items=len(full_items),
-            added_count=len(added_items),
-            removed_count=len(removed_items),
-        )
-        return self._envelope(
-            {'data': data, 'source_url': payload.get('source_url')},
-            entry,
-            cached=cached,
-            partial=partial,
-            warnings=warnings,
-            cache_state=cache_state,
-            resource_kind='planning',
-            found=True,
-        )
-
-    def cache_stats(self) -> Envelope:
-        data = self.cache.stats()
-        return Envelope(
-            ok=True,
-            found=True,
-            source='manga_news',
-            source_url=None,
-            cached=False,
-            cache_state=None,
-            fetched_at=now_utc().isoformat(),
-            cache_expires_at=None,
-            partial=False,
-            parse_status='complete',
-            missing_fields=[],
-            fingerprint=make_fingerprint(data),
-            warnings=[],
+        return PlanningResponse(
+            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(items)),
             data=data,
-        )
-
-    def invalidate_cache(
-        self,
-        *,
-        cache_key: str | None,
-        namespace: str | None,
-        resource_url: str | None,
-        expired_only: bool,
-        all_entries: bool,
-    ) -> Envelope:
-        deleted_entries = self.cache.invalidate(
-            cache_key=cache_key,
-            namespace=namespace,
-            resource_url=resource_url,
-            expired_only=expired_only,
-            all_entries=all_entries,
-        )
-        log_event(
-            logger,
-            logging.WARNING,
-            'cache_invalidate',
-            json_mode=self._json_logs,
-            deleted_entries=deleted_entries,
-            cache_key=cache_key,
-            namespace=namespace,
-            resource_url=resource_url,
-            expired_only=expired_only,
-            all_entries=all_entries,
-        )
-        data = {
-            'deleted_entries': deleted_entries,
-            'filters': {
-                'cache_key': cache_key,
-                'namespace': namespace,
-                'resource_url': resource_url,
-                'expired_only': expired_only,
-                'all_entries': all_entries,
-            },
-        }
-        return Envelope(
-            ok=True,
-            found=True,
-            source='manga_news',
-            source_url=None,
-            cached=False,
-            cache_state=None,
-            fetched_at=now_utc().isoformat(),
-            cache_expires_at=None,
-            partial=False,
-            parse_status='complete',
-            missing_fields=[],
-            fingerprint=make_fingerprint(data),
-            warnings=[],
-            data=data,
-        )
-
-    def _planning_item_identity(self, item: dict[str, Any]) -> str:
-        return item.get('url') or '|'.join(
-            [
-                item.get('title') or '',
-                item.get('release_date') or '',
-                item.get('publisher') or '',
-            ]
         )
 
     def _parse_iso_date(self, value: str | None, field_name: str) -> date | None:
@@ -589,7 +372,7 @@ class MangaNewsService:
         except ValueError as exc:
             raise ParseError(f'{field_name} must be a valid date.') from exc
 
-    async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> Envelope:
+    async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> NewsResponse:
         cache_key = make_cache_key(cache_namespace, target_url, str(limit))
 
         async def loader():
@@ -597,13 +380,16 @@ class MangaNewsService:
             parsed = parse_news_page(result.text, result.url, self.base_url, limit=limit)
             return [item.model_dump() for item in parsed], result.url
 
-        payload, entry, cached, partial, warnings, cache_state = await self._cached_payload(
-            namespace=cache_namespace,
+        payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=ttl,
             loader=loader,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, cache_state=cache_state, resource_kind='news')
+        data = [NewsItem.model_validate(item) for item in payload.get('data', [])]
+        return NewsResponse(
+            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(data)),
+            data=data,
+        )
 
     def _resolve_series_url(self, *, slug: str | None, url: str | None) -> str:
         if url:
