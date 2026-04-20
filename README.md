@@ -1,174 +1,80 @@
 # Manga News Private API
 
-API non officielle, auto-hébergeable, qui expose en JSON des données publiques de Manga-News.
+API non officielle, auto-hébergée, qui récupère les pages publiques de Manga News et les expose sous forme de JSON propre, stable et réutilisable.
 
-Le projet est pensé pour un usage concret : scripts perso, dashboard, bot, outil de suivi, agent IA, ou backend intermédiaire. La source amont reste du HTML public, donc l’API sert surtout à fournir un contrat JSON stable, cacheable et exploitable.
+Elle est pensée pour trois cas d'usage :
+- un projet perso qui a besoin de métadonnées manga ;
+- un autre service qui veut consommer des fiches série / volume sans parser du HTML ;
+- une IA ou un agent qui doit résoudre un titre puis interroger l'API de manière fiable.
 
-## Ce que l’API fournit
+## Ce que l'API sait faire
 
-- contrat canonique sous `/v1/...`
-- routes legacy non versionnées désactivées par défaut
-- auth séparée : `API_TOKEN` pour le public, `ADMIN_TOKEN` pour l’admin
-- cache SQLite persistant
-- cache négatif court pour éviter de refrapper en boucle une ressource absente/cassée
-- `ETag` + `If-None-Match` + `304`
-- erreurs machine-readable avec `code` stable
-- pagination structurée sur les endpoints de liste
-- normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`
-- rate limiting configurable par `.env`, variables d’environnement ou compose
-- endpoint admin de métriques
-- dump HTML optionnel en cas d’échec de parsing
-- smoke tests prêts à lancer
-- OpenAPI / Swagger activables
+- rechercher une série ou un volume ;
+- résoudre automatiquement le meilleur résultat ;
+- récupérer une fiche série ;
+- récupérer une fiche volume ;
+- lister les contenus liés à une série ;
+- lister les éditions VF / VO d'une série ;
+- lire les news globales ;
+- lire les news d'une série ou d'un volume ;
+- interroger le planning des sorties.
 
-## À qui sert cette doc
+## Ce que l'API **ne** fait pas
 
-Cette documentation doit suffire pour :
+- elle n'utilise pas d'API officielle Manga News ;
+- elle ne garantit pas que le HTML source ne changera jamais ;
+- elle ne fournit pas aujourd'hui de routes `/v1` ;
+- elle ne remplace pas un vrai moteur de suivi ou d'alerting.
 
-- lancer l’API localement ou en Docker
-- comprendre le contrat HTTP
-- consommer l’API depuis un script, un autre service ou une IA
-- faire un premier diagnostic si quelque chose casse
-- tester rapidement l’API avec le cas One Piece
+## Démarrage rapide
 
-## Parcours recommandé
-
-Selon ton besoin, lis dans cet ordre :
-
-1. **Ce README** pour la vue d’ensemble et le démarrage rapide.
-2. **`docs/API_INTEGRATION.md`** pour consommer l’API proprement.
-3. **`docs/DEPLOYMENT_AND_OPERATIONS.md`** pour déployer, configurer et exploiter l’API.
-4. **`docs/USE_CASES_AND_RECIPES.md`** pour des scénarios concrets, humains ou IA.
-5. **`docs/ONE_PIECE_API_TESTS.txt`** pour les tests manuels et le smoke test de bout en bout.
-
-## Démarrage rapide en 5 minutes
-
-### 1) Installer les dépendances
+### Local Python
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # Linux/macOS
+# .venv\Scripts\activate   # Windows PowerShell
 pip install -r requirements.txt
-```
-
-Sous Windows PowerShell :
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-### 2) Préparer la config
-
-Copie `.env.example` vers `.env`, puis ajuste au minimum :
-
-```env
-API_TOKEN=change-me
-ADMIN_TOKEN=change-me-admin
-ENABLE_DOCS=true
-```
-
-Pour un usage local sans auth, laisse les tokens vides. Pour un service exposé, ne fais pas ça.
-
-### 3) Lancer l’API
-
-```bash
+cp .env.example .env
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8017
 ```
 
-L’API sera disponible sur :
+Ensuite :
+- Swagger UI : `http://localhost:8017/docs`
+- OpenAPI brut : `http://localhost:8017/openapi.json`
+- health : `http://localhost:8017/health`
 
-- `http://localhost:8017/v1`
-- docs Swagger : `http://localhost:8017/docs`
-- OpenAPI JSON : `http://localhost:8017/openapi.json`
-
-### 4) Vérifier que ça répond
-
-Sans auth :
+### Docker Compose
 
 ```bash
-curl http://localhost:8017/v1/health
-```
-
-Avec auth :
-
-```bash
-curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8017/v1/health
-```
-
-### 5) Faire une vraie requête utile
-
-```bash
-curl -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/lookup/volume?series=One%20Piece&number=91"
-```
-
-## Démarrage rapide avec Docker Compose
-
-```bash
+cp .env.example .env
 docker compose up -d --build
 ```
 
-Par défaut, le port hôte est `8017`.
+Port exposé par défaut : `8017`.
+Le conteneur écoute en interne sur `8000`.
 
-### Variables importantes exposées dans le compose
+## Authentification
 
-Les réglages d’exploitation utiles sont pilotables sans modifier le code :
+Si `API_TOKEN` est vide, l'API est ouverte sur le réseau où elle est exposée.
 
-- `API_TOKEN`
-- `ADMIN_TOKEN`
-- `ENABLE_DOCS`
-- `ENABLE_LEGACY_ROUTES`
-- `DEBUG_CAPTURE_HTML_ON_ERROR`
-- `DEBUG_HTML_DUMP_DIR`
-- `NEGATIVE_CACHE_ENABLED`
-- `NEGATIVE_CACHE_TTL_SECONDS`
-- `RATE_LIMIT_ENABLED`
-- `RATE_LIMIT_REQUESTS`
-- `RATE_LIMIT_WINDOW_SECONDS`
-- `RATE_LIMIT_SCOPE`
-- `RATE_LIMIT_INCLUDE_ADMIN`
-- `RATE_LIMIT_EXEMPT_PATHS`
-- `REQUEST_MAX_RETRIES`
-- `REQUEST_BACKOFF_SECONDS`
+Si `API_TOKEN` est défini, chaque requête doit envoyer :
 
-Le détail d’exploitation est documenté dans `docs/DEPLOYMENT_AND_OPERATIONS.md`.
-
-## Contrat HTTP : ce qu’il faut retenir
-
-### Base URL
-
-Utilise **uniquement** les routes `/v1/...`.
-
-Exemples :
-
-- `/v1/health`
-- `/v1/search`
-- `/v1/search/resolve`
-- `/v1/lookup/volume`
-- `/v1/series/{slug}`
-- `/v1/volume/{series_slug}/{volume_slug}`
-- `/v1/news/global`
-- `/v1/planning`
-- `/v1/admin/cache/stats`
-- `/v1/admin/metrics`
-
-### Pourquoi il y avait des doublons `/v1/...` et non versionnés
-
-Il n’y avait pas de différence métier. Les routes non versionnées servaient uniquement à la rétrocompatibilité. Elles sont maintenant désactivées par défaut.
-
-Pour les réactiver explicitement :
-
-```env
-ENABLE_LEGACY_ROUTES=true
+```http
+Authorization: Bearer <token>
 ```
 
-Pour un nouveau client, il n’y a aucune bonne raison d’utiliser autre chose que `/v1`.
+Exemple :
 
-### Enveloppe standard
+```bash
+curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/health"
+```
 
-La majorité des endpoints renvoient une enveloppe commune :
+## Contrat HTTP à connaître
+
+### Enveloppe de réponse
+
+Presque toutes les routes renvoient une enveloppe standard :
 
 ```json
 {
@@ -183,206 +89,153 @@ La majorité des endpoints renvoient une enveloppe commune :
   "partial": false,
   "warnings": [],
   "fingerprint": "...",
-  "pagination": {
-    "page": 1,
-    "limit": 10,
-    "returned": 1,
-    "total": 1,
-    "has_more": false
-  },
   "data": {}
 }
 ```
 
-`pagination` est présent sur les endpoints de liste.
+### Cache côté client : `ETag`
 
-### Headers utiles
-
-Les réponses peuvent exposer :
-
+Quand une réponse contient un `fingerprint`, l'API renvoie aussi :
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
-- `X-Cache-Status: MISS|HIT|STALE`
-- `X-Request-ID: <id>`
-- `X-RateLimit-Limit`
-- `X-RateLimit-Remaining`
-- `X-RateLimit-Reset`
-- `Retry-After` si `429`
 
-### Format d’erreur
+Tu peux donc renvoyer :
+
+```http
+If-None-Match: "<fingerprint>"
+```
+
+et obtenir `304 Not Modified` si rien n'a changé.
+
+### Erreurs
+
+Actuellement, le format d'erreur est simple :
 
 ```json
-{
-  "ok": false,
-  "code": "INVALID_REQUEST",
-  "detail": "Unknown volume field path: bogus"
-}
+{ "detail": "..." }
 ```
 
 Codes principaux :
+- `401` : token manquant ou invalide ;
+- `404` : ressource absente côté Manga News ;
+- `502` : erreur d'accès à Manga News ou parsing cassé ;
+- `304` : inchangé quand `If-None-Match` est fourni.
 
-- `INVALID_REQUEST`
-- `AUTH_REQUIRED`
-- `RESOURCE_NOT_FOUND`
-- `UPSTREAM_FETCH_ERROR`
-- `UPSTREAM_PARSE_ERROR`
-- `RATE_LIMITED`
-- `ENDPOINT_NOT_FOUND`
+## Premiers appels utiles
 
-## Endpoints principaux
-
-### Santé
+### 1) Résoudre une série
 
 ```bash
-curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8017/v1/health
-```
-
-### Recherche libre
-
-```bash
-curl -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/search?q=one%20piece&kind=series&mode=all&limit=10"
-```
-
-### Résolution directe d’un volume par série + numéro
-
-```bash
-curl -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/lookup/volume?series=One%20Piece&number=91"
-```
-
-### Fiche série
-
-```bash
-curl -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/series/One-piece-Edition-originale"
-```
-
-### Fiche volume
-
-```bash
-curl -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/volume/One-Piece/vol-91"
-```
-
-### News globales
-
-```bash
-curl -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/news/global?limit=10"
-```
-
-### Planning filtré
-
-```bash
-curl -G -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/planning" \
-  --data-urlencode "section=manga-vf" \
+curl --get "http://localhost:8017/search/resolve" \
   --data-urlencode "q=one piece" \
-  --data-urlencode "sort=date_desc" \
-  --data-urlencode "limit=10"
+  --data-urlencode "kind=series"
 ```
 
-## Use cases fréquents
-
-### Cas 1 — Je connais déjà la série et le numéro
-
-Utilise `/v1/lookup/volume`.
-
-C’est le chemin le plus propre. Tu évites un `search/resolve` manuel côté client.
-
-### Cas 2 — Je n’ai qu’un titre flou
-
-1. `GET /v1/search` ou `GET /v1/search/resolve`
-2. récupère `slug`, `series_slug` ou `volume_slug`
-3. recharge la ressource canonique avec `/series/...` ou `/volume/...`
-
-### Cas 3 — Je veux seulement quelques champs
-
-Les endpoints `/series/...` et `/volume/...` acceptent `blocks`, `fields` et `include_raw_sections`.
-
-Exemple série :
+### 2) Charger la fiche série
 
 ```bash
-curl -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/series/One-piece-Edition-originale?blocks=editions,stats&fields=title,vf.volumes"
+curl "http://localhost:8017/series/One-piece-Edition-originale"
 ```
 
-Exemple volume :
+### 3) Charger uniquement quelques champs
 
 ```bash
-curl -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/volume/One-Piece/vol-91?blocks=release,scores&fields=title,number_int"
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,vf.volumes,next_release_date"
 ```
 
-### Cas 4 — Je veux éviter les transferts inutiles
-
-Stocke l’`ETag` puis renvoie `If-None-Match`.
+### 4) Charger les éditions VF / VO
 
 ```bash
-curl -i -H "Authorization: Bearer $API_TOKEN" \
-  "http://localhost:8017/v1/series/One-piece-Edition-originale"
+curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
 ```
 
-Puis :
+### 5) Charger un volume
 
 ```bash
-curl -i -H "Authorization: Bearer $API_TOKEN" \
-  -H 'If-None-Match: "<etag-precedent>"' \
-  "http://localhost:8017/v1/series/One-piece-Edition-originale"
+curl "http://localhost:8017/volume/One-Piece/vol-110"
 ```
 
-## Smoke tests et validation
-
-### Tests HTTP batch
+### 6) Lire le planning
 
 ```bash
-python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN"
+curl --get "http://localhost:8017/planning" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "year=2026" \
+  --data-urlencode "month=4" \
+  --data-urlencode "publisher=Glénat" \
+  --data-urlencode "sort=date_asc"
 ```
 
-### Si le dossier de sortie n’est pas inscriptible
+## Architecture
 
-```bash
-python scripts/run_api_smoke_tests.py --output-dir /tmp/api_test_outputs
+```mermaid
+flowchart LR
+    Client[Client / service / IA] --> API[FastAPI app/main.py]
+    API --> Auth[auth.py]
+    API --> Service[MangaNewsService]
+    Service --> Cache[(SQLite cache)]
+    Service --> Fetcher[httpx AsyncFetcher]
+    Fetcher --> MangaNews[(manga-news.com)]
+    MangaNews --> Fetcher
+    Fetcher --> Parsers[parsers.py]
+    Parsers --> Service
+    Service --> API
+    API --> Client
 ```
 
-ou sans fichier de sortie :
+Explication rapide :
+- **FastAPI** expose le contrat HTTP et l'OpenAPI ;
+- **MangaNewsService** orchestre cache, fetch et parsing ;
+- **AsyncFetcher** récupère les pages HTML / RSS ;
+- **parsers.py** convertit le HTML en structures Python ;
+- **SQLiteCache** stocke les réponses pour éviter de refrapper inutilement l'upstream.
 
-```bash
-python scripts/run_api_smoke_tests.py --output-dir ""
-```
+Le schéma détaillé est dans [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-### Suite projet complète
+## Documentation à lire selon ton besoin
 
-```bash
-pytest
-```
+- [`docs/API_INTEGRATION.md`](docs/API_INTEGRATION.md) : guide d'intégration complet, endpoint par endpoint ;
+- [`docs/USE_CASES_AND_RECIPES.md`](docs/USE_CASES_AND_RECIPES.md) : recettes concrètes, workflows et anti-patterns ;
+- [`docs/OPENAPI_AND_AI_USAGE.md`](docs/OPENAPI_AND_AI_USAGE.md) : comment exploiter `/openapi.json`, Swagger et une IA ;
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) : composants, flux et rôle de chaque module ;
+- [`docs/ONE_PIECE_API_TESTS.txt`](docs/ONE_PIECE_API_TESTS.txt) : scénario de test prêt à lancer.
 
-Les tests async sont pris en charge par `pytest-asyncio`, déjà inclus dans `requirements.txt`.
+## Variables d'environnement principales
 
-## Si tu veux donner la doc à quelqu’un ou à une IA
+- `APP_NAME` : nom affiché de l'application ;
+- `APP_ENV` : environnement (`development`, `production`, etc.) ;
+- `LOG_LEVEL` : niveau de logs ;
+- `LOG_FORMAT` : `text` aujourd'hui ;
+- `MANGA_NEWS_BASE_URL` : URL de base Manga News ;
+- `USER_AGENT` : user-agent envoyé à Manga News ;
+- `API_TOKEN` : token Bearer optionnel ;
+- `DB_PATH` : chemin du cache SQLite ;
+- `REQUEST_TIMEOUT_SECONDS` : timeout HTTP amont ;
+- `CACHE_STALE_GRACE_SECONDS` : durée d'utilisation d'un cache périmé en cas d'erreur amont ;
+- `CACHE_TTL_SEARCH_SECONDS` : TTL du cache recherche ;
+- `CACHE_TTL_SERIES_SECONDS` : TTL des fiches série et éditions ;
+- `CACHE_TTL_VOLUME_SECONDS` : TTL des fiches volume ;
+- `CACHE_TTL_NEWS_GLOBAL_SECONDS` : TTL des news globales ;
+- `CACHE_TTL_NEWS_SERIES_SECONDS` : TTL des news série / volume ;
+- `CACHE_TTL_PLANNING_SECONDS` : TTL du planning ;
+- `SEARCH_SCORE_THRESHOLD` : seuil minimal de score pour conserver un résultat ;
+- `DEFAULT_LIMIT` : limite par défaut ;
+- `MAX_LIMIT` : limite maximale ;
+- `ENABLE_DOCS` : active `/docs` et `/redoc`.
 
-Commence par fournir :
+## Limites connues
 
-- ce `README.md`
-- `docs/API_INTEGRATION.md`
-- `docs/DEPLOYMENT_AND_OPERATIONS.md`
-- `docs/USE_CASES_AND_RECIPES.md`
+- cette API dépend du HTML public de Manga News ;
+- si le site change fortement, certains parseurs devront être adaptés ;
+- le cache réduit les appels mais ne remplace pas une vraie supervision ;
+- la précision de `search/resolve` dépend de la qualité des résultats publics Manga News.
 
-C’est suffisant pour :
+## Pour une autre IA : instruction minimale
 
-- comprendre les endpoints
-- savoir comment s’authentifier
-- intégrer le cache et les ETag
-- gérer les erreurs proprement
-- exploiter les endpoints admin
-- diagnostiquer un problème de parsing ou de quota
-
-## Limite importante à garder en tête
-
-L’API fournit un contrat JSON stable, mais la source amont reste du HTML public. Si Manga-News change fortement son HTML, les parseurs peuvent devoir être ajustés. Les mécanismes utiles pour diagnostiquer ça existent déjà :
-
-- métriques admin
-- cache négatif court
-- dump HTML sur erreur de parsing
-- tests de fixtures
+1. Lis `/openapi.json` pour connaître le contrat réel.
+2. Pour trouver une série ou un tome, commence par `/search/resolve`.
+3. Utilise ensuite `/series/{slug}` ou `/volume/{series_slug}/{volume_slug}`.
+4. Réutilise `ETag` avec `If-None-Match` quand tu relances la même requête.
+5. Si tu veux limiter la taille des réponses, utilise `blocks` et `fields`.
+6. Ne suppose pas l'existence d'autres routes que celles présentes dans l'OpenAPI.
