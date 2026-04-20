@@ -16,6 +16,7 @@ from app.manga_news.service import MangaNewsService
 from app.models import (
     ComparisonResponse,
     Envelope,
+    FieldValueResponse,
     HealthResponse,
     MachineSeriesSummaryResponse,
     MachineVolumeSummaryResponse,
@@ -25,7 +26,9 @@ from app.models import (
     SeriesNewsSummaryResponse,
     SeriesReleaseSummaryResponse,
     SeriesResponse,
+    SeriesTimelineResponse,
     VolumeResponse,
+    WatchResponse,
 )
 
 
@@ -53,7 +56,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title='Manga News Private API',
-    version='0.2.0',
+    version='0.3.0',
     docs_url=get_settings().docs_url,
     redoc_url=get_settings().redoc_url,
     lifespan=lifespan,
@@ -120,18 +123,40 @@ async def get_series_by_url(url: str = Query(...), service: MangaNewsService = D
 async def select_series_fields(
     slug: str,
     fields: str = Query(..., description='Comma-separated list of dotted fields, e.g. title,vf.volumes'),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
     service: MangaNewsService = Depends(get_service),
 ):
-    return await service.select_series_fields(slug=slug, fields=fields)
+    return await service.select_series_fields(slug=slug, fields=fields, output_format=output_format)
 
 
 @app.get('/series/by-url/select', dependencies=[Depends(auth_dependency)], response_model=Envelope)
 async def select_series_fields_by_url(
     url: str = Query(...),
     fields: str = Query(..., description='Comma-separated list of dotted fields, e.g. title,vf.volumes'),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
     service: MangaNewsService = Depends(get_service),
 ):
-    return await service.select_series_fields(url=url, fields=fields)
+    return await service.select_series_fields(url=url, fields=fields, output_format=output_format)
+
+
+@app.get('/series/{slug}/blocks', dependencies=[Depends(auth_dependency)], response_model=Envelope)
+async def select_series_blocks(
+    slug: str,
+    blocks: str = Query(..., description='Comma-separated business blocks, e.g. identity,release'),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.select_series_blocks(slug=slug, blocks=blocks, output_format=output_format)
+
+
+@app.get('/series/by-url/blocks', dependencies=[Depends(auth_dependency)], response_model=Envelope)
+async def select_series_blocks_by_url(
+    url: str = Query(...),
+    blocks: str = Query(..., description='Comma-separated business blocks, e.g. identity,release'),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.select_series_blocks(url=url, blocks=blocks, output_format=output_format)
 
 
 @app.get('/series/{slug}/summary', dependencies=[Depends(auth_dependency)], response_model=MachineSeriesSummaryResponse)
@@ -152,6 +177,75 @@ async def get_series_release_summary(slug: str, service: MangaNewsService = Depe
 @app.get('/series/by-url/release-summary', dependencies=[Depends(auth_dependency)], response_model=SeriesReleaseSummaryResponse)
 async def get_series_release_summary_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
     return await service.get_series_release_summary(url=url)
+
+
+@app.get('/series/{slug}/timeline', dependencies=[Depends(auth_dependency)], response_model=SeriesTimelineResponse)
+async def get_series_timeline(
+    slug: str,
+    news_limit: int = Query(default=5, ge=1, le=20),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.get_series_timeline(slug=slug, news_limit=news_limit)
+
+
+@app.get('/series/by-url/timeline', dependencies=[Depends(auth_dependency)], response_model=SeriesTimelineResponse)
+async def get_series_timeline_by_url(
+    url: str = Query(...),
+    news_limit: int = Query(default=5, ge=1, le=20),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.get_series_timeline(url=url, news_limit=news_limit)
+
+
+@app.get('/series/{slug}/watch', dependencies=[Depends(auth_dependency)], response_model=WatchResponse)
+async def watch_series(
+    slug: str,
+    fields: str | None = Query(default=None),
+    previous_fingerprint: str | None = Query(default=None),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.watch_series(
+        slug=slug,
+        fields=fields,
+        previous_fingerprint=previous_fingerprint,
+        output_format=output_format,
+    )
+
+
+@app.get('/series/by-url/watch', dependencies=[Depends(auth_dependency)], response_model=WatchResponse)
+async def watch_series_by_url(
+    url: str = Query(...),
+    fields: str | None = Query(default=None),
+    previous_fingerprint: str | None = Query(default=None),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.watch_series(
+        url=url,
+        fields=fields,
+        previous_fingerprint=previous_fingerprint,
+        output_format=output_format,
+    )
+
+
+@app.get('/series/{slug}/value', dependencies=[Depends(auth_dependency)], response_model=FieldValueResponse)
+async def get_series_field_value(
+    slug: str,
+    field: str = Query(..., description='Single dotted field path, e.g. vf.volumes'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.get_series_field_value(slug=slug, field=field)
+
+
+@app.get('/series/{slug}/vf-volumes', dependencies=[Depends(auth_dependency)], response_model=FieldValueResponse)
+async def get_series_vf_volumes(slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_series_field_value(slug=slug, field='vf.volumes')
+
+
+@app.get('/series/{slug}/next-release-date', dependencies=[Depends(auth_dependency)], response_model=FieldValueResponse)
+async def get_series_next_release_date(slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_series_field_value(slug=slug, field='next_release_date')
 
 
 @app.get('/series/{slug}/news-summary', dependencies=[Depends(auth_dependency)], response_model=SeriesNewsSummaryResponse)
@@ -187,18 +281,51 @@ async def select_volume_fields(
     series_slug: str,
     volume_slug: str,
     fields: str = Query(..., description='Comma-separated list of dotted fields, e.g. title,publication_date,isbn_ean'),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
     service: MangaNewsService = Depends(get_service),
 ):
-    return await service.select_volume_fields(series_slug=series_slug, volume_slug=volume_slug, fields=fields)
+    return await service.select_volume_fields(
+        series_slug=series_slug,
+        volume_slug=volume_slug,
+        fields=fields,
+        output_format=output_format,
+    )
 
 
 @app.get('/volume/by-url/select', dependencies=[Depends(auth_dependency)], response_model=Envelope)
 async def select_volume_fields_by_url(
     url: str = Query(...),
     fields: str = Query(..., description='Comma-separated list of dotted fields, e.g. title,publication_date,isbn_ean'),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
     service: MangaNewsService = Depends(get_service),
 ):
-    return await service.select_volume_fields(url=url, fields=fields)
+    return await service.select_volume_fields(url=url, fields=fields, output_format=output_format)
+
+
+@app.get('/volume/{series_slug}/{volume_slug}/blocks', dependencies=[Depends(auth_dependency)], response_model=Envelope)
+async def select_volume_blocks(
+    series_slug: str,
+    volume_slug: str,
+    blocks: str = Query(..., description='Comma-separated business blocks, e.g. identity,publication'),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.select_volume_blocks(
+        series_slug=series_slug,
+        volume_slug=volume_slug,
+        blocks=blocks,
+        output_format=output_format,
+    )
+
+
+@app.get('/volume/by-url/blocks', dependencies=[Depends(auth_dependency)], response_model=Envelope)
+async def select_volume_blocks_by_url(
+    url: str = Query(...),
+    blocks: str = Query(..., description='Comma-separated business blocks, e.g. identity,publication'),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.select_volume_blocks(url=url, blocks=blocks, output_format=output_format)
 
 
 @app.get('/volume/{series_slug}/{volume_slug}/summary', dependencies=[Depends(auth_dependency)], response_model=MachineVolumeSummaryResponse)
@@ -209,6 +336,60 @@ async def get_volume_summary(series_slug: str, volume_slug: str, service: MangaN
 @app.get('/volume/by-url/summary', dependencies=[Depends(auth_dependency)], response_model=MachineVolumeSummaryResponse)
 async def get_volume_summary_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
     return await service.get_volume_summary(url=url)
+
+
+@app.get('/volume/{series_slug}/{volume_slug}/watch', dependencies=[Depends(auth_dependency)], response_model=WatchResponse)
+async def watch_volume(
+    series_slug: str,
+    volume_slug: str,
+    fields: str | None = Query(default=None),
+    previous_fingerprint: str | None = Query(default=None),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.watch_volume(
+        series_slug=series_slug,
+        volume_slug=volume_slug,
+        fields=fields,
+        previous_fingerprint=previous_fingerprint,
+        output_format=output_format,
+    )
+
+
+@app.get('/volume/by-url/watch', dependencies=[Depends(auth_dependency)], response_model=WatchResponse)
+async def watch_volume_by_url(
+    url: str = Query(...),
+    fields: str | None = Query(default=None),
+    previous_fingerprint: str | None = Query(default=None),
+    output_format: Literal['nested', 'flat'] = Query(default='nested', alias='format'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.watch_volume(
+        url=url,
+        fields=fields,
+        previous_fingerprint=previous_fingerprint,
+        output_format=output_format,
+    )
+
+
+@app.get('/volume/{series_slug}/{volume_slug}/value', dependencies=[Depends(auth_dependency)], response_model=FieldValueResponse)
+async def get_volume_field_value(
+    series_slug: str,
+    volume_slug: str,
+    field: str = Query(..., description='Single dotted field path, e.g. publication_date'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.get_volume_field_value(series_slug=series_slug, volume_slug=volume_slug, field=field)
+
+
+@app.get('/volume/{series_slug}/{volume_slug}/publication-date', dependencies=[Depends(auth_dependency)], response_model=FieldValueResponse)
+async def get_volume_publication_date(series_slug: str, volume_slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_volume_field_value(series_slug=series_slug, volume_slug=volume_slug, field='publication_date')
+
+
+@app.get('/volume/{series_slug}/{volume_slug}/isbn-ean', dependencies=[Depends(auth_dependency)], response_model=FieldValueResponse)
+async def get_volume_isbn(series_slug: str, volume_slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_volume_field_value(series_slug=series_slug, volume_slug=volume_slug, field='isbn_ean')
 
 
 @app.get('/compare/series', dependencies=[Depends(auth_dependency)], response_model=ComparisonResponse)
@@ -269,27 +450,18 @@ async def get_volume_news(
     return await service.get_volume_news(series_slug=series_slug, volume_slug=volume_slug, limit=limit)
 
 
-@app.get('/news/volume/by-url', dependencies=[Depends(auth_dependency)], response_model=NewsListResponse)
-async def get_volume_news_by_url(
-    url: str = Query(...),
-    limit: int = Query(default=10, ge=1, le=50),
-    service: MangaNewsService = Depends(get_service),
-):
-    return await service.get_volume_news(url=url, limit=limit)
-
-
 @app.get('/planning', dependencies=[Depends(auth_dependency)], response_model=PlanningResponse)
 async def get_planning(
     section: Literal['manga-vf', 'manga-vo'] = Query(default='manga-vf'),
-    year: int | None = Query(default=None, ge=1900, le=2100),
+    year: int | None = Query(default=None, ge=1900, le=3000),
     month: int | None = Query(default=None, ge=1, le=12),
-    page: int = Query(default=1, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
     publisher: str | None = Query(default=None),
-    q: str | None = Query(default=None, min_length=1),
+    q: str | None = Query(default=None),
     date_from: str | None = Query(default=None),
     date_to: str | None = Query(default=None),
     sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'] = Query(default='date_asc'),
-    limit: int = Query(default=25, ge=1, le=100),
+    limit: int = Query(default=20, ge=1, le=100),
     service: MangaNewsService = Depends(get_service),
 ):
     return await service.get_planning(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 from datetime import UTC, datetime
@@ -207,3 +208,14 @@ def flatten_for_compare(data: dict, prefix: str = '') -> dict[str, object]:
         else:
             flattened[path] = value
     return flattened
+
+
+def format_output_data(data: dict, output_format: str = 'nested') -> dict:
+    if output_format == 'flat':
+        return flatten_for_compare(data)
+    return data
+
+
+def fingerprint_data(data: object) -> str:
+    raw = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()

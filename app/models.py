@@ -233,6 +233,59 @@ class MachineVolumeSummaryResponse(Envelope):
     data: MachineVolumeSummaryData
 
 
+class TimelineEvent(BaseModel):
+    date: str | None = None
+    kind: Literal['last_release', 'next_release', 'news']
+    title: str
+    url: str | None = None
+    category: str | None = None
+
+
+class SeriesTimelineData(BaseModel):
+    schema_version: Literal['series-timeline/v1'] = 'series-timeline/v1'
+    slug: str
+    title: str
+    last_release_date: str | None = None
+    next_release_date: str | None = None
+    has_upcoming_release: bool = False
+    events: list[TimelineEvent] = Field(default_factory=list)
+    source_url: str
+
+
+class SeriesTimelineResponse(Envelope):
+    data: SeriesTimelineData
+
+
+class WatchData(BaseModel):
+    schema_version: Literal['watch/v1'] = 'watch/v1'
+    kind: Literal['series', 'volume']
+    identifier: str
+    fingerprint: str
+    previous_fingerprint: str | None = None
+    changed: bool | None = None
+    watched_fields: list[str] = Field(default_factory=list)
+    watched_data: Any = None
+    checked_at: str
+    source_url: str
+
+
+class WatchResponse(Envelope):
+    data: WatchData
+
+
+class FieldValueData(BaseModel):
+    schema_version: Literal['field-value/v1'] = 'field-value/v1'
+    kind: Literal['series', 'volume']
+    identifier: str
+    field: str
+    value: Any = None
+    source_url: str
+
+
+class FieldValueResponse(Envelope):
+    data: FieldValueData
+
+
 class ComparisonDiff(BaseModel):
     field: str
     left: Any = None

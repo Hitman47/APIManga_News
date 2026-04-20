@@ -23,7 +23,6 @@ API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d
 - provider anime séparé ;
 - enrichissement cross-source ;
 - pagination multi-pages automatisée côté upstream.
-- sélection générique par blocs métier complets (seuls les champs ciblés sont exposés pour l’instant).
 
 ## Variables d'environnement principales
 
@@ -217,6 +216,59 @@ curl --get "http://localhost:8017/compare/volume" \
   --data-urlencode "left_volume_slug=vol-109" \
   --data-urlencode "right_series_slug=One-Piece" \
   --data-urlencode "right_volume_slug=vol-110"
+```
+
+## Nouvelles options utiles pour l'automatisation
+
+### Projection par blocs métier
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/blocks" \
+  --data-urlencode "blocks=identity,release"
+```
+
+```bash
+curl --get "http://localhost:8017/volume/One-Piece/vol-110/blocks" \
+  --data-urlencode "blocks=publication,scores" \
+  --data-urlencode "format=flat"
+```
+
+### Timeline série
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/timeline?news_limit=5"
+```
+
+### Watch / fingerprint pour savoir si quelque chose a changé
+
+Premier appel :
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/watch"
+```
+
+Appel suivant en réutilisant le fingerprint précédent :
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/watch" \
+  --data-urlencode "previous_fingerprint=<fingerprint_precedent>" \
+  --data-urlencode "fields=vf.volumes,next_release_date" \
+  --data-urlencode "format=flat"
+```
+
+### Valeur unique pour les cas ultra simples
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/vf-volumes"
+```
+
+```bash
+curl "http://localhost:8017/volume/One-Piece/vol-110/isbn-ean"
+```
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/value" \
+  --data-urlencode "field=vf.volumes"
 ```
 
 ## Avis sur la sélection partielle
