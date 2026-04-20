@@ -1,6 +1,23 @@
 Tests manuels One Piece pour l'API Manga News
 ============================================
 
+But
+---
+Ce fichier sert de check-list simple et concrète pour vérifier qu'une instance est réellement exploitable.
+
+Il couvre :
+- santé
+- auth publique et admin
+- recherche
+- résolution
+- lookup volume
+- fiches série / volume
+- news
+- planning
+- endpoints admin
+- ETag / 304
+- smoke test batch
+
 Base URL recommandée
 --------------------
 http://localhost:8017/v1
@@ -23,25 +40,46 @@ Règle simple
 - endpoints admin : header Bearer avec ADMIN_TOKEN
 - si pas d'auth chez toi, enlève simplement les headers Authorization
 
+Pré-check conseillé
+-------------------
+1) l'API est démarrée
+2) /v1/health répond
+3) si auth activée, les bons tokens sont définis
+4) si legacy routes sont off, ne teste pas /health sans /v1
+
 Santé
 -----
-curl -sS "$BASE_URL/health"
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/health"
 
 Trouver le tome 91 de One Piece
 -------------------------------
 curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search?q=one%20piece%20tome%2091&kind=volume&mode=all&limit=10"
 
+Attendu : au moins un candidat volume exploitable, avec series_slug et volume_slug.
+
 Résoudre directement le meilleur match du tome 91
 -------------------------------------------------
 curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search/resolve?q=one%20piece%20tome%2091&kind=volume&limit=10"
+
+Attendu : data.best.kind = volume et volume_slug exploitable.
 
 Lookup volume direct par série + numéro
 ---------------------------------------
 curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/lookup/volume?series=One%20Piece&number=91&limit=10"
 
+Attendu : data.volume complet, avec number=91 et number_int=91 si détecté.
+
 Fiche volume 91
 ---------------
 curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/volume/One-Piece/vol-91"
+
+Vérifications conseillées :
+- title présent
+- number = 91
+- number_int = 91
+- publication_date présent si disponible
+- isbn_ean présent si disponible
+- source_url présent
 
 Fiche volume 91 via URL
 -----------------------
@@ -63,9 +101,17 @@ Résoudre la série One Piece
 ---------------------------
 curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search/resolve?q=one%20piece&kind=series&limit=10"
 
+Attendu : data.best.slug exploitable.
+
 Fiche série One Piece
 ---------------------
 curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Edition-originale"
+
+Vérifications conseillées :
+- title présent
+- publisher_fr présent si disponible
+- vf / vo présents si disponibles
+- source_url présent
 
 Fiche série via URL
 -------------------
@@ -123,6 +169,8 @@ curl -i -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Editio
 2) rejoue avec If-None-Match :
 curl -i -sS -H "Authorization: Bearer $TOKEN" -H 'If-None-Match: "<etag-precedent>"' "$BASE_URL/series/One-piece-Edition-originale"
 
+Attendu : 304 si rien n'a changé.
+
 Batch automatisé
 ----------------
 python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN"
@@ -134,3 +182,7 @@ python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --
 Désactiver complètement les fichiers de sortie
 ----------------------------------------------
 python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN" --output-dir ""
+
+Suite projet complète
+---------------------
+pytest

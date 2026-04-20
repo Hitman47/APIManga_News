@@ -2,27 +2,147 @@
 
 API non officielle, auto-hébergeable, qui expose en JSON des données publiques de Manga-News.
 
-## Ce que l'API fait maintenant
+Le projet est pensé pour un usage concret : scripts perso, dashboard, bot, outil de suivi, agent IA, ou backend intermédiaire. La source amont reste du HTML public, donc l’API sert surtout à fournir un contrat JSON stable, cacheable et exploitable.
+
+## Ce que l’API fournit
 
 - contrat canonique sous `/v1/...`
 - routes legacy non versionnées désactivées par défaut
+- auth séparée : `API_TOKEN` pour le public, `ADMIN_TOKEN` pour l’admin
 - cache SQLite persistant
-- cache négatif court pour éviter de retaper en boucle une ressource cassée ou inexistante
-- token public et token admin séparés
-- ETag / `If-None-Match`
+- cache négatif court pour éviter de refrapper en boucle une ressource absente/cassée
+- `ETag` + `If-None-Match` + `304`
 - erreurs machine-readable avec `code` stable
 - pagination structurée sur les endpoints de liste
-- normalisation volume renforcée : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`
-- rate limiting configurable via `.env`, variables d'environnement ou compose
+- normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`
+- rate limiting configurable par `.env`, variables d’environnement ou compose
 - endpoint admin de métriques
-- capture optionnelle du HTML brut lors d'un échec de parsing
-- script de smoke tests prêt à lancer
+- dump HTML optionnel en cas d’échec de parsing
+- smoke tests prêts à lancer
+- OpenAPI / Swagger activables
 
-## Contrat d'API
+## À qui sert cette doc
 
-Utilise uniquement les routes `/v1/...`.
+Cette documentation doit suffire pour :
+
+- lancer l’API localement ou en Docker
+- comprendre le contrat HTTP
+- consommer l’API depuis un script, un autre service ou une IA
+- faire un premier diagnostic si quelque chose casse
+- tester rapidement l’API avec le cas One Piece
+
+## Parcours recommandé
+
+Selon ton besoin, lis dans cet ordre :
+
+1. **Ce README** pour la vue d’ensemble et le démarrage rapide.
+2. **`docs/API_INTEGRATION.md`** pour consommer l’API proprement.
+3. **`docs/DEPLOYMENT_AND_OPERATIONS.md`** pour déployer, configurer et exploiter l’API.
+4. **`docs/USE_CASES_AND_RECIPES.md`** pour des scénarios concrets, humains ou IA.
+5. **`docs/ONE_PIECE_API_TESTS.txt`** pour les tests manuels et le smoke test de bout en bout.
+
+## Démarrage rapide en 5 minutes
+
+### 1) Installer les dépendances
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Sous Windows PowerShell :
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+### 2) Préparer la config
+
+Copie `.env.example` vers `.env`, puis ajuste au minimum :
+
+```env
+API_TOKEN=change-me
+ADMIN_TOKEN=change-me-admin
+ENABLE_DOCS=true
+```
+
+Pour un usage local sans auth, laisse les tokens vides. Pour un service exposé, ne fais pas ça.
+
+### 3) Lancer l’API
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8017
+```
+
+L’API sera disponible sur :
+
+- `http://localhost:8017/v1`
+- docs Swagger : `http://localhost:8017/docs`
+- OpenAPI JSON : `http://localhost:8017/openapi.json`
+
+### 4) Vérifier que ça répond
+
+Sans auth :
+
+```bash
+curl http://localhost:8017/v1/health
+```
+
+Avec auth :
+
+```bash
+curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8017/v1/health
+```
+
+### 5) Faire une vraie requête utile
+
+```bash
+curl -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/lookup/volume?series=One%20Piece&number=91"
+```
+
+## Démarrage rapide avec Docker Compose
+
+```bash
+docker compose up -d --build
+```
+
+Par défaut, le port hôte est `8017`.
+
+### Variables importantes exposées dans le compose
+
+Les réglages d’exploitation utiles sont pilotables sans modifier le code :
+
+- `API_TOKEN`
+- `ADMIN_TOKEN`
+- `ENABLE_DOCS`
+- `ENABLE_LEGACY_ROUTES`
+- `DEBUG_CAPTURE_HTML_ON_ERROR`
+- `DEBUG_HTML_DUMP_DIR`
+- `NEGATIVE_CACHE_ENABLED`
+- `NEGATIVE_CACHE_TTL_SECONDS`
+- `RATE_LIMIT_ENABLED`
+- `RATE_LIMIT_REQUESTS`
+- `RATE_LIMIT_WINDOW_SECONDS`
+- `RATE_LIMIT_SCOPE`
+- `RATE_LIMIT_INCLUDE_ADMIN`
+- `RATE_LIMIT_EXEMPT_PATHS`
+- `REQUEST_MAX_RETRIES`
+- `REQUEST_BACKOFF_SECONDS`
+
+Le détail d’exploitation est documenté dans `docs/DEPLOYMENT_AND_OPERATIONS.md`.
+
+## Contrat HTTP : ce qu’il faut retenir
+
+### Base URL
+
+Utilise **uniquement** les routes `/v1/...`.
 
 Exemples :
+
 - `/v1/health`
 - `/v1/search`
 - `/v1/search/resolve`
@@ -36,7 +156,7 @@ Exemples :
 
 ### Pourquoi il y avait des doublons `/v1/...` et non versionnés
 
-Il n'y avait pas de différence métier. Les routes non versionnées servaient uniquement de compatibilité ancienne. Elles sont maintenant bloquées par défaut.
+Il n’y avait pas de différence métier. Les routes non versionnées servaient uniquement à la rétrocompatibilité. Elles sont maintenant désactivées par défaut.
 
 Pour les réactiver explicitement :
 
@@ -44,70 +164,42 @@ Pour les réactiver explicitement :
 ENABLE_LEGACY_ROUTES=true
 ```
 
-En pratique, pour un nouveau client, il n'y a aucune bonne raison d'utiliser autre chose que `/v1`.
+Pour un nouveau client, il n’y a aucune bonne raison d’utiliser autre chose que `/v1`.
 
-## Installation locale
+### Enveloppe standard
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8017
+La majorité des endpoints renvoient une enveloppe commune :
+
+```json
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/...",
+  "cached": false,
+  "fetched_at": "2026-04-20T12:00:00+00:00",
+  "cache_expires_at": "2026-04-21T12:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "...",
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "returned": 1,
+    "total": 1,
+    "has_more": false
+  },
+  "data": {}
+}
 ```
 
-API disponible sur `http://localhost:8017`.
+`pagination` est présent sur les endpoints de liste.
 
-## Docker Compose
-
-```bash
-docker compose up -d --build
-```
-
-### Changements explicites faits dans le compose
-
-J'ai ajouté ces variables dans `docker-compose.yml` :
-- `ADMIN_TOKEN`
-- `ENABLE_LEGACY_ROUTES`
-- `DEBUG_CAPTURE_HTML_ON_ERROR`
-- `DEBUG_HTML_DUMP_DIR`
-- `NEGATIVE_CACHE_ENABLED`
-- `NEGATIVE_CACHE_TTL_SECONDS`
-- `RATE_LIMIT_ENABLED`
-- `RATE_LIMIT_REQUESTS`
-- `RATE_LIMIT_WINDOW_SECONDS`
-- `RATE_LIMIT_SCOPE`
-- `RATE_LIMIT_INCLUDE_ADMIN`
-- `RATE_LIMIT_EXEMPT_PATHS`
-
-Pourquoi :
-- avant, une partie des comportements utiles était cachée dans le code ;
-- maintenant, tout ce qui compte côté exploitation est réglable par stack ou `.env`.
-
-## Variables d'environnement utiles
-
-Voir `.env.example` pour la liste complète.
-
-Les plus importantes :
-- `API_TOKEN` : token Bearer des endpoints publics
-- `ADMIN_TOKEN` : token Bearer des endpoints admin ; si vide, fallback sur `API_TOKEN`
-- `DB_PATH` : chemin du cache SQLite
-- `CACHE_TTL_*` : TTL par famille de données
-- `CACHE_STALE_GRACE_SECONDS` : durée d'utilisation du stale cache en fallback
-- `NEGATIVE_CACHE_ENABLED` : active le cache négatif
-- `NEGATIVE_CACHE_TTL_SECONDS` : durée du cache négatif
-- `DEBUG_CAPTURE_HTML_ON_ERROR` : sauvegarde le HTML brut lors d'un échec de parsing
-- `DEBUG_HTML_DUMP_DIR` : dossier de dump du HTML de debug
-- `REQUEST_MAX_RETRIES` et `REQUEST_BACKOFF_SECONDS` : robustesse réseau vers Manga-News
-- `ENABLE_LEGACY_ROUTES` : réactive les routes non versionnées
-- `RATE_LIMIT_ENABLED` : active le rate limiting
-- `RATE_LIMIT_REQUESTS` et `RATE_LIMIT_WINDOW_SECONDS` : quota et fenêtre
-- `RATE_LIMIT_SCOPE` : `ip`, `token`, `ip_or_token`
-- `RATE_LIMIT_INCLUDE_ADMIN` : inclure ou non les routes admin
-- `RATE_LIMIT_EXEMPT_PATHS` : chemins exemptés
-
-## Headers utiles
+### Headers utiles
 
 Les réponses peuvent exposer :
+
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
 - `X-Cache-Status: MISS|HIT|STALE`
@@ -117,7 +209,7 @@ Les réponses peuvent exposer :
 - `X-RateLimit-Reset`
 - `Retry-After` si `429`
 
-## Format d'erreur
+### Format d’erreur
 
 ```json
 {
@@ -128,6 +220,7 @@ Les réponses peuvent exposer :
 ```
 
 Codes principaux :
+
 - `INVALID_REQUEST`
 - `AUTH_REQUIRED`
 - `RESOURCE_NOT_FOUND`
@@ -136,229 +229,160 @@ Codes principaux :
 - `RATE_LIMITED`
 - `ENDPOINT_NOT_FOUND`
 
-## Pagination structurée
-
-Les endpoints de liste renvoient un bloc `pagination`.
-
-```json
-{
-  "pagination": {
-    "page": 1,
-    "limit": 10,
-    "returned": 10,
-    "total": 34,
-    "has_more": true
-  }
-}
-```
-
-Appliqué à :
-- `/v1/search`
-- `/v1/search/resolve`
-- `/v1/news/*`
-- `/v1/planning`
-- `/v1/lookup/volume`
-
-## Normalisation volume
-
-Les payloads volume exposent notamment :
-
-```json
-{
-  "number": "91",
-  "number_int": 91,
-  "edition_label": "edition_originale",
-  "is_special": false,
-  "is_one_shot": null
-}
-```
-
-## Cache négatif
-
-Le cache négatif évite de re-solliciter immédiatement Manga-News quand une ressource est :
-- inexistante
-- temporairement cassée
-- impossible à parser
-
-C'est volontairement court. Le but n'est pas de masquer durablement un problème, juste d'éviter les rafales inutiles.
-
-Réglage minimal :
-
-```env
-NEGATIVE_CACHE_ENABLED=true
-NEGATIVE_CACHE_TTL_SECONDS=120
-```
-
-## Capture HTML de debug sur erreur de parsing
-
-Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, l'API sauvegarde :
-- le HTML brut ayant échoué
-- un fichier JSON compagnon avec l'URL, le parser et l'erreur
-
-Exemple :
-
-```env
-DEBUG_CAPTURE_HTML_ON_ERROR=true
-DEBUG_HTML_DUMP_DIR=/tmp/manga-news-debug-html
-```
-
-Usage réel :
-- tu actives ça seulement quand Manga-News change son HTML ou quand un parser casse ;
-- tu regardes le dump ;
-- tu corriges le parseur ;
-- tu peux ensuite le désactiver.
-
-## Endpoint admin de métriques
-
-Route :
-- `GET /v1/admin/metrics`
-
-Cette route expose des compteurs simples, utiles en exploitation :
-- réponses HTTP par classe
-- hits/misses de cache
-- stale fallbacks
-- hits de cache négatif
-- erreurs de parsing
-- erreurs upstream
-- nombre de `429`
-- ratios dérivés (`cache_hit_ratio`, `negative_cache_hit_ratio`, `upstream_error_ratio`)
-
-## Endpoint admin de cache
-
-Routes :
-- `GET /v1/admin/cache/stats`
-- `POST /v1/admin/cache/invalidate`
-
-`/v1/admin/cache/stats` expose :
-- stats du cache principal
-- stats du cache négatif
-- stats des snapshots watch
-
-## Requêtes rapides
+## Endpoints principaux
 
 ### Santé
 
 ```bash
-curl http://localhost:8017/v1/health
+curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8017/v1/health
 ```
 
-### Résoudre un volume directement
+### Recherche libre
 
 ```bash
-curl "http://localhost:8017/v1/lookup/volume?series=One%20Piece&number=91"
+curl -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/search?q=one%20piece&kind=series&mode=all&limit=10"
 ```
 
-### Charger une série
+### Résolution directe d’un volume par série + numéro
 
 ```bash
-curl "http://localhost:8017/v1/series/One-piece-Edition-originale"
+curl -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/lookup/volume?series=One%20Piece&number=91"
 ```
 
-### Charger un volume
+### Fiche série
 
 ```bash
-curl "http://localhost:8017/v1/volume/One-Piece/vol-91"
+curl -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/series/One-piece-Edition-originale"
+```
+
+### Fiche volume
+
+```bash
+curl -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/volume/One-Piece/vol-91"
+```
+
+### News globales
+
+```bash
+curl -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/news/global?limit=10"
 ```
 
 ### Planning filtré
 
 ```bash
-curl --get "http://localhost:8017/v1/planning" \
+curl -G -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/planning" \
   --data-urlencode "section=manga-vf" \
-  --data-urlencode "publisher=Glénat" \
   --data-urlencode "q=one piece" \
   --data-urlencode "sort=date_desc" \
   --data-urlencode "limit=10"
 ```
 
-## Smoke tests One Piece
+## Use cases fréquents
 
-Fichiers utiles :
-- `docs/ONE_PIECE_API_TESTS.txt`
-- `scripts/run_api_smoke_tests.py`
+### Cas 1 — Je connais déjà la série et le numéro
 
-### 1) Démarrer l'API
+Utilise `/v1/lookup/volume`.
+
+C’est le chemin le plus propre. Tu évites un `search/resolve` manuel côté client.
+
+### Cas 2 — Je n’ai qu’un titre flou
+
+1. `GET /v1/search` ou `GET /v1/search/resolve`
+2. récupère `slug`, `series_slug` ou `volume_slug`
+3. recharge la ressource canonique avec `/series/...` ou `/volume/...`
+
+### Cas 3 — Je veux seulement quelques champs
+
+Les endpoints `/series/...` et `/volume/...` acceptent `blocks`, `fields` et `include_raw_sections`.
+
+Exemple série :
 
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8017
+curl -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/series/One-piece-Edition-originale?blocks=editions,stats&fields=title,vf.volumes"
 ```
 
-ou :
+Exemple volume :
 
 ```bash
-docker compose up -d --build
+curl -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/volume/One-Piece/vol-91?blocks=release,scores&fields=title,number_int"
 ```
 
-### 2) Vérifier que l'API répond
+### Cas 4 — Je veux éviter les transferts inutiles
+
+Stocke l’`ETag` puis renvoie `If-None-Match`.
 
 ```bash
-curl http://localhost:8017/v1/health
+curl -i -H "Authorization: Bearer $API_TOKEN" \
+  "http://localhost:8017/v1/series/One-piece-Edition-originale"
 ```
 
-### 3) Lancer le batch de tests
-
-Linux / macOS :
+Puis :
 
 ```bash
-export BASE_URL="http://localhost:8017/v1"
-export TOKEN="ton_token_public"
-export ADMIN_TOKEN="ton_token_admin"
+curl -i -H "Authorization: Bearer $API_TOKEN" \
+  -H 'If-None-Match: "<etag-precedent>"' \
+  "http://localhost:8017/v1/series/One-piece-Edition-originale"
+```
+
+## Smoke tests et validation
+
+### Tests HTTP batch
+
+```bash
 python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN"
 ```
 
-Windows PowerShell :
-
-```powershell
-$env:BASE_URL = "http://localhost:8017/v1"
-$env:TOKEN = "ton_token_public"
-$env:ADMIN_TOKEN = "ton_token_admin"
-python .\scripts\run_api_smoke_tests.py --base-url $env:BASE_URL --token $env:TOKEN --admin-token $env:ADMIN_TOKEN
-```
-
-### 4) Où lire les sorties
-
-Par défaut, le script écrit des fichiers JSON dans `api_test_outputs/`.
-
-S'il n'a pas les droits d'écriture, il tente automatiquement :
-- le dossier demandé
-- un dossier à côté du script
-- le dossier temporaire système
-
-Tu peux aussi forcer le dossier :
+### Si le dossier de sortie n’est pas inscriptible
 
 ```bash
 python scripts/run_api_smoke_tests.py --output-dir /tmp/api_test_outputs
 ```
 
-Ou désactiver complètement l'écriture des sorties :
+ou sans fichier de sortie :
 
 ```bash
 python scripts/run_api_smoke_tests.py --output-dir ""
 ```
 
-### 5) Code retour du script
-
-- `0` : tout passe
-- `1` : au moins un test échoue
-
-### 6) Lancer aussi la suite Note: les tests asynchrones sont pris en charge directement via `pytest-asyncio`, déjà inclus dans `requirements.txt`. Aucun plugin supplémentaire n’est à installer si tu fais `pip install -r requirements.txt`.
-
-pytest
+### Suite projet complète
 
 ```bash
 pytest
 ```
 
-Le script de smoke test vérifie le contrat HTTP. `pytest` vérifie le projet.
+Les tests async sont pris en charge par `pytest-asyncio`, déjà inclus dans `requirements.txt`.
 
-## OpenAPI
+## Si tu veux donner la doc à quelqu’un ou à une IA
 
-OpenAPI et `/docs` montrent uniquement les routes `/v1` quand les routes legacy sont désactivées.
+Commence par fournir :
 
-## Ce qu'il faut retenir
+- ce `README.md`
+- `docs/API_INTEGRATION.md`
+- `docs/DEPLOYMENT_AND_OPERATIONS.md`
+- `docs/USE_CASES_AND_RECIPES.md`
 
-- utilise `/v1` partout
-- sépare `API_TOKEN` et `ADMIN_TOKEN`
-- active le rate limit si l'API est exposée à d'autres outils
-- garde le cache négatif court
-- n'active le dump HTML que pour diagnostiquer un parseur cassé
+C’est suffisant pour :
+
+- comprendre les endpoints
+- savoir comment s’authentifier
+- intégrer le cache et les ETag
+- gérer les erreurs proprement
+- exploiter les endpoints admin
+- diagnostiquer un problème de parsing ou de quota
+
+## Limite importante à garder en tête
+
+L’API fournit un contrat JSON stable, mais la source amont reste du HTML public. Si Manga-News change fortement son HTML, les parseurs peuvent devoir être ajustés. Les mécanismes utiles pour diagnostiquer ça existent déjà :
+
+- métriques admin
+- cache négatif court
+- dump HTML sur erreur de parsing
+- tests de fixtures
