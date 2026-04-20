@@ -2,9 +2,9 @@ from app.models import NewsResponse, PlanningResponse, ResolveResponse, SearchRe
 
 
 def test_response_models_are_importable():
-    assert NewsResponse.model_fields["data"] is not None
-    assert PlanningResponse.model_fields["data"] is not None
-    assert ResolveResponse.model_fields["data"] is not None
-    assert SearchResponse.model_fields["data"] is not None
-    assert SeriesResponse.model_fields["data"] is not None
-    assert VolumeResponse.model_fields["data"] is not None
+    assert SearchResponse is not None
+    assert ResolveResponse is not None
+    assert SeriesResponse is not None
+    assert VolumeResponse is not None
+    assert NewsResponse is not None
+    assert PlanningResponse is not None

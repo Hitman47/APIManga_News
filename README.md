@@ -1,10 +1,11 @@
 # Manga News Private API
 
-API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d'interroger Manga News avec un cache SQLite et une authentification Bearer optionnelle.
+API privée, légère et auto-hébergeable, conçue pour servir d'interface stable entre Manga News et un autre projet. Elle met en cache les réponses dans SQLite, supporte une authentification Bearer optionnelle, expose une doc OpenAPI via FastAPI et fournit un contrat JSON suffisamment stable pour être consommé par un autre service ou une autre IA.
 
-## Ce que fait cette V1
+## Fonctionnalités disponibles
 
-- recherche de séries et volumes ;
+- recherche de séries et de volumes ;
+- résolution directe du meilleur match via `/search/resolve` ;
 - récupération d'une fiche série ;
 - récupération d'une fiche volume ;
 - récupération des news globales via RSS ;
@@ -13,15 +14,16 @@ API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d
 - récupération du planning manga VF et manga VO ;
 - filtres locaux sur le planning : éditeur, plage de dates, recherche textuelle, tri ;
 - cache SQLite persistant avec fallback sur cache périmé si l'upstream casse temporairement ;
-- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc` ;
-- endpoints complémentaires pour les fiches série : `related`, `editions` ;
-- projection partielle par `blocks` et `fields` sur les endpoints série/volume.
+- support `ETag` / `If-None-Match` / `304 Not Modified` ;
+- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc`.
 
-## Ce que cette V1 ne fait pas encore
+## Ce que cette version ne fait pas encore
 
 - provider anime séparé ;
 - enrichissement cross-source ;
-- pagination multi-pages automatisée côté upstream.
+- pagination multi-pages automatisée côté upstream ;
+- webhooks ;
+- endpoints admin de cache.
 
 ## Variables d'environnement principales
 
@@ -52,40 +54,69 @@ docker compose up -d --build
 
 L'API sera alors disponible sur `http://localhost:8017`.
 
-## GitHub / GHCR
+## Documentation
 
-Fichiers ajoutés pour un dépôt GitHub propre et une publication GHCR automatique :
+- Swagger UI : `http://localhost:8017/docs`
+- ReDoc : `http://localhost:8017/redoc`
+- Guide d'intégration détaillé : [`docs/API_INTEGRATION.md`](docs/API_INTEGRATION.md)
 
-- `.github/workflows/ci.yml` : lance les tests sur push / pull request ;
-- `.github/workflows/publish-ghcr.yml` : build multi-arch `linux/amd64` + `linux/arm64` et push vers GHCR ;
-- `.github/workflows/manifest.yml` : inspecte le manifest publié et stocke `manifest.json` en artifact ;
-- `.dockerignore` : évite d'envoyer les fichiers inutiles au build Docker ;
-- `.gitignore` : ignore l'environnement local, le cache et la base SQLite.
+## Contrat de réponse global
 
-Image publiée par défaut : `ghcr.io/<owner>/<repo>` en minuscules.
+Tous les endpoints métier renvoient une enveloppe JSON de ce type :
 
-Tags générés automatiquement par le workflow de publication :
+```json
+{
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/...",
+  "cached": true,
+  "fetched_at": "2026-04-20T12:00:00+00:00",
+  "cache_expires_at": "2026-04-21T12:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "schema_version": "1.0",
+  "fingerprint": "<sha256>",
+  "data": {}
+}
+```
 
-- `latest` sur la branche par défaut ;
-- tag de branche ;
-- tag Git ;
-- semver (`1.2.3`, `1.2`) si le tag Git suit `v1.2.3` ;
-- tag SHA court.
+### Sens des champs transverses
 
-### Secrets et permissions
+- `ok` : succès logique ;
+- `found` : vrai si la ressource ou la liste a produit un résultat exploitable ;
+- `source` : toujours `manga_news` actuellement ;
+- `source_url` : URL Manga News utilisée ;
+- `cached` : réponse issue du cache SQLite ;
+- `fetched_at` : date de récupération/source cache ;
+- `cache_expires_at` : fin de fraîcheur du cache ;
+- `partial` : vrai si un cache périmé a été servi après échec upstream ;
+- `warnings` : messages non bloquants ;
+- `schema_version` : version de contrat de l'enveloppe ;
+- `fingerprint` : hash stable du contenu `data`, réutilisé pour les ETag ;
+- `data` : charge utile spécifique à l'endpoint.
 
-Pour publier vers GHCR depuis GitHub Actions, aucun secret supplémentaire n'est nécessaire tant que le package est publié par le dépôt lui-même : le workflow utilise `GITHUB_TOKEN`.
+## ETag / 304
 
-Pour **pull une image privée depuis Portainer, Docker Compose ou une autre machine**, prévois en revanche un **PAT GitHub classic** avec au minimum `read:packages`.
+Les endpoints métier renvoient :
 
-### Déclenchement conseillé
+- `ETag: "<fingerprint>"`
+- `X-Data-Fingerprint: <fingerprint>`
 
-- `ci.yml` tourne sur push / pull request ;
-- `publish-ghcr.yml` ne publie qu'après un `ci` vert sur `main` ;
-- `workflow_dispatch` permet une exécution manuelle de publication.
+Si le client renvoie ensuite :
 
+```http
+If-None-Match: "<fingerprint>"
+```
 
-## Exemples curl
+et que les données n'ont pas changé, l'API répond :
+
+- `304 Not Modified`
+- sans corps JSON
+
+C'est utile pour éviter de retraiter une même fiche côté autre projet.
+
+## Endpoints principaux
 
 ### Health
 
@@ -97,6 +128,12 @@ curl http://localhost:8017/health
 
 ```bash
 curl "http://localhost:8017/search?q=one%20piece&kind=series&mode=all&limit=5"
+```
+
+### Résolution directe du meilleur match
+
+```bash
+curl "http://localhost:8017/search/resolve?q=one%20piece&kind=series"
 ```
 
 ### Fiche série via slug
@@ -118,6 +155,13 @@ curl --get "http://localhost:8017/series/by-url" \
 curl "http://localhost:8017/volume/One-Piece/vol-110"
 ```
 
+### Fiche volume via URL
+
+```bash
+curl --get "http://localhost:8017/volume/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-110"
+```
+
 ### News globales
 
 ```bash
@@ -130,18 +174,11 @@ curl "http://localhost:8017/news/global?limit=10"
 curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
 ```
 
-### Avec Bearer token
+### News d'un volume
 
 ```bash
-curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/search?q=one%20piece"
+curl "http://localhost:8017/news/volume/One-Piece/vol-110?limit=10"
 ```
-
-## Notes de conception
-
-- L'API repose sur le HTML public et le flux RSS de Manga News. C'est un usage privé ; ne t'en sers pas pour republier massivement leur contenu.
-- Le cache persistant limite les appels et réduit le risque de casser ton automatisation sur une panne temporaire du site.
-- Les parsers sont volontairement tolérants : beaucoup de logique est basée sur les libellés textuels visibles plutôt que sur des sélecteurs CSS trop fragiles.
-
 
 ### Planning manga VF
 
@@ -156,35 +193,36 @@ curl --get "http://localhost:8017/planning" \
   --data-urlencode "sort=date_asc"
 ```
 
-### Manifest GHCR
-
-Après publication, le workflow `manifest.yml` peut inspecter l'image publiée et produire un `manifest.json` téléchargeable depuis les artifacts GitHub Actions. C'est utile pour vérifier qu'un manifest multi-arch a bien été généré.
-
-
-## Endpoints additionnels
-
-### Fiche série avec projection partielle
+### Avec Bearer token
 
 ```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
-  --data-urlencode "fields=title,vf.volumes"
+curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/search?q=one%20piece"
 ```
 
-### Blocs d'une fiche série
+## Notes d'intégration
 
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
-  --data-urlencode "blocks=editions,stats"
-```
+- depuis la machine hôte : `http://localhost:8017`
+- depuis un autre conteneur Docker sur le même réseau : `http://manga-news-api:8000`
+- si `API_TOKEN` est défini, tous les appels doivent inclure `Authorization: Bearer <token>`
+- pour une intégration pilotée par un autre service, préfère en général :
+  1. `/search/resolve`
+  2. puis `/series/{slug}` ou `/volume/{series_slug}/{volume_slug}`
+- pour économiser du traitement côté client, exploite `ETag` et `If-None-Match`.
 
-### Liens associés d'une série
+## GitHub / GHCR
 
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/related"
-```
+Fichiers utiles :
 
-### Editions VF/VO d'une série
+- `.github/workflows/ci.yml` : lance les tests ;
+- `.github/workflows/publish-ghcr.yml` : build multi-arch `linux/amd64` + `linux/arm64` et push vers GHCR ;
+- `.github/workflows/manifest.yml` : inspecte le manifest publié ;
+- `.dockerignore` : évite d'envoyer les fichiers inutiles au build Docker ;
+- `.gitignore` : ignore l'environnement local, le cache et la base SQLite.
 
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
-```
+Image publiée par défaut : `ghcr.io/<owner>/<repo>` en minuscules.
+
+### Secrets et permissions
+
+Pour publier vers GHCR depuis GitHub Actions, le workflow utilise `GITHUB_TOKEN`.
+
+Pour pull une image privée depuis Portainer, Docker Compose ou une autre machine, prévois un PAT GitHub classic avec au minimum `read:packages`.
