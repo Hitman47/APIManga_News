@@ -7,19 +7,25 @@ http://localhost:8017
 Si API_TOKEN est défini, ajouter :
 Authorization: Bearer <token>
 
+Astuce :
+- les payloads JSON figés correspondant aux principaux cas sont dans `docs/examples/`
+- la validation automatique doc+contrat est dans `python scripts/validate_contract_and_docs.py`
+
 1) Health
 ---------
 curl http://localhost:8017/health
 
+Exemple figé : docs/examples/health_ok.json
+
 2) Résoudre la série One Piece
 ------------------------------
-curl --get "http://localhost:8017/search/resolve" \
-  --data-urlencode "q=one piece" \
-  --data-urlencode "kind=series"
+curl --get "http://localhost:8017/search/resolve"   --data-urlencode "q=one piece"   --data-urlencode "kind=series"
 
 Attendu :
 - data.best.kind == "series"
 - data.best.slug proche de "One-piece-Edition-originale"
+
+Exemple figé : docs/examples/search_resolve_series_one_piece.json
 
 3) Charger la fiche série
 -------------------------
@@ -31,10 +37,11 @@ Attendu :
 - vf / vo présents ou partiellement présents
 - headers ETag et X-Data-Fingerprint présents
 
+Exemple figé : docs/examples/series_one_piece.json
+
 4) Charger une projection légère de la série
 --------------------------------------------
-curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
-  --data-urlencode "fields=title,vf.volumes,next_release_date"
+curl --get "http://localhost:8017/series/One-piece-Edition-originale"   --data-urlencode "fields=title,vf.volumes,next_release_date"
 
 Attendu :
 - data.title présent
@@ -49,11 +56,11 @@ Attendu :
 - data.vf ou data.vo présents
 - items listés si la page Manga News correspondante existe
 
+Exemple figé : docs/examples/series_editions_one_piece_all.json
+
 6) Résoudre un volume
 ---------------------
-curl --get "http://localhost:8017/search/resolve" \
-  --data-urlencode "q=one piece tome 110" \
-  --data-urlencode "kind=volume"
+curl --get "http://localhost:8017/search/resolve"   --data-urlencode "q=one piece tome 110"   --data-urlencode "kind=volume"
 
 Attendu :
 - data.best.kind == "volume"
@@ -68,6 +75,8 @@ Attendu :
 - publication_date et isbn_ean présents si disponibles
 - headers ETag et X-Data-Fingerprint présents
 
+Exemple figé : docs/examples/volume_one_piece_110.json
+
 8) Tester un 304 sur la série
 -----------------------------
 - récupérer l'ETag sur /series/One-piece-Edition-originale
@@ -81,15 +90,13 @@ Attendu :
 ---------------------------
 curl "http://localhost:8017/news/global?limit=5"
 
+Exemple figé : docs/examples/news_global_one_piece_sample.json
+
 10) Tester le planning
 ----------------------
-curl --get "http://localhost:8017/planning" \
-  --data-urlencode "section=manga-vf" \
-  --data-urlencode "year=2026" \
-  --data-urlencode "month=4" \
-  --data-urlencode "publisher=Glénat" \
-  --data-urlencode "sort=date_asc" \
-  --data-urlencode "limit=25"
+curl --get "http://localhost:8017/planning"   --data-urlencode "section=manga-vf"   --data-urlencode "year=2026"   --data-urlencode "month=4"   --data-urlencode "publisher=Glénat"   --data-urlencode "sort=date_asc"   --data-urlencode "limit=25"
+
+Exemple figé : docs/examples/planning_manga_vf_april_2026.json
 
 11) Ouvrir l'OpenAPI
 --------------------
@@ -97,7 +104,12 @@ curl --get "http://localhost:8017/planning" \
 - http://localhost:8017/redoc
 - http://localhost:8017/openapi.json
 
+12) Lancer la validation doc + contrat
+--------------------------------------
+python scripts/validate_contract_and_docs.py
+
 But du test :
 - vérifier que les routes existent ;
 - vérifier que les payloads sont cohérents ;
-- vérifier que l'OpenAPI est suffisante pour guider un utilisateur ou une IA.
+- vérifier que l'OpenAPI est suffisante pour guider un utilisateur ou une IA ;
+- vérifier que la documentation et les exemples JSON ne divergent pas du code.

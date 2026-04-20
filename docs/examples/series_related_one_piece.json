@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
+  "cached": true,
+  "fetched_at": "2026-04-20T12:00:00+00:00",
+  "cache_expires_at": "2026-04-21T12:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "fp-series-related-one-piece",
+  "pagination": null,
+  "data": {
+    "title": "One Piece",
+    "related": {
+      "series": [
+        {
+          "title": "One Piece Magazine",
+          "url": "https://www.manga-news.com/index.php/serie/One-piece-Magazine",
+          "kind": "series"
+        }
+      ],
+      "volumes": [
+        {
+          "title": "One Piece Vol.110",
+          "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-110",
+          "kind": "volume"
+        }
+      ],
+      "anime": [
+        {
+          "title": "One Piece (anime)",
+          "url": "https://www.manga-news.com/index.php/serie-vo/One-Piece-anime",
+          "kind": "anime"
+        }
+      ],
+      "drama": [],
+      "dossiers": [],
+      "univers": [],
+      "external": [],
+      "misc": []
+    },
+    "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+  }
+}

@@ -1,21 +1,23 @@
 # Déploiement et exploitation
 
-Ce document couvre la partie opérateur : lancement, configuration, cache, logs, quota, debug, diagnostics.
+Ce document couvre la partie opérateur : lancement, configuration, cache, retries, diagnostic et validation locale.
 
 ## 1. Modes de lancement
 
-## 1.1 Local
+### 1.1 Local
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 uvicorn app.main:app --host 0.0.0.0 --port 8017 --reload
 ```
 
-## 1.2 Docker Compose
+### 1.2 Docker Compose
 
 ```bash
+cp .env.example .env
 docker compose up -d --build
 ```
 
@@ -32,47 +34,23 @@ docker compose down
 docker compose up -d --build
 ```
 
-## 2. Variables d’environnement importantes
+## 2. Variables d'environnement utiles aujourd'hui
 
-Toutes les variables sont dans `.env.example`. Ci-dessous, les plus utiles à connaître rapidement.
+Toutes les variables déclarées vivent dans `.env.example`, mais toutes n'ont pas la même importance opérationnelle.
 
-## 2.1 Identité et docs
+### 2.1 Réglages réellement actifs et utiles
 
 - `APP_NAME`
 - `APP_ENV`
 - `LOG_LEVEL`
-- `LOG_FORMAT=text|json`
-- `ENABLE_DOCS=true|false`
-- `ENABLE_LEGACY_ROUTES=true|false`
-
-## 2.2 Auth
-
-- `API_TOKEN`
-- `ADMIN_TOKEN`
-
-Règle :
-
-- endpoints publics -> `API_TOKEN`
-- endpoints admin -> `ADMIN_TOKEN`
-- si `ADMIN_TOKEN` est vide -> fallback sur `API_TOKEN`
-
-## 2.3 Réseau vers Manga-News
-
+- `LOG_FORMAT`
 - `MANGA_NEWS_BASE_URL`
 - `USER_AGENT`
+- `API_TOKEN`
+- `DB_PATH`
 - `REQUEST_TIMEOUT_SECONDS`
 - `REQUEST_MAX_RETRIES`
 - `REQUEST_BACKOFF_SECONDS`
-
-Utilité réelle :
-
-- `REQUEST_TIMEOUT_SECONDS` : temps max d’attente d’une requête amont
-- `REQUEST_MAX_RETRIES` : nombre de retries sur erreurs réseau/HTTP éligibles
-- `REQUEST_BACKOFF_SECONDS` : base du backoff exponentiel
-
-## 2.4 Cache
-
-- `DB_PATH`
 - `CACHE_STALE_GRACE_SECONDS`
 - `CACHE_TTL_SEARCH_SECONDS`
 - `CACHE_TTL_SERIES_SECONDS`
@@ -80,323 +58,166 @@ Utilité réelle :
 - `CACHE_TTL_NEWS_GLOBAL_SECONDS`
 - `CACHE_TTL_NEWS_SERIES_SECONDS`
 - `CACHE_TTL_PLANNING_SECONDS`
+- `SEARCH_SCORE_THRESHOLD`
+- `DEFAULT_LIMIT`
+- `MAX_LIMIT`
+- `ENABLE_DOCS`
 
-### Lecture rapide
+### 2.2 Réglages présents dans la config mais non exposés comme feature publique aujourd'hui
 
-- `search` et `series` : TTL d’environ 24h par défaut
-- `volume` : TTL plus long, environ 7 jours
-- `news/planning` : TTL plus court
-- `CACHE_STALE_GRACE_SECONDS` : combien de temps un cache expiré peut encore servir de fallback si l’upstream casse
-
-## 2.5 Cache négatif
-
+- `ADMIN_TOKEN`
+- `ENABLE_LEGACY_ROUTES`
+- `DEBUG_CAPTURE_HTML_ON_ERROR`
+- `DEBUG_HTML_DUMP_DIR`
 - `NEGATIVE_CACHE_ENABLED`
 - `NEGATIVE_CACHE_TTL_SECONDS`
-
-Utilité : éviter de refrapper immédiatement une ressource absente ou cassée.
-
-À activer presque toujours. TTL court recommandé.
-
-## 2.6 Rate limiting
-
 - `RATE_LIMIT_ENABLED`
 - `RATE_LIMIT_REQUESTS`
 - `RATE_LIMIT_WINDOW_SECONDS`
-- `RATE_LIMIT_SCOPE=ip|token|ip_or_token`
-- `RATE_LIMIT_INCLUDE_ADMIN=true|false`
-- `RATE_LIMIT_EXEMPT_PATHS=/openapi.json,/docs,...`
+- `RATE_LIMIT_SCOPE`
+- `RATE_LIMIT_INCLUDE_ADMIN`
+- `RATE_LIMIT_EXEMPT_PATHS`
 
-### Recommandation simple
+Tu peux les voir dans la config, mais ils ne correspondent pas aujourd'hui à des routes admin publiques ou à un middleware activé dans `app.main`.
 
-Pour un usage perso ou petit outil :
+## 3. Recommandations simples
 
-```env
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_REQUESTS=60
-RATE_LIMIT_WINDOW_SECONDS=60
-RATE_LIMIT_SCOPE=ip_or_token
-RATE_LIMIT_INCLUDE_ADMIN=false
-```
-
-## 2.7 Debug parsing
-
-- `DEBUG_CAPTURE_HTML_ON_ERROR`
-- `DEBUG_HTML_DUMP_DIR`
-
-À activer uniquement si tu suspectes une casse HTML côté Manga-News.
-
-## 3. Exemples de configuration
-
-## 3.1 Profil local simple
+### 3.1 Profil local simple
 
 ```env
 API_TOKEN=
-ADMIN_TOKEN=
 ENABLE_DOCS=true
-LOG_FORMAT=text
-RATE_LIMIT_ENABLED=false
-NEGATIVE_CACHE_ENABLED=true
-DEBUG_CAPTURE_HTML_ON_ERROR=false
+LOG_LEVEL=INFO
 ```
 
-## 3.2 Profil serveur privé raisonnable
+### 3.2 Profil serveur privé raisonnable
 
 ```env
-API_TOKEN=replace-me-public
-ADMIN_TOKEN=replace-me-admin
+API_TOKEN=replace-me
 ENABLE_DOCS=true
-LOG_FORMAT=json
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_REQUESTS=60
-RATE_LIMIT_WINDOW_SECONDS=60
-RATE_LIMIT_SCOPE=ip_or_token
-RATE_LIMIT_INCLUDE_ADMIN=false
-NEGATIVE_CACHE_ENABLED=true
-NEGATIVE_CACHE_TTL_SECONDS=120
-DEBUG_CAPTURE_HTML_ON_ERROR=false
+LOG_LEVEL=INFO
+REQUEST_TIMEOUT_SECONDS=20
+REQUEST_MAX_RETRIES=2
+REQUEST_BACKOFF_SECONDS=0.5
+CACHE_TTL_SEARCH_SECONDS=86400
+CACHE_TTL_SERIES_SECONDS=86400
+CACHE_TTL_VOLUME_SECONDS=604800
+CACHE_TTL_NEWS_GLOBAL_SECONDS=21600
+CACHE_TTL_NEWS_SERIES_SECONDS=43200
+CACHE_TTL_PLANNING_SECONDS=43200
 ```
 
-## 3.3 Profil debug parsing
+## 4. Ce que le cache fait vraiment
 
-```env
-DEBUG_CAPTURE_HTML_ON_ERROR=true
-DEBUG_HTML_DUMP_DIR=/tmp/manga-news-debug-html
-LOG_LEVEL=DEBUG
-LOG_FORMAT=json
-```
+Le service utilise un cache SQLite pour éviter de refrapper Manga News à chaque appel.
 
-Puis désactive-le après diagnostic. Laisser ça allumé en permanence n’a pas beaucoup d’intérêt.
+Répartition utile :
+- `search` et `series` : TTL d'environ 24h par défaut ;
+- `volume` : TTL plus long, environ 7 jours ;
+- `news` et `planning` : TTL plus court ;
+- `CACHE_STALE_GRACE_SECONDS` : combien de temps un cache expiré peut encore servir de fallback si l'upstream casse.
 
-## 4. Logs et observabilité
+## 5. Retries et tolérance réseau
 
-## 4.1 Logs
+Réglages utiles :
+- `REQUEST_TIMEOUT_SECONDS` : temps max d'attente par requête amont ;
+- `REQUEST_MAX_RETRIES` : nombre de retries amont ;
+- `REQUEST_BACKOFF_SECONDS` : base du backoff entre retries.
 
-`LOG_FORMAT=text` : pratique en local.
+Recommandation réaliste :
+- ne mets pas un timeout énorme ;
+- préfère un timeout raisonnable + quelques retries ;
+- garde un `USER_AGENT` explicite.
 
-`LOG_FORMAT=json` : pratique si tu collectes les logs ou si tu veux les parser automatiquement.
+## 6. Docs interactives et contrat machine-readable
 
-### Événements utiles dans les logs
+Si `ENABLE_DOCS=true` :
+- Swagger : `/docs`
+- ReDoc : `/redoc`
+- OpenAPI : `/openapi.json`
 
-Selon le chemin d’exécution, tu verras des événements du type :
+Si `ENABLE_DOCS=false` :
+- `/docs` et `/redoc` disparaissent ;
+- `/openapi.json` reste le meilleur point d'entrée pour une intégration automatique.
 
-- `request_started`
-- `request_completed`
-- `cache_hit`
-- `cache_store`
-- `cache_stale_fallback`
-- `upstream_fetch_started`
-- `upstream_fetch_retry`
-- `upstream_fetch_completed`
+## 7. Smoke tests et validation locale
 
-## 4.2 Endpoint admin de métriques
-
-Route :
-
-```text
-GET /v1/admin/metrics
-```
-
-Cette route expose :
-
-- compteurs HTTP
-- hits/misses de cache
-- stale fallbacks
-- hits de cache négatif
-- erreurs de parsing
-- erreurs upstream
-- retries upstream
-- nombre de `429`
-- ratios dérivés
-
-C’est l’endpoint à consulter en premier si tu veux savoir si l’API se dégrade.
-
-## 4.3 Endpoint admin de stats cache
-
-Route :
-
-```text
-GET /v1/admin/cache/stats
-```
-
-Expose :
-
-- nombre d’entrées par namespace
-- nombre d’entrées fraîches / expirées
-- détail du cache négatif
-- métadonnées des snapshots internes
-
-## 5. Invalidation cache
-
-Route :
-
-```text
-POST /v1/admin/cache/invalidate
-```
-
-### Payload possible
-
-```json
-{
-  "cache_key": null,
-  "namespace": null,
-  "resource_url": null,
-  "expired_only": false,
-  "all_entries": false
-}
-```
-
-### Exemples utiles
-
-Invalider une ressource précise :
+### 7.1 Script batch
 
 ```bash
-curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  "http://localhost:8017/v1/admin/cache/invalidate" \
-  -d '{"resource_url":"https://www.manga-news.com/index.php/manga/One-Piece/vol-91"}'
+python scripts/run_api_smoke_tests.py --base-url "http://localhost:8017" --token "$TOKEN"
 ```
 
-Invalider un namespace :
+### 7.2 Validation contrat + doc
 
 ```bash
-curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  "http://localhost:8017/v1/admin/cache/invalidate" \
-  -d '{"namespace":"series"}'
+python scripts/validate_contract_and_docs.py
 ```
 
-Invalider tout le cache :
-
-```bash
-curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  "http://localhost:8017/v1/admin/cache/invalidate" \
-  -d '{"all_entries":true}'
-```
-
-## 6. Smoke tests et validation opérateur
-
-## 6.1 Script batch
-
-```bash
-python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN"
-```
-
-Ce script permet de vérifier rapidement que l’API répond sur les routes principales.
-
-## 6.2 Si le dossier de sortie n’est pas inscriptible
-
-```bash
-python scripts/run_api_smoke_tests.py --output-dir /tmp/api_test_outputs
-```
-
-ou sans fichiers de sortie :
-
-```bash
-python scripts/run_api_smoke_tests.py --output-dir ""
-```
-
-## 6.3 Tests projet
+### 7.3 Tests projet
 
 ```bash
 pytest
 ```
 
-## 7. Diagnostic rapide par symptôme
+## 8. Diagnostic rapide par symptôme
 
-### Symptôme : `401 AUTH_REQUIRED`
+### Symptôme : `401`
 
 Cause probable :
-
-- token absent
-- mauvais token
-- endpoint admin appelé avec le token public
+- token absent ;
+- mauvais token.
 
 À vérifier :
+- header `Authorization` ;
+- valeur de `API_TOKEN`.
 
-- header `Authorization`
-- `API_TOKEN`
-- `ADMIN_TOKEN`
-
-### Symptôme : `404 ENDPOINT_NOT_FOUND` sur `/health` ou une route non versionnée
+### Symptôme : `404`
 
 Cause probable :
+- slug inconnu ;
+- page réellement absente côté Manga News ;
+- URL `/by-url` pointant sur une ressource supprimée.
 
-- routes legacy désactivées
+À vérifier :
+- l'URL Manga News réelle ;
+- le slug résolu par `/search/resolve`.
 
-Solution :
-
-- utiliser `/v1/...`
-- ou activer explicitement `ENABLE_LEGACY_ROUTES=true` si tu dois garder un vieux client
-
-### Symptôme : `429 RATE_LIMITED`
+### Symptôme : `502`
 
 Cause probable :
-
-- quota dépassé
+- incident réseau ;
+- timeout amont ;
+- HTML amont modifié ;
+- parser non adapté à une nouvelle structure.
 
 À faire :
+1. vérifier la connectivité sortante ;
+2. vérifier `REQUEST_TIMEOUT_SECONDS`, `REQUEST_MAX_RETRIES`, `REQUEST_BACKOFF_SECONDS` ;
+3. reproduire le cas avec une requête ciblée ;
+4. ajouter ou adapter une fixture de test si le HTML a changé.
 
-- lire `Retry-After`
-- ralentir le client
-- ajuster `RATE_LIMIT_*` si nécessaire
-
-### Symptôme : `502 UPSTREAM_FETCH_ERROR`
-
-Cause probable :
-
-- incident réseau
-- timeout amont
-- Manga-News indisponible
-
-À faire :
-
-- vérifier la connectivité sortante
-- vérifier `REQUEST_TIMEOUT_SECONDS`
-- vérifier les retries configurés
-- consulter `/v1/admin/metrics`
-
-### Symptôme : `502 UPSTREAM_PARSE_ERROR`
+### Symptôme : `304`
 
 Cause probable :
+- le client renvoie le bon `If-None-Match` ;
+- le `fingerprint` n'a pas changé.
 
-- HTML amont modifié
-- parseur cassé pour un type de page
+Comportement attendu :
+- corps vide ;
+- réutilisation de la copie locale côté client.
 
-À faire :
+## 9. Ce qu'il faut éviter de supposer
 
-1. activer `DEBUG_CAPTURE_HTML_ON_ERROR=true`
-2. reproduire la requête
-3. inspecter `DEBUG_HTML_DUMP_DIR`
-4. corriger le parseur
-5. ajouter ou adapter un test de fixture
+- n'invente pas de namespace `/v1` ;
+- n'invente pas de routes admin ;
+- ne pars pas du principe que `LOG_FORMAT=json` produit déjà des logs JSON structurés ;
+- ne suppose pas que tous les champs métier seront toujours remplis.
 
-### Symptôme : résultats surprenants ou trop faibles en recherche
+## 10. Fichiers utiles pour l'exploitation
 
-Cause probable :
-
-- score de matching trop strict
-- mauvaise formulation de la requête
-
-À faire :
-
-- vérifier `SEARCH_SCORE_THRESHOLD`
-- comparer `/search` et `/search/resolve`
-- tester `/lookup/volume` si tu connais déjà le numéro du tome
-
-## 8. Sauvegarde et persistance
-
-Le cache SQLite est stocké dans `DB_PATH`.
-
-Si tu utilises Docker, assure-toi que ce chemin pointe sur un volume persistant. Sinon tu perdras le cache à chaque reconstruction.
-
-## 9. OpenAPI et docs interactives
-
-Si `ENABLE_DOCS=true` :
-
-- Swagger : `/docs`
-- ReDoc : `/redoc`
-- OpenAPI : `/openapi.json`
-
-Pour un déploiement privé, c’est utile. Pour un déploiement plus verrouillé, tu peux désactiver la doc générée avec :
-
-```env
-ENABLE_DOCS=false
-```
+- [`../README.md`](../README.md)
+- [`API_INTEGRATION.md`](API_INTEGRATION.md)
+- [`OPENAPI_AND_AI_USAGE.md`](OPENAPI_AND_AI_USAGE.md)
+- [`ONE_PIECE_API_TESTS.txt`](ONE_PIECE_API_TESTS.txt)
+- [`examples/README.md`](examples/README.md)

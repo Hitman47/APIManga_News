@@ -26,7 +26,15 @@ En clair :
 - un humain peut démarrer avec `/docs` ;
 - un agent ou une IA doit commencer par `/openapi.json`.
 
-## 3. Utilisation par une IA
+## 3. Ordre recommandé pour un agent ou une IA
+
+1. lire [`../README.md`](../README.md) pour le contexte d'usage ;
+2. télécharger `/openapi.json` ;
+3. regarder 2 ou 3 payloads de [`examples/`](examples/README.md) ;
+4. choisir les routes ;
+5. réutiliser `ETag` / `If-None-Match` quand c'est pertinent.
+
+## 4. Utilisation par une IA
 
 ### Stratégie recommandée
 
@@ -34,7 +42,8 @@ En clair :
 2. repérer les routes par tag ;
 3. choisir `/search/resolve` pour transformer un titre libre en slug ;
 4. charger ensuite la ressource cible ;
-5. utiliser `ETag` pour éviter les requêtes inutiles.
+5. utiliser les routes `/by-url` si l'utilisateur donne déjà une URL Manga News ;
+6. utiliser `ETag` pour éviter les requêtes inutiles.
 
 ### Prompt minimal
 
@@ -44,7 +53,7 @@ En clair :
 
 > Considère `/openapi.json` comme contrat unique. Si l'utilisateur donne une URL Manga News, privilégie les routes `/by-url`. Si l'utilisateur donne un titre libre, commence par `/search/resolve`. Si l'utilisateur veut plusieurs candidats, utilise `/search?mode=all`. Limite le bruit avec `blocks` et `fields` quand c'est utile.
 
-## 4. Utilisation par un humain
+## 5. Utilisation par un humain
 
 ### Swagger UI
 
@@ -70,9 +79,9 @@ http://localhost:8017/redoc
 
 ReDoc est plus agréable pour la lecture continue de la doc.
 
-## 5. Ce qui a été enrichi côté code
+## 6. Ce qui a été enrichi côté code
 
-L'OpenAPI embarquée expose désormais :
+L'OpenAPI embarquée expose :
 - des tags métier (`health`, `search`, `series`, `volume`, `news`, `planning`) ;
 - des résumés ;
 - des descriptions ;
@@ -85,9 +94,33 @@ L'OpenAPI embarquée expose désormais :
 - un générateur client ;
 - un agent LLM.
 
-## 6. Bonnes pratiques
+## 7. Exemples figés à montrer à une IA
+
+Les meilleurs fichiers pour démarrer sont généralement :
+- [`examples/search_resolve_series_one_piece.json`](examples/search_resolve_series_one_piece.json)
+- [`examples/series_one_piece.json`](examples/series_one_piece.json)
+- [`examples/volume_one_piece_110.json`](examples/volume_one_piece_110.json)
+- [`examples/planning_manga_vf_april_2026.json`](examples/planning_manga_vf_april_2026.json)
+- [`examples/error_resource_not_found.json`](examples/error_resource_not_found.json)
+
+## 8. Validation locale du contrat documentaire
+
+Commande :
+
+```bash
+python scripts/validate_contract_and_docs.py
+```
+
+Ce contrôle vérifie :
+- la génération de l'OpenAPI ;
+- les routes clés ;
+- la validité des exemples JSON ;
+- les liens Markdown locaux.
+
+## 9. Bonnes pratiques
 
 - ne te base pas sur le README seul si tu peux lire l'OpenAPI ;
 - ne documente jamais des routes absentes de `/openapi.json` ;
 - considère les exemples comme illustratifs, pas comme un contrat de contenu exhaustif ;
-- pense à l'authentification avant de conclure qu'une route ne marche pas.
+- pense à l'authentification avant de conclure qu'une route ne marche pas ;
+- si un point de doc contredit l'OpenAPI, crois l'OpenAPI.

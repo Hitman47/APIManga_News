@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale",
+  "cached": true,
+  "fetched_at": "2026-04-20T12:00:00+00:00",
+  "cache_expires_at": "2026-04-21T12:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "fp-series-editions-one-piece",
+  "pagination": null,
+  "data": {
+    "title": "One Piece",
+    "series_slug": "One-piece-Edition-originale",
+    "vf": {
+      "edition": "vf",
+      "source_url": "https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale",
+      "total": 2,
+      "items": [
+        {
+          "title": "One Piece Vol.110",
+          "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-110",
+          "series_slug": "One-Piece",
+          "volume_slug": "vol-110",
+          "number": "110",
+          "number_int": 110,
+          "edition_label": null,
+          "is_special": false,
+          "is_one_shot": false,
+          "publication_date": "2025-09-27",
+          "cover_image": "https://www.manga-news.com/public/images/series/one-piece-110.jpg"
+        },
+        {
+          "title": "One Piece Vol.111",
+          "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-111",
+          "series_slug": "One-Piece",
+          "volume_slug": "vol-111",
+          "number": "111",
+          "number_int": 111,
+          "edition_label": null,
+          "is_special": false,
+          "is_one_shot": false,
+          "publication_date": "2026-04-08",
+          "cover_image": null
+        }
+      ]
+    },
+    "vo": {
+      "edition": "vo",
+      "source_url": "https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale",
+      "total": 1,
+      "items": [
+        {
+          "title": "One Piece Vol.114",
+          "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-114",
+          "series_slug": "One-Piece",
+          "volume_slug": "vol-114",
+          "number": "114",
+          "number_int": 114,
+          "edition_label": null,
+          "is_special": false,
+          "is_one_shot": false,
+          "publication_date": null,
+          "cover_image": null
+        }
+      ]
+    },
+    "source_url": "https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale"
+  }
+}

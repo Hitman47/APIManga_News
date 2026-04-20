@@ -9,7 +9,7 @@ Base URL typiques :
 - même réseau Docker : `http://manga-news-api:8000`
 - autre machine du LAN : `http://<ip-hote>:8017`
 
-Endpoints principaux :
+Contrat public actuel :
 - `GET /health`
 - `GET /search`
 - `GET /search/resolve`
@@ -26,6 +26,11 @@ Endpoints principaux :
 - `GET /news/volume/{series_slug}/{volume_slug}`
 - `GET /news/volume/by-url`
 - `GET /planning`
+
+Important :
+- il n'existe **pas** de namespace `/v1` aujourd'hui ;
+- il n'existe **pas** de routes admin publiques aujourd'hui ;
+- la source de vérité machine-readable reste `GET /openapi.json`.
 
 ## 2. Authentification
 
@@ -60,6 +65,7 @@ La plupart des routes renvoient cette enveloppe :
   "partial": false,
   "warnings": [],
   "fingerprint": "...",
+  "pagination": null,
   "data": {}
 }
 ```
@@ -69,7 +75,8 @@ Signification des champs importants :
 - `cached` : indique si le résultat vient du cache ;
 - `partial` : vrai si l'API a dû servir une version de repli ;
 - `warnings` : informations non bloquantes ;
-- `fingerprint` : hash logique du `data`, utilisé aussi comme `ETag`.
+- `fingerprint` : hash logique du `data`, utilisé aussi comme `ETag` ;
+- `pagination` : métadonnées présentes sur les endpoints de liste (`search`, `search/resolve`, `news`, `planning`) quand le service en renvoie.
 
 ## 4. Cache côté client avec `ETag`
 
@@ -92,13 +99,12 @@ curl -i "http://localhost:8017/series/One-piece-Edition-originale"
 Puis :
 
 ```bash
-curl -i "http://localhost:8017/series/One-piece-Edition-originale" \
-  -H 'If-None-Match: "<fingerprint>"'
+curl -i "http://localhost:8017/series/One-piece-Edition-originale"   -H 'If-None-Match: "<fingerprint>"'
 ```
 
 ## 5. Gestion des erreurs
 
-Format d'erreur actuel :
+Format d'erreur public actuel :
 
 ```json
 { "detail": "..." }
@@ -110,9 +116,30 @@ Codes à traiter :
 - `502` : le fetch amont a échoué ou le parser n'a pas reconnu la page ;
 - `304` : inchangé, pas de body.
 
-## 6. Référence endpoint par endpoint
+Les payloads JSON d'exemple de ce type sont dans :
+- [`examples/error_resource_not_found.json`](examples/error_resource_not_found.json)
+- [`examples/error_upstream_parse.json`](examples/error_upstream_parse.json)
 
-### 6.1 `GET /health`
+## 6. Exemples JSON figés
+
+Avant d'intégrer en production, regarde aussi :
+- [`examples/search_series_one_piece.json`](examples/search_series_one_piece.json)
+- [`examples/search_resolve_series_one_piece.json`](examples/search_resolve_series_one_piece.json)
+- [`examples/series_one_piece.json`](examples/series_one_piece.json)
+- [`examples/series_related_one_piece.json`](examples/series_related_one_piece.json)
+- [`examples/series_editions_one_piece_all.json`](examples/series_editions_one_piece_all.json)
+- [`examples/volume_one_piece_110.json`](examples/volume_one_piece_110.json)
+- [`examples/news_global_one_piece_sample.json`](examples/news_global_one_piece_sample.json)
+- [`examples/planning_manga_vf_april_2026.json`](examples/planning_manga_vf_april_2026.json)
+
+Pour une IA, c'est souvent le chemin le plus rapide :
+1. lire `/openapi.json` ;
+2. regarder 2 ou 3 payloads d'exemple ;
+3. appeler la route réelle.
+
+## 7. Référence endpoint par endpoint
+
+### 7.1 `GET /health`
 
 Usage : vérifier que l'API répond.
 
@@ -122,7 +149,9 @@ Réponse :
 { "ok": true }
 ```
 
-### 6.2 `GET /search`
+Exemple figé : [`examples/health_ok.json`](examples/health_ok.json)
+
+### 7.2 `GET /search`
 
 Recherche libre.
 
@@ -135,19 +164,17 @@ Paramètres :
 Exemple :
 
 ```bash
-curl --get "http://localhost:8017/search" \
-  --data-urlencode "q=one piece" \
-  --data-urlencode "kind=series" \
-  --data-urlencode "mode=all" \
-  --data-urlencode "limit=5"
+curl --get "http://localhost:8017/search"   --data-urlencode "q=one piece"   --data-urlencode "kind=series"   --data-urlencode "mode=all"   --data-urlencode "limit=5"
 ```
+
+Exemple figé : [`examples/search_series_one_piece.json`](examples/search_series_one_piece.json)
 
 Quand utiliser `/search` :
 - si tu veux afficher plusieurs candidats à un utilisateur ;
 - si tu veux journaliser les scores ;
 - si tu veux choisir toi-même la stratégie de sélection.
 
-### 6.3 `GET /search/resolve`
+### 7.3 `GET /search/resolve`
 
 Même idée que `/search`, mais pensée pour l'automatisation.
 
@@ -164,12 +191,12 @@ Réponse utile :
 Exemple :
 
 ```bash
-curl --get "http://localhost:8017/search/resolve" \
-  --data-urlencode "q=one piece tome 110" \
-  --data-urlencode "kind=volume"
+curl --get "http://localhost:8017/search/resolve"   --data-urlencode "q=one piece tome 110"   --data-urlencode "kind=volume"
 ```
 
-### 6.4 `GET /series/{slug}`
+Exemple figé : [`examples/search_resolve_series_one_piece.json`](examples/search_resolve_series_one_piece.json)
+
+### 7.4 `GET /series/{slug}`
 
 Charge une fiche série à partir de son slug.
 
@@ -185,14 +212,14 @@ curl "http://localhost:8017/series/One-piece-Edition-originale"
 ```
 
 ```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
-  --data-urlencode "blocks=identity,editions,stats"
+curl --get "http://localhost:8017/series/One-piece-Edition-originale"   --data-urlencode "blocks=identity,editions,stats"
 ```
 
 ```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
-  --data-urlencode "fields=title,vf.volumes,next_release_date"
+curl --get "http://localhost:8017/series/One-piece-Edition-originale"   --data-urlencode "fields=title,vf.volumes,next_release_date"
 ```
+
+Exemple figé : [`examples/series_one_piece.json`](examples/series_one_piece.json)
 
 Blocs séries disponibles :
 - `identity`
@@ -205,18 +232,17 @@ Blocs séries disponibles :
 - `raw`
 - `raw_sections`
 
-### 6.5 `GET /series/by-url`
+### 7.5 `GET /series/by-url`
 
 Même comportement, mais à partir de l'URL Manga News complète.
 
 Exemple :
 
 ```bash
-curl --get "http://localhost:8017/series/by-url" \
-  --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+curl --get "http://localhost:8017/series/by-url"   --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
 ```
 
-### 6.6 `GET /series/{slug}/related`
+### 7.6 `GET /series/{slug}/related`
 
 Retourne les contenus liés à une série.
 
@@ -226,7 +252,9 @@ Exemple :
 curl "http://localhost:8017/series/One-piece-Edition-originale/related"
 ```
 
-### 6.7 `GET /series/{slug}/editions`
+Exemple figé : [`examples/series_related_one_piece.json`](examples/series_related_one_piece.json)
+
+### 7.7 `GET /series/{slug}/editions`
 
 Retourne les éditions VF, VO, ou les deux.
 
@@ -239,7 +267,9 @@ Exemple :
 curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
 ```
 
-### 6.8 `GET /volume/{series_slug}/{volume_slug}`
+Exemple figé : [`examples/series_editions_one_piece_all.json`](examples/series_editions_one_piece_all.json)
+
+### 7.8 `GET /volume/{series_slug}/{volume_slug}`
 
 Charge une fiche volume à partir des deux slugs.
 
@@ -265,42 +295,53 @@ Exemple :
 curl "http://localhost:8017/volume/One-Piece/vol-110"
 ```
 
-```bash
-curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
-  --data-urlencode "fields=title,publication_date,isbn_ean"
-```
+Exemple figé : [`examples/volume_one_piece_110.json`](examples/volume_one_piece_110.json)
 
-### 6.9 `GET /volume/by-url`
+### 7.9 `GET /volume/by-url`
 
-Même comportement, mais à partir de l'URL du volume.
+Même comportement que la route par slugs, mais à partir d'une URL Manga News complète.
 
-### 6.10 `GET /news/global`
+### 7.10 `GET /news/global`
 
-Lit le flux RSS global.
+Retourne les news globales issues du flux RSS public.
 
 Exemple :
 
 ```bash
-curl "http://localhost:8017/news/global?limit=10"
+curl "http://localhost:8017/news/global?limit=5"
 ```
 
-### 6.11 `GET /news/series/{slug}`
+Exemple figé : [`examples/news_global_one_piece_sample.json`](examples/news_global_one_piece_sample.json)
 
-Lit les news d'une série.
+### 7.11 `GET /news/series/{slug}`
 
-### 6.12 `GET /news/volume/{series_slug}/{volume_slug}`
+Retourne les news liées à une série.
 
-Lit les news d'un volume.
+Exemple :
 
-### 6.13 `GET /news/volume/by-url`
+```bash
+curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
+```
 
-Même comportement à partir de l'URL du volume.
+### 7.12 `GET /news/volume/{series_slug}/{volume_slug}`
 
-### 6.14 `GET /planning`
+Retourne les news liées à un volume précis.
 
-Filtre le planning des sorties.
+Exemple :
 
-Paramètres :
+```bash
+curl "http://localhost:8017/news/volume/One-Piece/vol-110?limit=10"
+```
+
+### 7.13 `GET /news/volume/by-url`
+
+Même comportement que la route par slugs, mais à partir de l'URL du volume.
+
+### 7.14 `GET /planning`
+
+Permet d'interroger le planning des sorties.
+
+Paramètres principaux :
 - `section=manga-vf|manga-vo`
 - `year`
 - `month`
@@ -312,69 +353,50 @@ Paramètres :
 - `sort=date_asc|date_desc|title_asc|title_desc`
 - `limit`
 
-Exemple complet :
+Exemple :
 
 ```bash
-curl --get "http://localhost:8017/planning" \
-  --data-urlencode "section=manga-vf" \
-  --data-urlencode "year=2026" \
-  --data-urlencode "month=4" \
-  --data-urlencode "publisher=Glénat" \
-  --data-urlencode "q=one piece" \
-  --data-urlencode "date_from=2026-04-01" \
-  --data-urlencode "date_to=2026-04-30" \
-  --data-urlencode "sort=date_asc" \
-  --data-urlencode "limit=25"
+curl --get "http://localhost:8017/planning"   --data-urlencode "section=manga-vf"   --data-urlencode "year=2026"   --data-urlencode "month=4"   --data-urlencode "publisher=Glénat"   --data-urlencode "sort=date_asc"   --data-urlencode "limit=25"
 ```
 
-## 7. Workflows recommandés
+Exemple figé : [`examples/planning_manga_vf_april_2026.json`](examples/planning_manga_vf_april_2026.json)
 
-### Workflow A — chercher une série et charger sa fiche
+## 8. Flows d'intégration recommandés
 
-1. `GET /search/resolve?q=<titre>&kind=series`
+### 8.1 Titre libre vers fiche série
+
+1. appeler `/search/resolve?q=<titre>&kind=series`
 2. lire `data.best.slug`
-3. `GET /series/{slug}`
-4. stocker l'ETag
-5. rejouer avec `If-None-Match` plus tard
+3. appeler `/series/{slug}`
+4. mettre en cache côté client avec `ETag`
 
-### Workflow B — chercher un tome puis récupérer ses métadonnées
+### 8.2 URL Manga News déjà connue
 
-1. `GET /search/resolve?q=<titre+tome>&kind=volume`
-2. lire `data.best.series_slug` et `data.best.volume_slug`
-3. `GET /volume/{series_slug}/{volume_slug}`
+1. appeler `/series/by-url` ou `/volume/by-url`
+2. éviter une recherche intermédiaire inutile
 
-### Workflow C — interface qui affiche plusieurs résultats
+### 8.3 UI légère
 
-1. `GET /search?mode=all&limit=10`
-2. afficher `title`, `kind`, `score`
-3. laisser l'utilisateur choisir
-4. charger ensuite `/series/...` ou `/volume/...`
+1. appeler la fiche avec `fields=`
+2. limiter le payload à ce que l'écran consomme réellement
 
-### Workflow D — surveillance légère d'un planning
+### 8.4 Client robuste
 
-1. lancer `GET /planning?...`
-2. stocker `ETag`
-3. relancer régulièrement avec `If-None-Match`
-4. traiter `304` comme “aucun changement”
+1. traiter `401`, `404`, `502`, `304`
+2. considérer les champs comme optionnels
+3. ne jamais inventer une route absente de `/openapi.json`
 
-## 8. Conseils d'intégration pour une IA
+## 9. Validation locale doc + contrat
 
-Quand tu branches cette API à une autre IA :
+Commande :
 
-- commence par `/openapi.json` pour le contrat réel ;
-- ne suppose aucune route non documentée ;
-- préfère `/search/resolve` à `/search` si tu veux automatiser ;
-- quand tu connais déjà l'URL Manga News, utilise les routes `/by-url` ;
-- exploite `ETag` pour éviter les requêtes inutiles ;
-- utilise `fields` et `blocks` si tu veux limiter le bruit.
+```bash
+python scripts/validate_contract_and_docs.py
+```
 
-Prompt minimal réutilisable :
-
-> Utilise `GET /openapi.json` comme source de vérité. Pour résoudre un manga, appelle d'abord `/search/resolve`. Ensuite, charge `/series/{slug}` ou `/volume/{series_slug}/{volume_slug}`. Réutilise l'ETag avec `If-None-Match` quand tu relances une même requête. N'invente aucune route absente de l'OpenAPI.
-
-## 9. Ce qu'il faut éviter
-
-- parser directement le HTML si l'API fournit déjà la donnée ;
-- supposer que tous les champs seront toujours remplis ;
-- supposer que `search/resolve` est infaillible ;
-- documenter des routes qui n'existent pas dans `/openapi.json`.
+Ce contrôle vérifie :
+- la génération de l'OpenAPI ;
+- les routes critiques ;
+- les tags critiques ;
+- la validité des exemples JSON ;
+- les liens Markdown locaux de la doc.

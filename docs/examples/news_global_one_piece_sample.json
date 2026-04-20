@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/feed/news",
+  "cached": false,
+  "fetched_at": "2026-04-20T12:00:00+00:00",
+  "cache_expires_at": "2026-04-20T18:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "fp-news-global-sample",
+  "pagination": {
+    "page": 1,
+    "limit": 2,
+    "returned": 2,
+    "total": 2,
+    "has_more": false
+  },
+  "data": [
+    {
+      "title": "La saison 2 de la série live One Piece disponible sur Netflix !",
+      "url": "https://www.manga-news.com/index.php/actus/2026/03/10/La-saison-2-de-la-serie-live-One-Piece-disponible-sur-Netflix",
+      "published_at": "2026-03-10",
+      "excerpt": "C'est aujourd'hui ! Les fans peuvent désormais se rassasier avec les épisodes de la saison 2...",
+      "comments": 0,
+      "category": "Manga"
+    },
+    {
+      "title": "Celio x One Piece : Chopper en guest star !",
+      "url": "https://www.manga-news.com/index.php/actus/2026/03/03/Celio-x-One-Piece-Chopper-en-guest-star",
+      "published_at": "2026-03-03",
+      "excerpt": "Celio x One Piece : Chopper star d’une collection printanière ultra cute ! ...",
+      "comments": 1,
+      "category": "Produits dérivés"
+    }
+  ]
+}

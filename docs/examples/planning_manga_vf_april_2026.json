@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/planning/",
+  "cached": false,
+  "fetched_at": "2026-04-20T12:00:00+00:00",
+  "cache_expires_at": "2026-04-20T18:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "fp-planning-april-2026",
+  "pagination": {
+    "page": 1,
+    "limit": 25,
+    "returned": 2,
+    "total": 2,
+    "has_more": false
+  },
+  "data": {
+    "section": "manga-vf",
+    "year": 2026,
+    "month": 4,
+    "page": 1,
+    "filters": {
+      "publisher": "Glénat",
+      "query": null,
+      "date_from": "2026-04-01",
+      "date_to": "2026-04-30"
+    },
+    "sort": "date_asc",
+    "total_items": 2,
+    "items": [
+      {
+        "title": "One Piece Vol.110",
+        "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-110",
+        "release_date": "2026-04-27",
+        "authors": [
+          "Eiichirô ODA"
+        ],
+        "publisher": "Glénat",
+        "summary": "Le retour des Mugiwara dans un nouveau volume.",
+        "featured": true,
+        "series_slug": "One-Piece",
+        "volume_slug": "vol-110",
+        "number": "110",
+        "number_int": 110,
+        "edition_label": null,
+        "is_special": false,
+        "is_one_shot": false
+      },
+      {
+        "title": "Kagurabachi Vol.2",
+        "url": "https://www.manga-news.com/index.php/manga/Kagurabachi/vol-2",
+        "release_date": "2026-04-03",
+        "authors": [
+          "Takeru HOKAZONO"
+        ],
+        "publisher": "Kana",
+        "summary": "Chihiro poursuit sa traque.",
+        "featured": false,
+        "series_slug": "Kagurabachi",
+        "volume_slug": "vol-2",
+        "number": "2",
+        "number_int": 2,
+        "edition_label": null,
+        "is_special": false,
+        "is_one_shot": false
+      }
+    ]
+  }
+}
