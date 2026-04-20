@@ -1,50 +1,29 @@
 # Manga News Private API
 
-API privée, légère, pensée pour un usage personnel ou auto-hébergé, afin d'interroger Manga News avec cache SQLite, authentification Bearer optionnelle, schéma de réponse stable, ETag, et docs OpenAPI natives.
+API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d'interroger Manga News avec un cache SQLite persistant, une authentification Bearer optionnelle, des logs structurés, et des endpoints pensés pour l'automatisation.
 
-## Ce que fait la version actuelle
+## Ce que fait cette version
 
 - recherche de séries et volumes ;
-- résolution directe d'un titre vers le meilleur slug exploitable ;
 - récupération d'une fiche série ;
 - récupération d'une fiche volume ;
-- récupération des relations d'une série ;
-- récupération des éditions VF/VO d'une série ;
 - récupération des news globales via RSS ;
 - récupération des news d'une série ;
 - récupération des news d'un volume ;
 - récupération du planning manga VF et manga VO ;
-- projections partielles sur les endpoints série/volume via `blocks` et `fields` ;
+- endpoint `planning/watch` avec fingerprint et diff facultatif via snapshot serveur ;
+- stats et invalidation du cache via endpoints d'admin ;
 - cache SQLite persistant avec fallback sur cache périmé si l'upstream casse temporairement ;
-- ETag + `X-Data-Fingerprint` + support `If-None-Match` ;
-- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc` ;
-- corpus de fixtures HTML et golden tests pour verrouiller les parseurs.
+- enveloppes JSON plus explicites : `schema_version`, `fingerprint`, `cache_state`, `parse_status`, `missing_fields` ;
+- erreurs structurées : `not_found`, `parse_error`, `upstream_error` ;
+- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc`.
 
 ## Ce que cette version ne fait pas encore
 
 - provider anime séparé ;
 - enrichissement cross-source ;
 - pagination multi-pages automatisée côté upstream ;
-- endpoints d'admin du cache.
-
-## Contrat de réponse
-
-Toutes les réponses enveloppées exposent maintenant :
-
-- `schema_version`
-- `ok`
-- `found`
-- `source`
-- `source_url`
-- `cached`
-- `fetched_at`
-- `cache_expires_at`
-- `partial`
-- `warnings`
-- `fingerprint`
-- `data`
-
-Le champ `fingerprint` est aussi renvoyé dans l'en-tête `X-Data-Fingerprint` et sert de base à l'`ETag` HTTP.
+- diff historique multi-snapshots : pour l'instant, `planning/watch` compare l'état courant au dernier snapshot du même `watch_id`.
 
 ## Variables d'environnement principales
 
@@ -56,7 +35,8 @@ Les plus importantes :
 - `DB_PATH` : chemin du cache SQLite ;
 - `CACHE_TTL_*` : TTL par type de ressource ;
 - `SEARCH_SCORE_THRESHOLD` : seuil minimal de matching ;
-- `ENABLE_DOCS` : active `/docs` et `/redoc`.
+- `ENABLE_DOCS` : active `/docs` et `/redoc` ;
+- `LOG_FORMAT` : `text` ou `json`.
 
 ## Lancer localement
 
@@ -75,10 +55,17 @@ docker compose up -d --build
 
 L'API sera alors disponible sur `http://localhost:8017`.
 
-## Documentation
+## GitHub / GHCR
 
-- `http://localhost:8017/docs`
-- `http://localhost:8017/redoc`
+Fichiers ajoutés pour un dépôt GitHub propre et une publication GHCR automatique :
+
+- `.github/workflows/ci.yml` : lance les tests sur push / pull request ;
+- `.github/workflows/publish-ghcr.yml` : build multi-arch `linux/amd64` + `linux/arm64` et push vers GHCR ;
+- `.github/workflows/manifest.yml` : inspecte le manifest publié et stocke `manifest.json` en artifact ;
+- `.dockerignore` : évite d'envoyer les fichiers inutiles au build Docker ;
+- `.gitignore` : ignore l'environnement local, le cache et la base SQLite.
+
+Image publiée par défaut : `ghcr.io/<owner>/<repo>` en minuscules.
 
 ## Exemples curl
 
@@ -94,35 +81,16 @@ curl http://localhost:8017/health
 curl "http://localhost:8017/search?q=one%20piece&kind=series&mode=all&limit=5"
 ```
 
-### Résolution directe du meilleur résultat
-
-```bash
-curl "http://localhost:8017/search/resolve?q=one%20piece&kind=series"
-```
-
 ### Fiche série via slug
 
 ```bash
 curl "http://localhost:8017/series/One-piece-Edition-originale"
 ```
 
-### Fiche série avec projection partielle
-
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
-  --data-urlencode "fields=title,vf.volumes,next_release_date"
-```
-
 ### Fiche volume via slug
 
 ```bash
 curl "http://localhost:8017/volume/One-Piece/vol-110"
-```
-
-### News globales
-
-```bash
-curl "http://localhost:8017/news/global?limit=10"
 ```
 
 ### Planning manga VF
@@ -138,23 +106,27 @@ curl --get "http://localhost:8017/planning" \
   --data-urlencode "sort=date_asc"
 ```
 
-### Requête conditionnelle avec ETag
-
-Premier appel :
+### Watch du planning par éditeur
 
 ```bash
-curl -i "http://localhost:8017/series/One-piece-Edition-originale"
+curl --get "http://localhost:8017/planning/watch" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "publisher=Kana" \
+  --data-urlencode "watch_id=kana-watch" \
+  --data-urlencode "preview_limit=5"
 ```
 
-Réutilisation de l'ETag retourné :
+### Stats du cache
 
 ```bash
-curl -i \
-  -H 'If-None-Match: "<fingerprint>"' \
-  "http://localhost:8017/series/One-piece-Edition-originale"
+curl "http://localhost:8017/admin/cache/stats"
 ```
 
-Si rien n'a changé, l'API renvoie `304 Not Modified`.
+### Invalidation du cache planning
+
+```bash
+curl -X POST "http://localhost:8017/admin/cache/invalidate?namespace=planning"
+```
 
 ### Avec Bearer token
 
@@ -162,19 +134,46 @@ Si rien n'a changé, l'API renvoie `304 Not Modified`.
 curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/search?q=one%20piece"
 ```
 
-## GitHub / GHCR
+## Contrat de réponse
 
-Fichiers présents pour un dépôt GitHub propre et une publication GHCR automatique :
+### Enveloppe standard
 
-- `.github/workflows/ci.yml` : lance les tests sur push / pull request ;
-- `.github/workflows/publish-ghcr.yml` : build multi-arch et push vers GHCR ;
-- `.github/workflows/manifest.yml` : inspecte le manifest publié et stocke `manifest.json` en artifact ;
-- `.dockerignore` : évite d'envoyer les fichiers inutiles au build Docker ;
-- `.gitignore` : ignore l'environnement local, le cache et la base SQLite.
+```json
+{
+  "schema_version": "1.1",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/...",
+  "cached": true,
+  "cache_state": "fresh_hit",
+  "fetched_at": "2026-04-20T12:00:00+00:00",
+  "cache_expires_at": "2026-04-20T18:00:00+00:00",
+  "partial": false,
+  "parse_status": "complete",
+  "missing_fields": [],
+  "fingerprint": "...",
+  "warnings": [],
+  "data": {}
+}
+```
+
+### Erreur structurée
+
+```json
+{
+  "schema_version": "1.1",
+  "ok": false,
+  "error_code": "parse_error",
+  "detail": "date_from must be a valid date.",
+  "source": "manga_news"
+}
+```
 
 ## Notes de conception
 
 - L'API repose sur le HTML public et le flux RSS de Manga News. C'est un usage privé ; ne t'en sers pas pour republier massivement leur contenu.
 - Le cache persistant limite les appels et réduit le risque de casser ton automatisation sur une panne temporaire du site.
-- Les parseurs sont volontairement tolérants : beaucoup de logique repose sur les libellés textuels visibles plutôt que sur des sélecteurs CSS trop fragiles.
-- Les fixtures HTML dans `tests/fixtures/html` et les golden outputs dans `tests/fixtures/golden` servent de garde-fou contre les régressions de parsing.
+- Les parsers sont volontairement tolérants : beaucoup de logique est basée sur les libellés textuels visibles plutôt que sur des sélecteurs CSS trop fragiles.
+- `partial=true` signifie qu'un cache périmé a pu être utilisé ou que des champs importants manquent ; un champ facultatif simplement absent n'entraîne pas forcément un `partial`.
+- `planning/watch` est utile pour des cron jobs, n8n ou un autre conteneur ; avec un `watch_id`, l'API garde un snapshot courant et calcule les ajouts/suppressions au prochain appel.

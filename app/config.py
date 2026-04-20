@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     app_name: str = Field(default='Manga News Private API', alias='APP_NAME')
     app_env: str = Field(default='development', alias='APP_ENV')
     log_level: str = Field(default='INFO', alias='LOG_LEVEL')
+    log_format: str = Field(default='text', alias='LOG_FORMAT')
     manga_news_base_url: str = Field(default='https://www.manga-news.com', alias='MANGA_NEWS_BASE_URL')
     user_agent: str = Field(default='MangaNewsPrivateAPI/0.1 (+private-selfhosted)', alias='USER_AGENT')
     api_token: str | None = Field(default=None, alias='API_TOKEN')

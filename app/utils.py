@@ -4,8 +4,9 @@ import hashlib
 import json
 import re
 import unicodedata
-from datetime import UTC, datetime
-from typing import Iterable
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from typing import Any, Iterable
 from urllib.parse import quote, urljoin, urlparse
 
 from dateutil import parser as date_parser
@@ -37,12 +38,6 @@ IGNORE_TEXTS = {
     'aucun commentaire... soyez le 1er !!', 'tous les volumes', 'ma note', 'rédaction', 'redaction',
     'lecteurs', 'pas lu', 'pas vu', 'volume', 'volumes', 'actus précédentes', 'actus precedentes',
 }
-EDITION_NOISE_PATTERN = re.compile(
-    r"\b((?:tome|v(?:ol)?\.?|volume)\s*\d+|edition originale|ed\. originale|edition|collector|collectors?|"
-    r"deluxe|perfect|ultimate|kanzenban|double|triple|grand format|roman|light novel|novel|tome|vol(?:ume)?)\b",
-    flags=re.IGNORECASE,
-)
-LEADING_ARTICLES_PATTERN = re.compile(r'^(le|la|les|un|une|des|the)\s+', flags=re.IGNORECASE)
 
 
 def now_utc() -> datetime:
@@ -61,10 +56,7 @@ def normalize_text(value: str | None) -> str:
     cleaned = clean_ws(value).lower()
     normalized = unicodedata.normalize('NFKD', cleaned)
     normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
-    normalized = EDITION_NOISE_PATTERN.sub(' ', normalized)
-    normalized = LEADING_ARTICLES_PATTERN.sub('', normalized)
-    normalized = normalized.replace('&', ' and ')
-    normalized = re.sub(r'\bpartie\b', 'part', normalized)
+    normalized = re.sub(r"\b(edition originale|ed\. originale|edition|vol(?:ume)?|tome)\b", ' ', normalized)
     normalized = re.sub(r'[^a-z0-9]+', ' ', normalized)
     return re.sub(r'\s+', ' ', normalized).strip()
 
@@ -75,16 +67,12 @@ def slugify(value: str) -> str:
 
 
 def score_match(query: str, candidate: str, extra: str | None = None) -> int:
-    normalized_query = normalize_text(query)
-    normalized_candidate = normalize_text(candidate)
     base = max(
-        fuzz.WRatio(normalized_query, normalized_candidate),
-        fuzz.token_set_ratio(normalized_query, normalized_candidate),
-        fuzz.partial_ratio(normalized_query, normalized_candidate),
+        fuzz.WRatio(normalize_text(query), normalize_text(candidate)),
+        fuzz.token_set_ratio(normalize_text(query), normalize_text(candidate)),
     )
     if extra:
-        normalized_extra = normalize_text(extra)
-        base = max(base, fuzz.WRatio(normalized_query, normalized_extra), fuzz.partial_ratio(normalized_query, normalized_extra))
+        base = max(base, fuzz.WRatio(normalize_text(query), normalize_text(extra)))
     return int(base)
 
 
@@ -144,6 +132,28 @@ def make_cache_key(*parts: str) -> str:
     return digest
 
 
+def _normalize_for_fingerprint(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _normalize_for_fingerprint(val) for key, val in sorted(value.items(), key=lambda item: str(item[0]))}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_for_fingerprint(item) for item in value]
+    if isinstance(value, set):
+        return [_normalize_for_fingerprint(item) for item in sorted(value, key=lambda item: json.dumps(item, default=str, ensure_ascii=False))]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def stable_json_dumps(value: Any) -> str:
+    return json.dumps(_normalize_for_fingerprint(value), ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def make_fingerprint(value: Any) -> str:
+    return hashlib.sha256(stable_json_dumps(value).encode('utf-8')).hexdigest()
+
+
 def ensure_absolute_url(base_url: str, href: str | None) -> str | None:
     if not href:
         return None
@@ -161,61 +171,3 @@ def is_manga_news_url(url: str, base_url: str) -> bool:
 
 def encode_query(query: str) -> str:
     return quote(query, safe='')
-
-
-def parse_fields_param(fields: str | None) -> list[str]:
-    if not fields:
-        return []
-    return unique_list(part.strip() for part in fields.split(','))
-
-
-def project_dict_fields(data: dict, fields: list[str]) -> dict:
-    if not fields:
-        return data
-
-    projected: dict = {}
-    for field in fields:
-        parts = [part for part in field.split('.') if part]
-        if not parts:
-            continue
-        current_source = data
-        current_target = projected
-        valid = True
-        for index, part in enumerate(parts):
-            if not isinstance(current_source, dict) or part not in current_source:
-                valid = False
-                break
-            value = current_source[part]
-            is_last = index == len(parts) - 1
-            if is_last:
-                current_target[part] = value
-            else:
-                if part not in current_target or not isinstance(current_target[part], dict):
-                    current_target[part] = {}
-                current_target = current_target[part]
-                current_source = value
-        if not valid:
-            continue
-    return projected
-
-
-def flatten_for_compare(data: dict, prefix: str = '') -> dict[str, object]:
-    flattened: dict[str, object] = {}
-    for key, value in data.items():
-        path = f'{prefix}.{key}' if prefix else key
-        if isinstance(value, dict):
-            flattened.update(flatten_for_compare(value, path))
-        else:
-            flattened[path] = value
-    return flattened
-
-
-def format_output_data(data: dict, output_format: str = 'nested') -> dict:
-    if output_format == 'flat':
-        return flatten_for_compare(data)
-    return data
-
-
-def fingerprint_data(data: object) -> str:
-    raw = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)
-    return hashlib.sha256(raw.encode('utf-8')).hexdigest()

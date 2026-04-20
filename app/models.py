@@ -2,36 +2,37 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
-SCHEMA_VERSION = '1.0'
+from pydantic import BaseModel, Field
 
 
-class BaseEnvelope(BaseModel):
-    schema_version: str = SCHEMA_VERSION
+class Envelope(BaseModel):
+    schema_version: str = '1.1'
     ok: bool = True
     found: bool = True
     source: Literal['manga_news'] = 'manga_news'
     source_url: str | None = None
     cached: bool = False
+    cache_state: Literal['fresh_hit', 'refreshed', 'stale_fallback'] | None = None
     fetched_at: str | None = None
     cache_expires_at: str | None = None
     partial: bool = False
-    warnings: list[str] = Field(default_factory=list)
+    parse_status: Literal['complete', 'partial'] = 'complete'
+    missing_fields: list[str] = Field(default_factory=list)
     fingerprint: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    data: Any
 
 
-class Envelope(BaseEnvelope):
-    data: Any = None
+class ErrorEnvelope(BaseModel):
+    schema_version: str = '1.1'
+    ok: bool = False
+    error_code: Literal['not_found', 'parse_error', 'upstream_error']
+    detail: str
+    source: Literal['manga_news'] = 'manga_news'
 
 
 class HealthResponse(BaseModel):
     ok: bool = True
-    model_config = ConfigDict(
-        json_schema_extra={
-            'example': {'ok': True},
-        }
-    )
 
 
 class SearchResult(BaseModel):
@@ -44,82 +45,6 @@ class SearchResult(BaseModel):
     volume_slug: str | None = None
 
 
-class SearchResponse(BaseEnvelope):
-    data: list[SearchResult] = Field(default_factory=list)
-    model_config = ConfigDict(
-        json_schema_extra={
-            'example': {
-                'schema_version': SCHEMA_VERSION,
-                'ok': True,
-                'found': True,
-                'source': 'manga_news',
-                'source_url': 'https://www.manga-news.com/index.php/recherche/?cat=manga-serie-vf&q=one%20piece',
-                'cached': False,
-                'fetched_at': '2026-04-20T12:00:00+00:00',
-                'cache_expires_at': '2026-04-21T12:00:00+00:00',
-                'partial': False,
-                'warnings': [],
-                'fingerprint': '9f3a3a',
-                'data': [
-                    {
-                        'title': 'One Piece',
-                        'url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
-                        'kind': 'series',
-                        'score': 100,
-                        'slug': 'One-piece-Edition-originale',
-                        'series_slug': None,
-                        'volume_slug': None,
-                    }
-                ],
-            }
-        }
-    )
-
-
-class SearchResolveData(BaseModel):
-    query: str
-    kind: Literal['series', 'volume', 'all']
-    confidence: Literal['high', 'medium', 'low', 'none']
-    result: SearchResult | None = None
-    candidates: list[SearchResult] = Field(default_factory=list)
-
-
-class SearchResolveResponse(BaseEnvelope):
-    data: SearchResolveData
-    model_config = ConfigDict(
-        json_schema_extra={
-            'example': {
-                'schema_version': SCHEMA_VERSION,
-                'ok': True,
-                'found': True,
-                'source': 'manga_news',
-                'source_url': 'https://www.manga-news.com/index.php/recherche/?cat=manga-serie-vf&q=one%20piece',
-                'cached': True,
-                'fetched_at': '2026-04-20T12:00:00+00:00',
-                'cache_expires_at': '2026-04-21T12:00:00+00:00',
-                'partial': False,
-                'warnings': [],
-                'fingerprint': '4f2c31',
-                'data': {
-                    'query': 'one piece',
-                    'kind': 'series',
-                    'confidence': 'high',
-                    'result': {
-                        'title': 'One Piece',
-                        'url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
-                        'kind': 'series',
-                        'score': 100,
-                        'slug': 'One-piece-Edition-originale',
-                        'series_slug': None,
-                        'volume_slug': None,
-                    },
-                    'candidates': [],
-                },
-            }
-        }
-    )
-
-
 class NewsItem(BaseModel):
     title: str
     url: str | None = None
@@ -127,10 +52,6 @@ class NewsItem(BaseModel):
     excerpt: str | None = None
     comments: int | None = None
     category: str | None = None
-
-
-class NewsResponse(BaseEnvelope):
-    data: list[NewsItem] = Field(default_factory=list)
 
 
 class SeriesStats(BaseModel):
@@ -147,31 +68,8 @@ class EditionStatus(BaseModel):
     status: str | None = None
 
 
-class IllustrationDetails(BaseModel):
-    raw: str | None = None
-    pages: int | None = None
-    has_color_pages: bool | None = None
-
-
-class LinkItem(BaseModel):
-    title: str
-    url: str
-    kind: str | None = None
-
-
-class RelatedLinks(BaseModel):
-    series: list[LinkItem] = Field(default_factory=list)
-    volumes: list[LinkItem] = Field(default_factory=list)
-    anime: list[LinkItem] = Field(default_factory=list)
-    drama: list[LinkItem] = Field(default_factory=list)
-    dossiers: list[LinkItem] = Field(default_factory=list)
-    univers: list[LinkItem] = Field(default_factory=list)
-    external: list[LinkItem] = Field(default_factory=list)
-    misc: list[LinkItem] = Field(default_factory=list)
-
-
 class SeriesData(BaseModel):
-    title: str | None = None
+    title: str
     title_vo: str | None = None
     translated_title: str | None = None
     summary: str | None = None
@@ -186,7 +84,6 @@ class SeriesData(BaseModel):
     prepublication: str | None = None
     origin: str | None = None
     illustration: str | None = None
-    illustration_details: IllustrationDetails | None = None
     advisory_age: str | None = None
     cover_image: str | None = None
     vf: EditionStatus | None = None
@@ -196,13 +93,11 @@ class SeriesData(BaseModel):
     stats: SeriesStats | None = None
     themes: list[str] = Field(default_factory=list)
     strengths: str | None = None
-    related: RelatedLinks | None = None
-    raw_sections: dict[str, list[str]] | None = None
-    source_url: str | None = None
+    source_url: str
 
 
 class VolumeData(BaseModel):
-    title: str | None = None
+    title: str
     series_title: str | None = None
     title_vo: str | None = None
     translated_title: str | None = None
@@ -218,7 +113,6 @@ class VolumeData(BaseModel):
     prepublication: str | None = None
     origin: str | None = None
     illustration: str | None = None
-    illustration_details: IllustrationDetails | None = None
     advisory_age: str | None = None
     publication_date: str | None = None
     isbn_ean: str | None = None
@@ -226,41 +120,7 @@ class VolumeData(BaseModel):
     cover_image: str | None = None
     editorial_score: float | None = None
     reader_score: float | None = None
-    related: RelatedLinks | None = None
-    raw_sections: dict[str, list[str]] | None = None
-    source_url: str | None = None
-
-
-class SeriesResponse(BaseEnvelope):
-    data: SeriesData | dict[str, Any] | None = None
-    model_config = ConfigDict(
-        json_schema_extra={
-            'example': {
-                'schema_version': SCHEMA_VERSION,
-                'ok': True,
-                'found': True,
-                'source': 'manga_news',
-                'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
-                'cached': False,
-                'fetched_at': '2026-04-20T12:00:00+00:00',
-                'cache_expires_at': '2026-04-21T12:00:00+00:00',
-                'partial': False,
-                'warnings': [],
-                'fingerprint': '7a1f88',
-                'data': {
-                    'title': 'One Piece',
-                    'title_vo': 'ワンピース',
-                    'publisher_fr': 'Glénat',
-                    'vf': {'volumes': 112, 'status': 'En cours'},
-                    'next_release_date': '2026-05-06',
-                },
-            }
-        }
-    )
-
-
-class VolumeResponse(BaseEnvelope):
-    data: VolumeData | dict[str, Any] | None = None
+    source_url: str
 
 
 class PlanningItem(BaseModel):
@@ -280,89 +140,44 @@ class PlanningPage(BaseModel):
     year: int | None = None
     month: int | None = None
     page: int | None = None
-    filters: dict[str, Any] | None = None
-    sort: str | None = None
-    total_items: int | None = None
     items: list[PlanningItem] = Field(default_factory=list)
 
 
-class PlanningResponse(BaseEnvelope):
-    data: PlanningPage | dict[str, Any] | None = None
-    model_config = ConfigDict(
-        json_schema_extra={
-            'example': {
-                'schema_version': SCHEMA_VERSION,
-                'ok': True,
-                'found': True,
-                'source': 'manga_news',
-                'source_url': 'https://www.manga-news.com/index.php/planning/?p_year=2026&p_month=4',
-                'cached': False,
-                'fetched_at': '2026-04-20T12:00:00+00:00',
-                'cache_expires_at': '2026-04-20T18:00:00+00:00',
-                'partial': False,
-                'warnings': [],
-                'fingerprint': '7f90d1',
-                'data': {
-                    'section': 'manga-vf',
-                    'year': 2026,
-                    'month': 4,
-                    'page': 1,
-                    'filters': {'publisher': 'Glénat', 'query': None, 'date_from': None, 'date_to': None},
-                    'sort': 'date_asc',
-                    'total_items': 1,
-                    'items': [
-                        {
-                            'title': 'One Piece Vol.110',
-                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
-                            'release_date': '2026-04-27',
-                            'authors': ['Eiichirô ODA'],
-                            'publisher': 'Glénat',
-                            'summary': 'Résumé',
-                            'featured': False,
-                            'series_slug': 'One-Piece',
-                            'volume_slug': 'vol-110',
-                        }
-                    ],
-                },
-            }
-        }
-    )
+class CacheNamespaceStats(BaseModel):
+    entries: int = 0
+    fresh: int = 0
+    stale_usable: int = 0
+    expired: int = 0
 
 
-class SeriesEditionItem(BaseModel):
-    title: str
-    url: str
-    series_slug: str | None = None
-    volume_slug: str | None = None
-    number: str | None = None
-    publication_date: str | None = None
-    cover_image: str | None = None
+class CacheStatsData(BaseModel):
+    db_path: str
+    totals: CacheNamespaceStats
+    by_namespace: dict[str, CacheNamespaceStats] = Field(default_factory=dict)
+    watch_snapshots: dict[str, Any] = Field(default_factory=dict)
+    oldest_fetched_at: str | None = None
+    newest_fetched_at: str | None = None
 
 
-class SeriesEditionsBlock(BaseModel):
-    edition: Literal['vf', 'vo']
-    source_url: str | None = None
-    total: int = 0
-    items: list[SeriesEditionItem] = Field(default_factory=list)
+class CacheInvalidateData(BaseModel):
+    deleted_entries: int
+    filters: dict[str, Any] = Field(default_factory=dict)
 
 
-class SeriesEditionsData(BaseModel):
-    title: str | None = None
-    series_slug: str | None = None
-    vf: SeriesEditionsBlock | None = None
-    vo: SeriesEditionsBlock | None = None
-    source_url: str | None = None
-
-
-class SeriesEditionsResponse(BaseEnvelope):
-    data: SeriesEditionsData | None = None
-
-
-class SeriesRelatedData(BaseModel):
-    title: str | None = None
-    related: RelatedLinks = Field(default_factory=RelatedLinks)
-    source_url: str | None = None
-
-
-class SeriesRelatedResponse(BaseEnvelope):
-    data: SeriesRelatedData | None = None
+class PlanningWatchData(BaseModel):
+    section: str
+    year: int | None = None
+    month: int | None = None
+    watch_id: str | None = None
+    has_previous_snapshot: bool = False
+    scope_changed: bool = False
+    changed: bool = False
+    previous_fingerprint: str | None = None
+    current_fingerprint: str
+    total_items: int = 0
+    added_count: int = 0
+    removed_count: int = 0
+    added_items: list[PlanningItem] = Field(default_factory=list)
+    removed_items: list[PlanningItem] = Field(default_factory=list)
+    current_items_preview: list[PlanningItem] = Field(default_factory=list)
+    filters: dict[str, Any] = Field(default_factory=dict)

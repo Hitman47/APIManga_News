@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import Depends, FastAPI, Header, Query, Response
-from fastapi.encoders import jsonable_encoder
+from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.auth import require_api_token
@@ -13,25 +14,16 @@ from app.cache import SQLiteCache
 from app.config import Settings, get_settings
 from app.exceptions import ParseError, ResourceNotFound, UpstreamError
 from app.http import AsyncFetcher
+from app.logging_utils import log_event, reset_request_id, set_request_id
 from app.manga_news.service import MangaNewsService
-from app.models import (
-    HealthResponse,
-    NewsResponse,
-    PlanningResponse,
-    SearchResolveResponse,
-    SearchResponse,
-    SeriesEditionsResponse,
-    SeriesRelatedResponse,
-    SeriesResponse,
-    VolumeResponse,
-)
-from app.utils import fingerprint_data
+from app.models import Envelope, ErrorEnvelope, HealthResponse
 
 
 def configure_logging(settings: Settings) -> None:
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+        format='%(message)s' if settings.log_format.lower() == 'json' else '%(asctime)s %(levelname)s %(name)s: %(message)s',
+        force=True,
     )
 
 
@@ -40,7 +32,7 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings)
     cache = SQLiteCache(settings.db_path)
-    fetcher = AsyncFetcher(settings.user_agent, settings.request_timeout_seconds)
+    fetcher = AsyncFetcher(settings.user_agent, settings.request_timeout_seconds, log_json=settings.log_format.lower() == 'json')
     service = MangaNewsService(settings=settings, fetcher=fetcher, cache=cache)
     app.state.settings = settings
     app.state.service = service
@@ -52,11 +44,50 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title='Manga News Private API',
-    version='0.3.0',
+    version='0.2.0',
     docs_url=get_settings().docs_url,
     redoc_url=get_settings().redoc_url,
     lifespan=lifespan,
 )
+
+
+@app.middleware('http')
+async def request_context_middleware(request: Request, call_next):
+    request_id = uuid.uuid4().hex[:12]
+    token = set_request_id(request_id)
+    started = time.perf_counter()
+    settings = getattr(app.state, 'settings', get_settings())
+    try:
+        response = await call_next(request)
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        response.headers['X-Request-ID'] = request_id
+        log_event(
+            logging.getLogger('app.access'),
+            logging.INFO,
+            'request_complete',
+            json_mode=settings.log_format.lower() == 'json',
+            method=request.method,
+            path=request.url.path,
+            query=str(request.url.query),
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+        )
+        return response
+    except Exception:
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        log_event(
+            logging.getLogger('app.access'),
+            logging.ERROR,
+            'request_error',
+            json_mode=settings.log_format.lower() == 'json',
+            method=request.method,
+            path=request.url.path,
+            query=str(request.url.query),
+            duration_ms=duration_ms,
+        )
+        raise
+    finally:
+        reset_request_id(token)
 
 
 def get_service() -> MangaNewsService:
@@ -74,231 +105,99 @@ async def auth_dependency(
     return await require_api_token(settings, authorization)
 
 
+def _error_response(status_code: int, error_code: str, detail: str) -> JSONResponse:
+    payload = ErrorEnvelope(error_code=error_code, detail=detail)
+    return JSONResponse(status_code=status_code, content=payload.model_dump())
+
+
 @app.exception_handler(ResourceNotFound)
 async def not_found_handler(_, exc: ResourceNotFound):
-    return JSONResponse(status_code=404, content={'detail': str(exc)})
+    return _error_response(404, 'not_found', str(exc))
 
 
 @app.exception_handler(ParseError)
 async def parse_error_handler(_, exc: ParseError):
-    return JSONResponse(status_code=502, content={'detail': str(exc)})
+    return _error_response(502, 'parse_error', str(exc))
 
 
 @app.exception_handler(UpstreamError)
 async def upstream_error_handler(_, exc: UpstreamError):
-    return JSONResponse(status_code=502, content={'detail': str(exc)})
+    return _error_response(502, 'upstream_error', str(exc))
 
 
-def _normalize_envelope_payload(payload) -> dict:
-    body = payload.model_dump() if hasattr(payload, 'model_dump') else dict(payload)
-    if 'data' in body and 'ok' in body:
-        body.setdefault('schema_version', '1.0')
-        body.setdefault('fingerprint', fingerprint_data(body.get('data')))
-    return body
-
-
-
-def _if_none_match_matches(if_none_match: str | None, fingerprint: str) -> bool:
-    if not if_none_match:
-        return False
-    for raw_candidate in if_none_match.split(','):
-        candidate = raw_candidate.strip()
-        if not candidate:
-            continue
-        if candidate == '*':
-            return True
-        if candidate.startswith('W/'):
-            candidate = candidate[2:].strip()
-        if candidate.startswith('"') and candidate.endswith('"'):
-            candidate = candidate[1:-1]
-        if candidate == fingerprint:
-            return True
-    return False
-
-
-
-def _envelope_response(payload, if_none_match: str | None = None) -> Response:
-    body = _normalize_envelope_payload(payload)
-    fingerprint = body.get('fingerprint')
-    headers = {}
-    if fingerprint:
-        headers['ETag'] = f'"{fingerprint}"'
-        headers['X-Data-Fingerprint'] = fingerprint
-    if fingerprint and _if_none_match_matches(if_none_match, fingerprint):
-        return Response(status_code=304, headers=headers)
-    return JSONResponse(content=jsonable_encoder(body), headers=headers)
-
-
-@app.get('/health', dependencies=[Depends(auth_dependency)], response_model=HealthResponse)
+@app.get('/health', response_model=HealthResponse, dependencies=[Depends(auth_dependency)])
 async def health():
     return {'ok': True}
 
 
-@app.get('/search', dependencies=[Depends(auth_dependency)], response_model=SearchResponse)
+@app.get('/search', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
 async def search(
     q: str = Query(..., min_length=1),
     kind: Literal['series', 'volume', 'all'] = Query(default='all'),
     mode: Literal['best', 'all'] = Query(default='best'),
     limit: int = Query(default=10, ge=1, le=50),
-    if_none_match: str | None = Header(default=None),
     service: MangaNewsService = Depends(get_service),
 ):
-    result = await service.search(query=q, kind=kind, mode=mode, limit=limit)
-    return _envelope_response(result, if_none_match)
+    return await service.search(query=q, kind=kind, mode=mode, limit=limit)
 
 
-@app.get('/search/resolve', dependencies=[Depends(auth_dependency)], response_model=SearchResolveResponse)
-async def search_resolve(
-    q: str = Query(..., min_length=1),
-    kind: Literal['series', 'volume', 'all'] = Query(default='series'),
-    limit: int = Query(default=5, ge=1, le=20),
-    if_none_match: str | None = Header(default=None),
-    service: MangaNewsService = Depends(get_service),
-):
-    result = await service.resolve_search(query=q, kind=kind, limit=limit)
-    return _envelope_response(result, if_none_match)
+@app.get('/series/{slug}', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
+async def get_series(slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_series(slug=slug)
 
 
-@app.get('/series/{slug}', dependencies=[Depends(auth_dependency)], response_model=SeriesResponse)
-async def get_series(
-    slug: str,
-    blocks: str | None = Query(default=None, description='Comma-separated block names. Example: editions,stats'),
-    fields: str | None = Query(default=None, description='Comma-separated dot paths. Example: title,vf.volumes'),
-    include_raw_sections: bool = Query(default=False),
-    if_none_match: str | None = Header(default=None),
-    service: MangaNewsService = Depends(get_service),
-):
-    result = await service.get_series(slug=slug, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
-    return _envelope_response(result, if_none_match)
+@app.get('/series/by-url', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
+async def get_series_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
+    return await service.get_series(url=url)
 
 
-@app.get('/series/by-url', dependencies=[Depends(auth_dependency)], response_model=SeriesResponse)
-async def get_series_by_url(
-    url: str = Query(...),
-    blocks: str | None = Query(default=None),
-    fields: str | None = Query(default=None),
-    include_raw_sections: bool = Query(default=False),
-    if_none_match: str | None = Header(default=None),
-    service: MangaNewsService = Depends(get_service),
-):
-    result = await service.get_series(url=url, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
-    return _envelope_response(result, if_none_match)
+@app.get('/volume/{series_slug}/{volume_slug}', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
+async def get_volume(series_slug: str, volume_slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_volume(series_slug=series_slug, volume_slug=volume_slug)
 
 
-@app.get('/series/{slug}/related', dependencies=[Depends(auth_dependency)], response_model=SeriesRelatedResponse)
-async def get_series_related(
-    slug: str,
-    if_none_match: str | None = Header(default=None),
-    service: MangaNewsService = Depends(get_service),
-):
-    result = await service.get_series_related(slug=slug)
-    return _envelope_response(result, if_none_match)
+@app.get('/volume/by-url', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
+async def get_volume_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
+    return await service.get_volume(url=url)
 
 
-@app.get('/series/by-url/related', dependencies=[Depends(auth_dependency)], response_model=SeriesRelatedResponse)
-async def get_series_related_by_url(
-    url: str = Query(...),
-    if_none_match: str | None = Header(default=None),
-    service: MangaNewsService = Depends(get_service),
-):
-    result = await service.get_series_related(url=url)
-    return _envelope_response(result, if_none_match)
-
-
-@app.get('/series/{slug}/editions', dependencies=[Depends(auth_dependency)], response_model=SeriesEditionsResponse)
-async def get_series_editions(
-    slug: str,
-    edition: Literal['all', 'vf', 'vo'] = Query(default='all'),
-    if_none_match: str | None = Header(default=None),
-    service: MangaNewsService = Depends(get_service),
-):
-    result = await service.get_series_editions(slug=slug, edition=edition)
-    return _envelope_response(result, if_none_match)
-
-
-@app.get('/series/by-url/editions', dependencies=[Depends(auth_dependency)], response_model=SeriesEditionsResponse)
-async def get_series_editions_by_url(
-    url: str = Query(...),
-    edition: Literal['all', 'vf', 'vo'] = Query(default='all'),
-    if_none_match: str | None = Header(default=None),
-    service: MangaNewsService = Depends(get_service),
-):
-    result = await service.get_series_editions(url=url, edition=edition)
-    return _envelope_response(result, if_none_match)
-
-
-@app.get('/volume/{series_slug}/{volume_slug}', dependencies=[Depends(auth_dependency)], response_model=VolumeResponse)
-async def get_volume(
-    series_slug: str,
-    volume_slug: str,
-    blocks: str | None = Query(default=None, description='Comma-separated block names. Example: release,scores'),
-    fields: str | None = Query(default=None, description='Comma-separated dot paths. Example: publication_date,isbn_ean'),
-    include_raw_sections: bool = Query(default=False),
-    if_none_match: str | None = Header(default=None),
-    service: MangaNewsService = Depends(get_service),
-):
-    result = await service.get_volume(series_slug=series_slug, volume_slug=volume_slug, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
-    return _envelope_response(result, if_none_match)
-
-
-@app.get('/volume/by-url', dependencies=[Depends(auth_dependency)], response_model=VolumeResponse)
-async def get_volume_by_url(
-    url: str = Query(...),
-    blocks: str | None = Query(default=None),
-    fields: str | None = Query(default=None),
-    include_raw_sections: bool = Query(default=False),
-    if_none_match: str | None = Header(default=None),
-    service: MangaNewsService = Depends(get_service),
-):
-    result = await service.get_volume(url=url, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
-    return _envelope_response(result, if_none_match)
-
-
-@app.get('/news/global', dependencies=[Depends(auth_dependency)], response_model=NewsResponse)
+@app.get('/news/global', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
 async def get_global_news(
     limit: int = Query(default=10, ge=1, le=50),
-    if_none_match: str | None = Header(default=None),
     service: MangaNewsService = Depends(get_service),
 ):
-    result = await service.get_global_news(limit=limit)
-    return _envelope_response(result, if_none_match)
+    return await service.get_global_news(limit=limit)
 
 
-@app.get('/news/series/{slug}', dependencies=[Depends(auth_dependency)], response_model=NewsResponse)
+@app.get('/news/series/{slug}', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
 async def get_series_news(
     slug: str,
     limit: int = Query(default=10, ge=1, le=50),
-    if_none_match: str | None = Header(default=None),
     service: MangaNewsService = Depends(get_service),
 ):
-    result = await service.get_series_news(slug=slug, limit=limit)
-    return _envelope_response(result, if_none_match)
+    return await service.get_series_news(slug=slug, limit=limit)
 
 
-@app.get('/news/volume/{series_slug}/{volume_slug}', dependencies=[Depends(auth_dependency)], response_model=NewsResponse)
+@app.get('/news/volume/{series_slug}/{volume_slug}', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
 async def get_volume_news(
     series_slug: str,
     volume_slug: str,
     limit: int = Query(default=10, ge=1, le=50),
-    if_none_match: str | None = Header(default=None),
     service: MangaNewsService = Depends(get_service),
 ):
-    result = await service.get_volume_news(series_slug=series_slug, volume_slug=volume_slug, limit=limit)
-    return _envelope_response(result, if_none_match)
+    return await service.get_volume_news(series_slug=series_slug, volume_slug=volume_slug, limit=limit)
 
 
-@app.get('/news/volume/by-url', dependencies=[Depends(auth_dependency)], response_model=NewsResponse)
+@app.get('/news/volume/by-url', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
 async def get_volume_news_by_url(
     url: str = Query(...),
     limit: int = Query(default=10, ge=1, le=50),
-    if_none_match: str | None = Header(default=None),
     service: MangaNewsService = Depends(get_service),
 ):
-    result = await service.get_volume_news(url=url, limit=limit)
-    return _envelope_response(result, if_none_match)
+    return await service.get_volume_news(url=url, limit=limit)
 
 
-@app.get('/planning', dependencies=[Depends(auth_dependency)], response_model=PlanningResponse)
+@app.get('/planning', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
 async def get_planning(
     section: Literal['manga-vf', 'manga-vo'] = Query(default='manga-vf'),
     year: int | None = Query(default=None, ge=1900, le=2100),
@@ -310,10 +209,9 @@ async def get_planning(
     date_to: str | None = Query(default=None),
     sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'] = Query(default='date_asc'),
     limit: int = Query(default=25, ge=1, le=100),
-    if_none_match: str | None = Header(default=None),
     service: MangaNewsService = Depends(get_service),
 ):
-    result = await service.get_planning(
+    return await service.get_planning(
         section=section,
         year=year,
         month=month,
@@ -325,4 +223,62 @@ async def get_planning(
         sort=sort,
         limit=limit,
     )
-    return _envelope_response(result, if_none_match)
+
+
+@app.get('/planning/watch', response_model=Envelope, responses={404: {'model': ErrorEnvelope}, 502: {'model': ErrorEnvelope}}, dependencies=[Depends(auth_dependency)])
+async def get_planning_watch(
+    section: Literal['manga-vf', 'manga-vo'] = Query(default='manga-vf'),
+    year: int | None = Query(default=None, ge=1900, le=2100),
+    month: int | None = Query(default=None, ge=1, le=12),
+    page: int = Query(default=1, ge=1, le=100),
+    publisher: str | None = Query(default=None),
+    q: str | None = Query(default=None, min_length=1),
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
+    sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'] = Query(default='date_asc'),
+    limit: int = Query(default=100, ge=1, le=500),
+    watch_id: str | None = Query(default=None),
+    previous_fingerprint: str | None = Query(default=None),
+    commit_snapshot: bool = Query(default=True),
+    preview_limit: int = Query(default=10, ge=1, le=50),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.get_planning_watch(
+        section=section,
+        year=year,
+        month=month,
+        page=page,
+        publisher=publisher,
+        query=q,
+        date_from=date_from,
+        date_to=date_to,
+        sort=sort,
+        limit=limit,
+        watch_id=watch_id,
+        previous_fingerprint=previous_fingerprint,
+        commit_snapshot=commit_snapshot,
+        preview_limit=preview_limit,
+    )
+
+
+@app.get('/admin/cache/stats', response_model=Envelope, dependencies=[Depends(auth_dependency)])
+def cache_stats(service: MangaNewsService = Depends(get_service)):
+    return service.cache_stats()
+
+
+@app.post('/admin/cache/invalidate', response_model=Envelope, dependencies=[Depends(auth_dependency)])
+def invalidate_cache(
+    cache_key: str | None = Query(default=None),
+    namespace: str | None = Query(default=None),
+    resource_url: str | None = Query(default=None),
+    expired_only: bool = Query(default=False),
+    all_entries: bool = Query(default=False),
+    service: MangaNewsService = Depends(get_service),
+):
+    return service.invalidate_cache(
+        cache_key=cache_key,
+        namespace=namespace,
+        resource_url=resource_url,
+        expired_only=expired_only,
+        all_entries=all_entries,
+    )
