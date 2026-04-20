@@ -127,6 +127,8 @@ def test_search_resolve_and_etag_304():
                     'confidence': 'high',
                     'best': {
                         'title': 'One Piece',
+                        'title_vo': 'ワンピース',
+                        'translated_title': 'One Piece',
                         'url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
                         'kind': 'series',
                         'score': 98,
@@ -149,7 +151,7 @@ def test_search_resolve_and_etag_304():
 
 
 
-def test_openapi_exposes_routes_tags_and_human_readable_metadata():
+def test_openapi_exposes_series_editions_related_and_resolve_routes():
     with TestClient(app) as client:
         response = client.get('/openapi.json')
     assert response.status_code == 200
@@ -162,15 +164,42 @@ def test_openapi_exposes_routes_tags_and_human_readable_metadata():
     assert 'SeriesEditionsData' in schemas
     assert 'ResolveResponse' in schemas
 
-    tags = {tag['name'] for tag in payload.get('tags', [])}
-    assert {'health', 'search', 'series', 'volume', 'news', 'planning'} <= tags
 
-    resolve_get = payload['paths']['/search/resolve']['get']
-    assert resolve_get['summary']
-    assert resolve_get['description']
-    assert 'search' in resolve_get['tags']
+def test_search_endpoint_exposes_alternate_titles():
+    class DummyService:
+        async def search(self, **kwargs):
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/recherche/',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-search',
+                'data': [
+                    {
+                        'title': 'Black Night Parade',
+                        'title_vo': 'ブラックナイトパレード',
+                        'translated_title': 'Black Night Parade',
+                        'url': 'https://www.manga-news.com/index.php/serie/Black-Night-Parade',
+                        'kind': 'series',
+                        'score': 94,
+                        'slug': 'Black-Night-Parade',
+                        'series_slug': 'Black-Night-Parade',
+                        'volume_slug': None,
+                    }
+                ],
+            }})()
 
-    planning_get = payload['paths']['/planning']['get']
-    assert planning_get['summary']
-    assert planning_get['description']
-    assert 'planning' in planning_get['tags']
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/search?q=black%20night%20parade&kind=series&mode=all')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['data'][0]['title'] == 'Black Night Parade'
+    assert payload['data'][0]['title_vo'] == 'ブラックナイトパレード'
+    assert payload['data'][0]['translated_title'] == 'Black Night Parade'

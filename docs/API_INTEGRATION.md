@@ -1,55 +1,38 @@
-# Guide d'intégration API
+# API Integration Guide
 
-Ce document est le guide de référence pour intégrer l'API depuis une application, un script, un service ou une IA.
+This document is written for an external project or another AI agent that needs to integrate with this API without reading the whole codebase.
 
-## 1. Vue rapide
+## Goal
 
-Base URL typiques :
-- local direct : `http://localhost:8017`
-- même réseau Docker : `http://manga-news-api:8000`
-- autre machine du LAN : `http://<ip-hote>:8017`
+This API wraps public pages from Manga News and exposes normalized JSON for:
+- search
+- series details
+- volume details
+- related links
+- editions lists
+- global/series/volume news
+- release planning
 
-Contrat public actuel :
-- `GET /health`
-- `GET /search`
-- `GET /search/resolve`
-- `GET /series/{slug}`
-- `GET /series/by-url`
-- `GET /series/{slug}/related`
-- `GET /series/by-url/related`
-- `GET /series/{slug}/editions`
-- `GET /series/by-url/editions`
-- `GET /volume/{series_slug}/{volume_slug}`
-- `GET /volume/by-url`
-- `GET /news/global`
-- `GET /news/series/{slug}`
-- `GET /news/volume/{series_slug}/{volume_slug}`
-- `GET /news/volume/by-url`
-- `GET /planning`
+## Base URL
 
-Important :
-- il n'existe **pas** de routes admin publiques aujourd'hui ;
-- la source de vérité machine-readable reste `GET /openapi.json`.
+Choose the right base URL depending on where the caller runs:
+- same Docker network: `http://manga-news-api:8000`
+- host machine: `http://localhost:8017`
+- remote LAN call: `http://<host-ip>:8017`
 
-## 2. Authentification
+## Authentication
 
-Si `API_TOKEN` est vide, l'API ne demande pas d'authentification.
-
-Si `API_TOKEN` est défini :
+If `API_TOKEN` is configured, every request must include:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-Exemple `curl` :
+If `API_TOKEN` is empty, the API is open on the configured network.
 
-```bash
-curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/health"
-```
+## Response envelope
 
-## 3. Format standard des réponses
-
-La plupart des routes renvoient cette enveloppe :
+Most endpoints return the same envelope:
 
 ```json
 {
@@ -63,339 +46,154 @@ La plupart des routes renvoient cette enveloppe :
   "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "...",
-  "pagination": null,
+  "fingerprint": "sha256-like-hash",
   "data": {}
 }
 ```
 
-Signification des champs importants :
-- `found` : indique si une ressource exploitable a été trouvée ;
-- `cached` : indique si le résultat vient du cache ;
-- `partial` : vrai si l'API a dû servir une version de repli ;
-- `warnings` : informations non bloquantes ;
-- `fingerprint` : hash logique du `data`, utilisé aussi comme `ETag` ;
-- `pagination` : métadonnées présentes sur les endpoints de liste (`search`, `search/resolve`, `news`, `planning`) quand le service en renvoie.
+## Caching contract for clients
 
-## 4. Cache côté client avec `ETag`
-
-Quand l'API renvoie un `fingerprint`, elle renvoie aussi :
+Responses include:
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
 
-Workflow recommandé :
-1. faire la première requête ;
-2. stocker l'ETag ;
-3. rejouer plus tard la même requête avec `If-None-Match` ;
-4. traiter `304 Not Modified` comme “rien n'a changé”.
+Clients should reuse the ETag:
 
-Exemple :
-
-```bash
-curl -i "http://localhost:8017/series/One-piece-Edition-originale"
+```http
+If-None-Match: "<fingerprint>"
 ```
 
-Puis :
+If nothing changed, the API returns `304 Not Modified` with no body.
 
-```bash
-curl -i "http://localhost:8017/series/One-piece-Edition-originale"   -H 'If-None-Match: "<fingerprint>"'
+## Best endpoint for automated title resolution
+
+Use `/search/resolve` instead of `/search` when you want one best result directly.
+
+Example:
+
+```http
+GET /search/resolve?q=one%20piece&kind=series
 ```
 
-## 5. Gestion des erreurs
-
-Format d'erreur public actuel :
+Response shape:
 
 ```json
-{ "detail": "..." }
+{
+  "data": {
+    "query": "one piece",
+    "kind_requested": "series",
+    "confidence": "high",
+    "best": {
+      "title": "One Piece",
+      "url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
+      "kind": "series",
+      "score": 98,
+      "slug": "One-piece-Edition-originale"
+    },
+    "candidates": []
+  }
+}
 ```
 
-Codes à traiter :
-- `401` : token absent ou invalide ;
-- `404` : la page ciblée n'existe pas ;
-- `502` : le fetch amont a échoué ou le parser n'a pas reconnu la page ;
-- `304` : inchangé, pas de body.
+### Confidence meaning
+- `high`: strong match, generally safe to use directly
+- `medium`: probably correct, but the caller may want to log it
+- `low`: weak match, caller should confirm
+- `none`: no result
 
-Les payloads JSON d'exemple de ce type sont dans :
-- [`examples/error_resource_not_found.json`](examples/error_resource_not_found.json)
-- [`examples/error_upstream_parse.json`](examples/error_upstream_parse.json)
+## Recommended client flow
 
-## 6. Exemples JSON figés
+### Find and load a series
+1. `GET /search/resolve?q=<title>&kind=series`
+2. read `data.best.slug`
+3. `GET /series/{slug}`
+4. reuse the ETag on future calls
 
-Avant d'intégrer en production, regarde aussi :
-- [`examples/search_series_one_piece.json`](examples/search_series_one_piece.json)
-- [`examples/search_resolve_series_one_piece.json`](examples/search_resolve_series_one_piece.json)
-- [`examples/series_one_piece.json`](examples/series_one_piece.json)
-- [`examples/series_related_one_piece.json`](examples/series_related_one_piece.json)
-- [`examples/series_editions_one_piece_all.json`](examples/series_editions_one_piece_all.json)
-- [`examples/volume_one_piece_110.json`](examples/volume_one_piece_110.json)
-- [`examples/news_global_one_piece_sample.json`](examples/news_global_one_piece_sample.json)
-- [`examples/planning_manga_vf_april_2026.json`](examples/planning_manga_vf_april_2026.json)
+### Find and load a volume
+1. `GET /search/resolve?q=<title>&kind=volume`
+2. read `data.best.series_slug` and `data.best.volume_slug`
+3. `GET /volume/{series_slug}/{volume_slug}`
 
-Pour une IA, c'est souvent le chemin le plus rapide :
-1. lire `/openapi.json` ;
-2. regarder 2 ou 3 payloads d'exemple ;
-3. appeler la route réelle.
+### Monitor planning
+1. call `GET /planning?...`
+2. store `fingerprint` or `ETag`
+3. call again later with `If-None-Match`
 
-## 7. Référence endpoint par endpoint
+## Main endpoints
 
-### 7.1 `GET /health`
+### Search
+- `GET /search?q=...&kind=series|volume|all&mode=best|all&limit=10`
+- `GET /search/resolve?q=...&kind=series|volume|all&limit=10`
 
-Usage : vérifier que l'API répond.
+### Series
+- `GET /series/{slug}`
+- `GET /series/by-url?url=...`
+- `GET /series/{slug}/related`
+- `GET /series/{slug}/editions?edition=all|vf|vo`
 
-Réponse :
+Projection parameters on series endpoints:
+- `blocks=editions,stats`
+- `fields=title,vf.volumes`
+- `include_raw_sections=true`
+
+### Volume
+- `GET /volume/{series_slug}/{volume_slug}`
+- `GET /volume/by-url?url=...`
+
+Projection parameters on volume endpoints:
+- `blocks=release,scores`
+- `fields=publication_date,isbn_ean`
+- `include_raw_sections=true`
+
+### News
+- `GET /news/global?limit=10`
+- `GET /news/series/{slug}?limit=10`
+- `GET /news/volume/{series_slug}/{volume_slug}?limit=10`
+- `GET /news/volume/by-url?url=...&limit=10`
+
+### Planning
+- `GET /planning?section=manga-vf|manga-vo&year=2026&month=4&page=1&publisher=...&q=...&date_from=...&date_to=...&sort=date_asc|date_desc|title_asc|title_desc&limit=25`
+
+## Error handling
+
+- `404`: resource not found on Manga News
+- `502`: upstream fetch or parse error
+- `304`: unchanged resource when using `If-None-Match`
+
+Clients should treat `partial=true` and `warnings` as non-fatal soft issues.
+
+## Minimal integration prompt for another AI
+
+Use this API as the primary manga metadata source. First call `/search/resolve` with the user title. If a best result is returned, use its slug to call `/series/{slug}` or `/volume/{series_slug}/{volume_slug}`. Reuse the `ETag` header with `If-None-Match` to avoid refetching unchanged data. Read the common response envelope fields: `ok`, `found`, `partial`, `warnings`, `fingerprint`, and `data`.
+
+
+## Search result title variants
+
+Both `/search` and `/search/resolve` can expose three title-related fields on each candidate or best match:
+- `title`: the label found directly in the search result
+- `title_vo`: original-language title parsed from the detailed series or volume page
+- `translated_title`: translated title parsed from the detailed series or volume page
+
+This matters for clients that match against Japanese titles, French catalogue names, or translated English labels.
+
+Example candidate:
 
 ```json
-{ "ok": true }
+{
+  "title": "Black Night Parade",
+  "title_vo": "ブラックナイトパレード",
+  "translated_title": "Black Night Parade",
+  "url": "https://www.manga-news.com/index.php/serie/Black-Night-Parade",
+  "kind": "series",
+  "score": 94,
+  "slug": "Black-Night-Parade",
+  "series_slug": "Black-Night-Parade",
+  "volume_slug": null
+}
 ```
 
-Exemple figé : [`examples/health_ok.json`](examples/health_ok.json)
-
-### 7.2 `GET /search`
-
-Recherche libre.
-
-Paramètres :
-- `q` : texte à chercher ;
-- `kind` : `series`, `volume`, `all` ;
-- `mode` : `best`, `all` ;
-- `limit` : nombre maximum de résultats.
-
-Exemple :
-
-```bash
-curl --get "http://localhost:8017/search"   --data-urlencode "q=one piece"   --data-urlencode "kind=series"   --data-urlencode "mode=all"   --data-urlencode "limit=5"
-```
-
-Exemple figé : [`examples/search_series_one_piece.json`](examples/search_series_one_piece.json)
-
-Quand utiliser `/search` :
-- si tu veux afficher plusieurs candidats à un utilisateur ;
-- si tu veux journaliser les scores ;
-- si tu veux choisir toi-même la stratégie de sélection.
-
-### 7.3 `GET /search/resolve`
-
-Même idée que `/search`, mais pensée pour l'automatisation.
-
-Paramètres :
-- `q` ;
-- `kind` ;
-- `limit`.
-
-Réponse utile :
-- `data.best` : meilleur résultat ;
-- `data.candidates` : autres candidats ;
-- `data.confidence` : `high`, `medium`, `low`, `none`.
-
-Exemple :
-
-```bash
-curl --get "http://localhost:8017/search/resolve"   --data-urlencode "q=one piece tome 110"   --data-urlencode "kind=volume"
-```
-
-Exemple figé : [`examples/search_resolve_series_one_piece.json`](examples/search_resolve_series_one_piece.json)
-
-### 7.4 `GET /series/{slug}`
-
-Charge une fiche série à partir de son slug.
-
-Paramètres utiles :
-- `blocks` : projection par blocs ;
-- `fields` : projection fine par chemins ;
-- `include_raw_sections=true` : ajoute les sections brutes extraites du HTML.
-
-Exemples :
-
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale"
-```
-
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale"   --data-urlencode "blocks=identity,editions,stats"
-```
-
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale"   --data-urlencode "fields=title,vf.volumes,next_release_date"
-```
-
-Exemple figé : [`examples/series_one_piece.json`](examples/series_one_piece.json)
-
-Blocs séries disponibles :
-- `identity`
-- `staff`
-- `publishing`
-- `presentation`
-- `editions`
-- `stats`
-- `related`
-- `raw`
-- `raw_sections`
-
-### 7.5 `GET /series/by-url`
-
-Même comportement, mais à partir de l'URL Manga News complète.
-
-Exemple :
-
-```bash
-curl --get "http://localhost:8017/series/by-url"   --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
-```
-
-### 7.6 `GET /series/{slug}/related`
-
-Retourne les contenus liés à une série.
-
-Exemple :
-
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/related"
-```
-
-Exemple figé : [`examples/series_related_one_piece.json`](examples/series_related_one_piece.json)
-
-### 7.7 `GET /series/{slug}/editions`
-
-Retourne les éditions VF, VO, ou les deux.
-
-Paramètre :
-- `edition=all|vf|vo`
-
-Exemple :
-
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
-```
-
-Exemple figé : [`examples/series_editions_one_piece_all.json`](examples/series_editions_one_piece_all.json)
-
-### 7.8 `GET /volume/{series_slug}/{volume_slug}`
-
-Charge une fiche volume à partir des deux slugs.
-
-Paramètres utiles :
-- `blocks`
-- `fields`
-- `include_raw_sections`
-
-Blocs volumes disponibles :
-- `identity`
-- `staff`
-- `publishing`
-- `presentation`
-- `release`
-- `scores`
-- `related`
-- `raw`
-- `raw_sections`
-
-Exemple :
-
-```bash
-curl "http://localhost:8017/volume/One-Piece/vol-110"
-```
-
-Exemple figé : [`examples/volume_one_piece_110.json`](examples/volume_one_piece_110.json)
-
-### 7.9 `GET /volume/by-url`
-
-Même comportement que la route par slugs, mais à partir d'une URL Manga News complète.
-
-### 7.10 `GET /news/global`
-
-Retourne les news globales issues du flux RSS public.
-
-Exemple :
-
-```bash
-curl "http://localhost:8017/news/global?limit=5"
-```
-
-Exemple figé : [`examples/news_global_one_piece_sample.json`](examples/news_global_one_piece_sample.json)
-
-### 7.11 `GET /news/series/{slug}`
-
-Retourne les news liées à une série.
-
-Exemple :
-
-```bash
-curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
-```
-
-### 7.12 `GET /news/volume/{series_slug}/{volume_slug}`
-
-Retourne les news liées à un volume précis.
-
-Exemple :
-
-```bash
-curl "http://localhost:8017/news/volume/One-Piece/vol-110?limit=10"
-```
-
-### 7.13 `GET /news/volume/by-url`
-
-Même comportement que la route par slugs, mais à partir de l'URL du volume.
-
-### 7.14 `GET /planning`
-
-Permet d'interroger le planning des sorties.
-
-Paramètres principaux :
-- `section=manga-vf|manga-vo`
-- `year`
-- `month`
-- `page`
-- `publisher`
-- `q`
-- `date_from`
-- `date_to`
-- `sort=date_asc|date_desc|title_asc|title_desc`
-- `limit`
-
-Exemple :
-
-```bash
-curl --get "http://localhost:8017/planning"   --data-urlencode "section=manga-vf"   --data-urlencode "year=2026"   --data-urlencode "month=4"   --data-urlencode "publisher=Glénat"   --data-urlencode "sort=date_asc"   --data-urlencode "limit=25"
-```
-
-Exemple figé : [`examples/planning_manga_vf_april_2026.json`](examples/planning_manga_vf_april_2026.json)
-
-## 8. Flows d'intégration recommandés
-
-### 8.1 Titre libre vers fiche série
-
-1. appeler `/search/resolve?q=<titre>&kind=series`
-2. lire `data.best.slug`
-3. appeler `/series/{slug}`
-4. mettre en cache côté client avec `ETag`
-
-### 8.2 URL Manga News déjà connue
-
-1. appeler `/series/by-url` ou `/volume/by-url`
-2. éviter une recherche intermédiaire inutile
-
-### 8.3 UI légère
-
-1. appeler la fiche avec `fields=`
-2. limiter le payload à ce que l'écran consomme réellement
-
-### 8.4 Client robuste
-
-1. traiter `401`, `404`, `502`, `304`
-2. considérer les champs comme optionnels
-3. ne jamais inventer une route absente de `/openapi.json`
-
-## 9. Validation locale doc + contrat
-
-Commande :
-
-```bash
-python scripts/validate_contract_and_docs.py
-```
-
-Ce contrôle vérifie :
-- la génération de l'OpenAPI ;
-- les routes critiques ;
-- les tags critiques ;
-- la validité des exemples JSON ;
-- les liens Markdown locaux de la doc.
+Recommended matching strategy for another service or an AI agent:
+1. Prefer `slug` or `(series_slug, volume_slug)` as stable identifiers.
+2. Display `title` to users by default.
+3. Use `title_vo` and `translated_title` as secondary search and disambiguation fields.
+4. If multiple candidates are close, show all three title fields before picking a winner.

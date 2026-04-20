@@ -1,269 +1,329 @@
 # Manga News Private API
 
-API non officielle, auto-hébergée, qui récupère les pages publiques de Manga News et les expose sous forme de JSON propre, stable et réutilisable.
+API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d'interroger Manga News avec un cache SQLite et une authentification Bearer optionnelle.
 
-Elle sert surtout à trois cas d'usage :
-- un projet perso qui a besoin de métadonnées manga ;
-- un autre service qui veut consommer des fiches série / volume sans parser du HTML ;
-- une IA ou un agent qui doit résoudre un titre puis interroger l'API de manière fiable.
+## Ce que fait cette V1
 
-## Ce que l'API sait faire aujourd'hui
+- recherche de séries et volumes ;
+- récupération d'une fiche série ;
+- récupération d'une fiche volume ;
+- récupération des news globales via RSS ;
+- récupération des news d'une série ;
+- récupération des news d'un volume ;
+- récupération du planning manga VF et manga VO ;
+- filtres locaux sur le planning : éditeur, plage de dates, recherche textuelle, tri ;
+- cache SQLite persistant avec fallback sur cache périmé si l'upstream casse temporairement ;
+- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc`
+- endpoints de résumé stables pour l’automatisation (`/summary`, `/release-summary`, `/news-summary`) ;
+- comparaison de deux fiches série ou de deux fiches volume ;
+- projection locale de champs choisis via les endpoints `select`.
 
-Routes publiques réellement exposées :
-- `GET /health`
-- `GET /search`
-- `GET /search/resolve`
-- `GET /series/{slug}`
-- `GET /series/by-url`
-- `GET /series/{slug}/related`
-- `GET /series/by-url/related`
-- `GET /series/{slug}/editions`
-- `GET /series/by-url/editions`
-- `GET /volume/{series_slug}/{volume_slug}`
-- `GET /volume/by-url`
-- `GET /news/global`
-- `GET /news/series/{slug}`
-- `GET /news/volume/{series_slug}/{volume_slug}`
-- `GET /news/volume/by-url`
-- `GET /planning`
+## Ce que cette V1 ne fait pas encore
 
-Capacités concrètes :
-- recherche libre de séries et de volumes ;
-- résolution automatique du meilleur résultat ;
-- récupération de fiches série et volume ;
-- projection partielle avec `blocks` et `fields` ;
-- récupération des contenus liés et des éditions d'une série ;
-- lecture des news globales, série et volume ;
-- interrogation du planning de sorties ;
-- cache côté client via `ETag` / `If-None-Match`.
+- provider anime séparé ;
+- enrichissement cross-source ;
+- pagination multi-pages automatisée côté upstream.
 
-## Ce que l'API ne fait pas aujourd'hui
+## Variables d'environnement principales
 
-- elle n'utilise pas d'API officielle Manga News ;
-- elle ne garantit pas que le HTML source ne changera jamais ;
-- elle n'expose **pas** aujourd'hui de routes admin publiques ;
-- elle ne remplace pas un vrai moteur de suivi ou d'alerting.
+Consulte `.env.example`.
 
-## Démarrage rapide
+Les plus importantes :
 
-### Local Python
+- `API_TOKEN` : si vide, pas d'auth ; si défini, il faut envoyer `Authorization: Bearer <token>` ;
+- `DB_PATH` : chemin du cache SQLite ;
+- `CACHE_TTL_*` : TTL par type de ressource ;
+- `SEARCH_SCORE_THRESHOLD` : seuil minimal de matching ;
+- `ENABLE_DOCS` : active `/docs` et `/redoc`.
+
+## Lancer localement
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows PowerShell
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8017
+uvicorn app.main:app --reload
 ```
 
-Ensuite :
-- Swagger UI : `http://localhost:8017/docs`
-- OpenAPI brut : `http://localhost:8017/openapi.json`
-- health : `http://localhost:8017/health`
-
-### Docker Compose
+## Lancer avec Docker Compose
 
 ```bash
-cp .env.example .env
 docker compose up -d --build
 ```
 
-Port exposé par défaut : `8017`.
-Le conteneur écoute en interne sur `8000`.
+L'API sera alors disponible sur `http://localhost:8017`.
 
-## Authentification
+## GitHub / GHCR
 
-Si `API_TOKEN` est vide, l'API est ouverte sur le réseau où elle est exposée.
+Fichiers ajoutés pour un dépôt GitHub propre et une publication GHCR automatique :
 
-Si `API_TOKEN` est défini, chaque requête doit envoyer :
+- `.github/workflows/ci.yml` : lance les tests sur push / pull request ;
+- `.github/workflows/publish.yml` : build multi-arch `linux/amd64` + `linux/arm64` et push vers GHCR ;
+- `.github/workflows/manifest.yml` : inspecte le manifest publié et stocke `manifest.json` en artifact ;
+- `.dockerignore` : évite d'envoyer les fichiers inutiles au build Docker ;
+- `.gitignore` : ignore l'environnement local, le cache et la base SQLite.
 
-```http
-Authorization: Bearer <token>
-```
+Image publiée par défaut : `ghcr.io/<owner>/<repo>` en minuscules.
 
-Exemple :
+Tags générés automatiquement par le workflow de publication :
 
-```bash
-curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/health"
-```
+- `latest` sur la branche par défaut ;
+- tag de branche ;
+- tag Git ;
+- semver (`1.2.3`, `1.2`) si le tag Git suit `v1.2.3` ;
+- tag SHA court.
 
-## Contrat HTTP à connaître
+### Secrets et permissions
 
-### Enveloppe de réponse
+Pour publier vers GHCR depuis GitHub Actions, aucun secret supplémentaire n'est nécessaire tant que le package est publié par le dépôt lui-même : le workflow utilise `GITHUB_TOKEN`.
 
-Presque toutes les routes renvoient une enveloppe standard :
+Pour **pull une image privée depuis Portainer, Docker Compose ou une autre machine**, prévois en revanche un **PAT GitHub classic** avec au minimum `read:packages`.
 
-```json
-{
-  "schema_version": "1.0",
-  "ok": true,
-  "found": true,
-  "source": "manga_news",
-  "source_url": "https://www.manga-news.com/...",
-  "cached": false,
-  "fetched_at": "2026-04-20T12:00:00+00:00",
-  "cache_expires_at": "2026-04-21T12:00:00+00:00",
-  "partial": false,
-  "warnings": [],
-  "fingerprint": "...",
-  "pagination": null,
-  "data": {}
-}
-```
+### Déclenchement conseillé
 
-### Cache côté client : `ETag`
+- push sur `main` : publication continue ;
+- tag `vX.Y.Z` : publication versionnée ;
+- `workflow_dispatch` : exécution manuelle.
 
-Quand une réponse contient un `fingerprint`, l'API renvoie aussi :
-- `ETag: "<fingerprint>"`
-- `X-Data-Fingerprint: <fingerprint>`
 
-Tu peux donc renvoyer :
+## Exemples curl
 
-```http
-If-None-Match: "<fingerprint>"
-```
-
-et obtenir `304 Not Modified` si rien n'a changé.
-
-### Erreurs
-
-Le format d'erreur public actuel est volontairement simple :
-
-```json
-{ "detail": "..." }
-```
-
-Codes principaux :
-- `401` : token manquant ou invalide ;
-- `404` : ressource absente côté Manga News ;
-- `502` : erreur d'accès à Manga News ou parsing cassé ;
-- `304` : inchangé quand `If-None-Match` est fourni.
-
-## Premiers appels utiles
-
-### 1) Résoudre une série
+### Health
 
 ```bash
-curl --get "http://localhost:8017/search/resolve"   --data-urlencode "q=one piece"   --data-urlencode "kind=series"
+curl http://localhost:8017/health
 ```
 
-### 2) Charger la fiche série
+### Recherche simple
+
+```bash
+curl "http://localhost:8017/search?q=one%20piece&kind=series&mode=all&limit=5"
+```
+
+Search results now expose alternate titles when Manga News provides them on the detail page: `title`, `title_vo`, and `translated_title`.
+
+### Fiche série via slug
 
 ```bash
 curl "http://localhost:8017/series/One-piece-Edition-originale"
 ```
 
-### 3) Charger uniquement quelques champs
+### Fiche série via URL
 
 ```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale"   --data-urlencode "fields=title,vf.volumes,next_release_date"
+curl --get "http://localhost:8017/series/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
 ```
 
-### 4) Charger les éditions VF / VO
-
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
-```
-
-### 5) Charger un volume
+### Fiche volume via slug
 
 ```bash
 curl "http://localhost:8017/volume/One-Piece/vol-110"
 ```
 
-### 6) Lire le planning
+### News globales
 
 ```bash
-curl --get "http://localhost:8017/planning"   --data-urlencode "section=manga-vf"   --data-urlencode "year=2026"   --data-urlencode "month=4"   --data-urlencode "publisher=Glénat"   --data-urlencode "sort=date_asc"
+curl "http://localhost:8017/news/global?limit=10"
 ```
 
-## Architecture
-
-```mermaid
-flowchart LR
-    Client[Client / service / IA] --> API[FastAPI app/main.py]
-    API --> Auth[auth.py]
-    API --> Service[MangaNewsService]
-    Service --> Cache[(SQLite cache)]
-    Service --> Fetcher[httpx AsyncFetcher]
-    Fetcher --> MangaNews[(manga-news.com)]
-    MangaNews --> Fetcher
-    Fetcher --> Parsers[parsers.py]
-    Parsers --> Service
-    Service --> API
-    API --> Client
-```
-
-Explication rapide :
-- **FastAPI** expose le contrat HTTP et l'OpenAPI ;
-- **MangaNewsService** orchestre cache, fetch et parsing ;
-- **AsyncFetcher** récupère les pages HTML / RSS ;
-- **parsers.py** convertit le HTML en structures Python ;
-- **SQLiteCache** stocke les réponses pour éviter de refrapper inutilement l'upstream.
-
-Le schéma détaillé est dans [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
-
-## Documentation à lire selon ton besoin
-
-- [`docs/API_INTEGRATION.md`](docs/API_INTEGRATION.md) : guide d'intégration complet, endpoint par endpoint ;
-- [`docs/USE_CASES_AND_RECIPES.md`](docs/USE_CASES_AND_RECIPES.md) : recettes concrètes, workflows et anti-patterns ;
-- [`docs/OPENAPI_AND_AI_USAGE.md`](docs/OPENAPI_AND_AI_USAGE.md) : comment exploiter `/openapi.json`, Swagger et une IA ;
-- [`docs/DEPLOYMENT_AND_OPERATIONS.md`](docs/DEPLOYMENT_AND_OPERATIONS.md) : configuration, Docker, cache, retries, diagnostic ;
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) : composants, flux et rôle de chaque module ;
-- [`docs/ONE_PIECE_API_TESTS.txt`](docs/ONE_PIECE_API_TESTS.txt) : scénario de test prêt à lancer ;
-- [`docs/API_CHANGELOG.md`](docs/API_CHANGELOG.md) : changelog du contrat HTTP et des payloads ;
-- [`docs/examples/README.md`](docs/examples/README.md) : exemples JSON figés, utilisables par un dev ou une IA.
-
-## Validation locale du contrat et de la doc
-
-Commande recommandée après une modification :
+### News d'une série
 
 ```bash
-python scripts/validate_contract_and_docs.py
-pytest
+curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
 ```
 
-La validation de contrat/doc vérifie notamment :
-- que `/openapi.json` se génère ;
-- que les routes attendues existent ;
-- que les exemples JSON de `docs/examples/` sont valides ;
-- que les liens Markdown locaux de la doc pointent sur de vrais fichiers.
+### Avec Bearer token
 
-## Variables d'environnement principales
+```bash
+curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/search?q=one%20piece"
+```
 
-Réglages utiles et réellement actifs aujourd'hui :
-- `APP_NAME` : nom affiché de l'application ;
-- `APP_ENV` : environnement (`development`, `production`, etc.) ;
-- `LOG_LEVEL` : niveau de logs ;
-- `LOG_FORMAT` : accepté par la config, mais les logs restent actuellement orientés texte ;
-- `MANGA_NEWS_BASE_URL` : URL de base Manga News ;
-- `USER_AGENT` : user-agent envoyé à Manga News ;
-- `API_TOKEN` : token Bearer optionnel ;
-- `DB_PATH` : chemin du cache SQLite ;
-- `REQUEST_TIMEOUT_SECONDS` : timeout HTTP amont ;
-- `REQUEST_MAX_RETRIES` : nombre de retries amont ;
-- `REQUEST_BACKOFF_SECONDS` : base du backoff entre retries ;
-- `CACHE_STALE_GRACE_SECONDS` : durée d'utilisation d'un cache périmé en cas d'erreur amont ;
-- `CACHE_TTL_SEARCH_SECONDS` : TTL du cache recherche ;
-- `CACHE_TTL_SERIES_SECONDS` : TTL des fiches série et éditions ;
-- `CACHE_TTL_VOLUME_SECONDS` : TTL des fiches volume ;
-- `CACHE_TTL_NEWS_GLOBAL_SECONDS` : TTL des news globales ;
-- `CACHE_TTL_NEWS_SERIES_SECONDS` : TTL des news série / volume ;
-- `CACHE_TTL_PLANNING_SECONDS` : TTL du planning ;
-- `SEARCH_SCORE_THRESHOLD` : seuil minimal de score de recherche ;
-- `DEFAULT_LIMIT` / `MAX_LIMIT` : limites par défaut et maximale côté API ;
-- `ENABLE_DOCS` : expose ou non `/docs` et `/redoc`.
+## Notes de conception
 
-Variables présentes dans la configuration mais **pas exploitées par une route publique aujourd'hui** :
-- `ADMIN_TOKEN`
-- `DEBUG_CAPTURE_HTML_ON_ERROR`
-- `DEBUG_HTML_DUMP_DIR`
-- `NEGATIVE_CACHE_ENABLED`
-- `NEGATIVE_CACHE_TTL_SECONDS`
-- `RATE_LIMIT_*`
+- L'API repose sur le HTML public et le flux RSS de Manga News. C'est un usage privé ; ne t'en sers pas pour republier massivement leur contenu.
+- Le cache persistant limite les appels et réduit le risque de casser ton automatisation sur une panne temporaire du site.
+- Les parsers sont volontairement tolérants : beaucoup de logique est basée sur les libellés textuels visibles plutôt que sur des sélecteurs CSS trop fragiles.
 
-Pour le comportement réel, la source de vérité reste toujours :
-- le code ;
-- `/openapi.json` ;
-- les exemples figés de `docs/examples/`.
+
+### Planning manga VF
+
+```bash
+curl --get "http://localhost:8017/planning" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "year=2026" \
+  --data-urlencode "month=4" \
+  --data-urlencode "publisher=Glénat" \
+  --data-urlencode "date_from=2026-04-01" \
+  --data-urlencode "date_to=2026-04-30" \
+  --data-urlencode "sort=date_asc"
+```
+
+### Manifest GHCR
+
+Après publication, le workflow `manifest.yml` peut inspecter l'image publiée et produire un `manifest.json` téléchargeable depuis les artifacts GitHub Actions. C'est utile pour vérifier qu'un manifest multi-arch a bien été généré.
+
+
+## Endpoints d’automatisation ajoutés
+
+### Résumé série minimal et stable
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/summary"
+```
+
+### Résumé des sorties série
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/release-summary"
+```
+
+### Résumé news série
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/news-summary?limit=20"
+```
+
+### Résumé volume minimal et stable
+
+```bash
+curl "http://localhost:8017/volume/One-Piece/vol-110/summary"
+```
+
+### Projection ciblée de champs
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/select" \
+  --data-urlencode "fields=title,vf.volumes,next_release_date"
+```
+
+```bash
+curl --get "http://localhost:8017/volume/One-Piece/vol-110/select" \
+  --data-urlencode "fields=title,publication_date,isbn_ean"
+```
+
+### Comparer deux séries
+
+```bash
+curl --get "http://localhost:8017/compare/series" \
+  --data-urlencode "left_slug=One-piece-Edition-originale" \
+  --data-urlencode "right_slug=One-piece"
+```
+
+### Comparer deux volumes
+
+```bash
+curl --get "http://localhost:8017/compare/volume" \
+  --data-urlencode "left_series_slug=One-Piece" \
+  --data-urlencode "left_volume_slug=vol-109" \
+  --data-urlencode "right_series_slug=One-Piece" \
+  --data-urlencode "right_volume_slug=vol-110"
+```
+
+## Nouvelles options utiles pour l'automatisation
+
+### Projection par blocs métier
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/blocks" \
+  --data-urlencode "blocks=identity,release"
+```
+
+```bash
+curl --get "http://localhost:8017/volume/One-Piece/vol-110/blocks" \
+  --data-urlencode "blocks=publication,scores" \
+  --data-urlencode "format=flat"
+```
+
+### Timeline série
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/timeline?news_limit=5"
+```
+
+### Watch / fingerprint pour savoir si quelque chose a changé
+
+Premier appel :
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/watch"
+```
+
+Appel suivant en réutilisant le fingerprint précédent :
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/watch" \
+  --data-urlencode "previous_fingerprint=<fingerprint_precedent>" \
+  --data-urlencode "fields=vf.volumes,next_release_date" \
+  --data-urlencode "format=flat"
+```
+
+### Valeur unique pour les cas ultra simples
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/vf-volumes"
+```
+
+```bash
+curl "http://localhost:8017/volume/One-Piece/vol-110/isbn-ean"
+```
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/value" \
+  --data-urlencode "field=vf.volumes"
+```
+
+## Avis sur la sélection partielle
+
+Oui, c’est utile. Pas pour économiser massivement le scraping upstream, mais pour rendre l’intégration bien plus propre côté client.
+
+Exemple concret : si ton autre conteneur veut juste `vf.volumes`, un endpoint `summary` ou `select` évite d’avaler toute la fiche série complète. Le gain principal est donc :
+- réponse plus petite ;
+- parsing plus simple dans le client ;
+- contrat JSON plus stable pour l’automatisation.
+
+Le site source reste quand même chargé et parsé côté API privée. Donc ce n’est pas une optimisation miracle du scraping. C’est surtout une optimisation d’interface et de maintenabilité.
+
+
+## Integration notes for another project or AI agent
+
+A detailed integration document is available in `docs/API_INTEGRATION.md`.
+
+### Recommended endpoints
+
+- Use `/search/resolve` when the caller wants the best slug directly.
+- Use `/series/{slug}` or `/volume/{series_slug}/{volume_slug}` for normalized details.
+- Use projection parameters (`blocks`, `fields`, `include_raw_sections`) only when the caller really needs partial payloads.
+- Use `ETag` and `If-None-Match` to avoid reprocessing unchanged payloads.
+
+### Example resolve call
+
+```bash
+curl "http://localhost:8017/search/resolve?q=one%20piece&kind=series"
+```
+
+### Example conditional GET
+
+```bash
+curl -i   -H 'If-None-Match: "<etag-from-previous-response>"'   "http://localhost:8017/series/One-piece-Edition-originale"
+```
+
+
+### Search result title fields
+
+`/search` and `/search/resolve` expose alternate titles when available. A result can therefore include:
+- `title`: primary title shown in the search result list
+- `title_vo`: original-language title parsed from the detailed Manga News page
+- `translated_title`: translated title parsed from the detailed Manga News page
+
+Example payload excerpt:
+
+```json
+{
+  "title": "Black Night Parade",
+  "title_vo": "ブラックナイトパレード",
+  "translated_title": "Black Night Parade",
+  "kind": "series",
+  "slug": "Black-Night-Parade"
+}
+```
