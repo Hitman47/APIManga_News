@@ -23,20 +23,25 @@ class Envelope(BaseEnvelope):
     data: Any = None
 
 
+class ApiErrorResponse(BaseModel):
+    code: str
+    detail: str
+
+
 class HealthResponse(BaseModel):
     ok: bool = True
 
 
 class SearchResult(BaseModel):
     title: str
-    title_vo: str | None = None
-    translated_title: str | None = None
     url: str
     kind: Literal['series', 'volume']
     score: int
     slug: str | None = None
     series_slug: str | None = None
     volume_slug: str | None = None
+    title_vo: str | None = None
+    translated_title: str | None = None
 
 
 class SearchResponse(BaseEnvelope):
@@ -45,14 +50,14 @@ class SearchResponse(BaseEnvelope):
 
 class ResolveResult(BaseModel):
     title: str
-    title_vo: str | None = None
-    translated_title: str | None = None
     url: str
     kind: Literal['series', 'volume']
     score: int
     slug: str | None = None
     series_slug: str | None = None
     volume_slug: str | None = None
+    title_vo: str | None = None
+    translated_title: str | None = None
 
 
 class ResolveData(BaseModel):

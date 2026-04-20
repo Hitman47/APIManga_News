@@ -9,36 +9,35 @@
   "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-series-related-one-piece",
-  "pagination": null,
+  "fingerprint": "fp-related",
   "data": {
     "title": "One Piece",
     "related": {
       "series": [
         {
-          "title": "One Piece Magazine",
-          "url": "https://www.manga-news.com/index.php/serie/One-piece-Magazine",
+          "title": "Monster Perfect Edition",
+          "url": "https://www.manga-news.com/index.php/serie/Monster-perfect-edition",
           "kind": "series"
         }
       ],
-      "volumes": [
-        {
-          "title": "One Piece Vol.110",
-          "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-110",
-          "kind": "volume"
-        }
-      ],
-      "anime": [
-        {
-          "title": "One Piece (anime)",
-          "url": "https://www.manga-news.com/index.php/serie-vo/One-Piece-anime",
-          "kind": "anime"
-        }
-      ],
+      "volumes": [],
+      "anime": [],
       "drama": [],
       "dossiers": [],
-      "univers": [],
-      "external": [],
+      "univers": [
+        {
+          "title": "Univers One Piece",
+          "url": "https://www.manga-news.com/index.php/univers/One-piece",
+          "kind": "univers"
+        }
+      ],
+      "external": [
+        {
+          "title": "Wiki externe",
+          "url": "https://example.org/wiki/one-piece",
+          "kind": "external"
+        }
+      ],
       "misc": []
     },
     "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"

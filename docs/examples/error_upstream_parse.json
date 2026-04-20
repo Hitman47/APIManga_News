@@ -1,5 +1,4 @@
 {
-  "ok": false,
   "code": "UPSTREAM_PARSE_ERROR",
-  "detail": "Unable to parse Manga News page: unexpected HTML structure."
+  "detail": "Unable to parse the requested Manga News page."
 }

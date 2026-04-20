@@ -1,38 +1,29 @@
 # API Integration Guide
 
-This document is written for an external project or another AI agent that needs to integrate with this API without reading the whole codebase.
+This guide is meant for a developer, another service, or an AI agent that needs to use the API without reading the whole codebase.
 
-## Goal
+## 1. Base URL
 
-This API wraps public pages from Manga News and exposes normalized JSON for:
-- search
-- series details
-- volume details
-- related links
-- editions lists
-- global/series/volume news
-- release planning
+Use one of these depending on where the caller runs:
+- Docker network: `http://manga-news-api:8000`
+- Host machine: `http://localhost:8017`
+- LAN caller: `http://<host-ip>:8017`
 
-## Base URL
+There is no `/v1` prefix. The current public contract is unversioned.
 
-Choose the right base URL depending on where the caller runs:
-- same Docker network: `http://manga-news-api:8000`
-- host machine: `http://localhost:8017`
-- remote LAN call: `http://<host-ip>:8017`
+## 2. Authentication
 
-## Authentication
-
-If `API_TOKEN` is configured, every request must include:
+If `API_TOKEN` is configured, every request must send:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-If `API_TOKEN` is empty, the API is open on the configured network.
+If `API_TOKEN` is empty, the API is open.
 
-## Response envelope
+## 3. Common envelope
 
-Most endpoints return the same envelope:
+Most responses use this envelope:
 
 ```json
 {
@@ -46,154 +37,169 @@ Most endpoints return the same envelope:
   "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "sha256-like-hash",
+  "fingerprint": "...",
   "data": {}
 }
 ```
 
-## Caching contract for clients
+## 4. Key endpoints
 
-Responses include:
-- `ETag: "<fingerprint>"`
-- `X-Data-Fingerprint: <fingerprint>`
-
-Clients should reuse the ETag:
+### Search
 
 ```http
-If-None-Match: "<fingerprint>"
+GET /search?q=one%20piece&kind=series&mode=all&limit=5
 ```
 
-If nothing changed, the API returns `304 Not Modified` with no body.
+`kind` can be `series`, `volume`, or `all`.
+`mode` can be `best` or `all`.
 
-## Best endpoint for automated title resolution
+Each search result may expose:
+- `title`
+- `title_vo`
+- `translated_title`
+- `url`
+- `kind`
+- `score`
+- `slug` or `series_slug` / `volume_slug`
 
-Use `/search/resolve` instead of `/search` when you want one best result directly.
+### Resolve the best result directly
+
+```http
+GET /search/resolve?q=one%20piece%20tome%2091&kind=volume&limit=10
+```
+
+### Series details
+
+```http
+GET /series/{slug}
+GET /series/by-url?url=...
+```
+
+Useful fields include:
+- `title`
+- `title_vo`
+- `translated_title`
+- `summary`
+- `authors_story`
+- `authors_art`
+- `publisher_fr`
+- `publisher_vo`
+- `vf` / `vo`
+- `stats`
+- `related`
+
+### Volume details
+
+```http
+GET /volume/{series_slug}/{volume_slug}
+GET /volume/by-url?url=...
+```
+
+Useful fields include:
+- `title`
+- `series_title`
+- `title_vo`
+- `translated_title`
+- `publication_date`
+- `isbn_ean`
+- `price_code`
+- `editorial_score`
+- `reader_score`
+
+### Related links
+
+```http
+GET /series/{slug}/related
+GET /series/by-url/related?url=...
+```
+
+### Series editions
+
+```http
+GET /series/{slug}/editions?edition=all
+GET /series/by-url/editions?url=...&edition=vf
+```
+
+### News
+
+```http
+GET /news/global?limit=10
+GET /news/series/{slug}?limit=10
+GET /news/volume/{series_slug}/{volume_slug}?limit=10
+GET /news/volume/by-url?url=...&limit=10
+```
+
+### Planning
+
+```http
+GET /planning?section=manga-vf&year=2026&month=4&publisher=Glénat&limit=10
+```
+
+Supported local filters:
+- `publisher`
+- `q`
+- `date_from`
+- `date_to`
+- `sort` (`date_asc`, `date_desc`, `title_asc`, `title_desc`)
+- `limit`
+
+## 5. ETag and client caching
+
+Responses include:
+- `ETag`
+- `X-Data-Fingerprint`
+
+Send the ETag back with `If-None-Match` to get `304 Not Modified` when possible.
+
+## 6. Projection parameters on details endpoints
+
+Series and volume detail endpoints support:
+- `blocks`
+- `fields`
+- `include_raw_sections`
 
 Example:
 
 ```http
-GET /search/resolve?q=one%20piece&kind=series
+GET /series/One-piece-Edition-originale?blocks=editions,stats&fields=title,vf.volumes
 ```
 
-Response shape:
+## 7. Error model
+
+Current validation/documentation examples use this error shape:
 
 ```json
 {
-  "data": {
-    "query": "one piece",
-    "kind_requested": "series",
-    "confidence": "high",
-    "best": {
-      "title": "One Piece",
-      "url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
-      "kind": "series",
-      "score": 98,
-      "slug": "One-piece-Edition-originale"
-    },
-    "candidates": []
-  }
+  "code": "UPSTREAM_PARSE_ERROR",
+  "detail": "Unable to parse the requested Manga News page."
 }
 ```
 
-### Confidence meaning
-- `high`: strong match, generally safe to use directly
-- `medium`: probably correct, but the caller may want to log it
-- `low`: weak match, caller should confirm
-- `none`: no result
+The exact runtime handlers may still map framework-level auth errors differently, so consumers should always check the HTTP status code first.
 
-## Recommended client flow
+## 8. Best integration flow
 
-### Find and load a series
-1. `GET /search/resolve?q=<title>&kind=series`
-2. read `data.best.slug`
-3. `GET /series/{slug}`
-4. reuse the ETag on future calls
+### Find a series reliably
+1. Call `/search/resolve?q=<title>&kind=series`
+2. Read `data.best.slug`
+3. Call `/series/{slug}`
 
-### Find and load a volume
-1. `GET /search/resolve?q=<title>&kind=volume`
-2. read `data.best.series_slug` and `data.best.volume_slug`
-3. `GET /volume/{series_slug}/{volume_slug}`
+### Find a specific volume
+1. Call `/search/resolve?q=<series name> tome <number>&kind=volume`
+2. Read `series_slug` and `volume_slug`
+3. Call `/volume/{series_slug}/{volume_slug}`
 
-### Monitor planning
-1. call `GET /planning?...`
-2. store `fingerprint` or `ETag`
-3. call again later with `If-None-Match`
+## 9. Documentation assets
 
-## Main endpoints
+Use these files together:
+- `README.md` for quickstart
+- `docs/API_CHANGELOG.md` for contract evolution
+- `docs/examples/*.json` for sample payloads
+- `/openapi.json` for generated schema
 
-### Search
-- `GET /search?q=...&kind=series|volume|all&mode=best|all&limit=10`
-- `GET /search/resolve?q=...&kind=series|volume|all&limit=10`
+## 10. Local validation
 
-### Series
-- `GET /series/{slug}`
-- `GET /series/by-url?url=...`
-- `GET /series/{slug}/related`
-- `GET /series/{slug}/editions?edition=all|vf|vo`
-
-Projection parameters on series endpoints:
-- `blocks=editions,stats`
-- `fields=title,vf.volumes`
-- `include_raw_sections=true`
-
-### Volume
-- `GET /volume/{series_slug}/{volume_slug}`
-- `GET /volume/by-url?url=...`
-
-Projection parameters on volume endpoints:
-- `blocks=release,scores`
-- `fields=publication_date,isbn_ean`
-- `include_raw_sections=true`
-
-### News
-- `GET /news/global?limit=10`
-- `GET /news/series/{slug}?limit=10`
-- `GET /news/volume/{series_slug}/{volume_slug}?limit=10`
-- `GET /news/volume/by-url?url=...&limit=10`
-
-### Planning
-- `GET /planning?section=manga-vf|manga-vo&year=2026&month=4&page=1&publisher=...&q=...&date_from=...&date_to=...&sort=date_asc|date_desc|title_asc|title_desc&limit=25`
-
-## Error handling
-
-- `404`: resource not found on Manga News
-- `502`: upstream fetch or parse error
-- `304`: unchanged resource when using `If-None-Match`
-
-Clients should treat `partial=true` and `warnings` as non-fatal soft issues.
-
-## Minimal integration prompt for another AI
-
-Use this API as the primary manga metadata source. First call `/search/resolve` with the user title. If a best result is returned, use its slug to call `/series/{slug}` or `/volume/{series_slug}/{volume_slug}`. Reuse the `ETag` header with `If-None-Match` to avoid refetching unchanged data. Read the common response envelope fields: `ok`, `found`, `partial`, `warnings`, `fingerprint`, and `data`.
-
-
-## Search result title variants
-
-Both `/search` and `/search/resolve` can expose three title-related fields on each candidate or best match:
-- `title`: the label found directly in the search result
-- `title_vo`: original-language title parsed from the detailed series or volume page
-- `translated_title`: translated title parsed from the detailed series or volume page
-
-This matters for clients that match against Japanese titles, French catalogue names, or translated English labels.
-
-Example candidate:
-
-```json
-{
-  "title": "Black Night Parade",
-  "title_vo": "ブラックナイトパレード",
-  "translated_title": "Black Night Parade",
-  "url": "https://www.manga-news.com/index.php/serie/Black-Night-Parade",
-  "kind": "series",
-  "score": 94,
-  "slug": "Black-Night-Parade",
-  "series_slug": "Black-Night-Parade",
-  "volume_slug": null
-}
+```bash
+python scripts/validate_contract_and_docs.py
+pytest
 ```
-
-Recommended matching strategy for another service or an AI agent:
-1. Prefer `slug` or `(series_slug, volume_slug)` as stable identifiers.
-2. Display `title` to users by default.
-3. Use `title_vo` and `translated_title` as secondary search and disambiguation fields.
-4. If multiple candidates are close, show all three title fields before picking a winner.

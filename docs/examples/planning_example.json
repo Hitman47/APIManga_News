@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/planning/",
+  "cached": true,
+  "fetched_at": "2026-04-20T12:00:00+00:00",
+  "cache_expires_at": "2026-04-20T18:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "fp-plan",
+  "data": {
+    "section": "manga-vf",
+    "year": 2026,
+    "month": 4,
+    "page": 1,
+    "filters": {
+      "publisher": "Glénat",
+      "query": "one piece",
+      "date_from": "2026-04-01",
+      "date_to": "2026-04-30"
+    },
+    "sort": "date_asc",
+    "total_items": 1,
+    "items": [
+      {
+        "title": "One Piece Vol.110",
+        "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-110",
+        "release_date": "2026-04-27",
+        "authors": [
+          "Eiichirô ODA"
+        ],
+        "publisher": "Glénat",
+        "summary": "Le retour des Mugiwara dans un nouveau volume.",
+        "featured": true,
+        "series_slug": "One-Piece",
+        "volume_slug": "vol-110"
+      }
+    ]
+  }
+}

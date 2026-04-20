@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
+  "cached": true,
+  "fetched_at": "2026-04-20T12:00:00+00:00",
+  "cache_expires_at": "2026-04-21T12:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "fp-editions",
+  "data": {
+    "title": "One Piece",
+    "series_slug": "One-piece-Edition-originale",
+    "vf": {
+      "edition": "vf",
+      "source_url": "https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale",
+      "total": 2,
+      "items": [
+        {
+          "title": "One Piece Vol.91",
+          "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-91",
+          "series_slug": "One-Piece",
+          "volume_slug": "vol-91",
+          "number": "91",
+          "publication_date": "2019-07-03",
+          "cover_image": "https://www.manga-news.com/public/images/series/one-piece-91.jpg"
+        }
+      ]
+    },
+    "vo": null,
+    "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+  }
+}

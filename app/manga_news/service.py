@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-
 import logging
 from copy import deepcopy
 from datetime import date
@@ -20,6 +18,7 @@ from app.models import (
     RelatedLinks,
     ResolveData,
     ResolveResult,
+    SearchResult,
     SeriesEditionsBlock,
     SeriesEditionsData,
     SeriesRelatedData,
@@ -35,8 +34,6 @@ from app.manga_news.parsers import (
 from app.utils import clean_ws, fingerprint_data, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
 
 logger = logging.getLogger(__name__)
-
-SEARCH_TITLE_FIELDS = ('title_vo', 'translated_title')
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
@@ -197,26 +194,25 @@ class MangaNewsService:
             data=data,
         )
 
-    async def _enrich_search_result_titles(self, result: ResolveResult) -> None:
-        try:
-            if result.kind == 'series':
-                payload, *_ = await self._get_series_payload(slug=result.slug, url=result.url)
-            else:
-                payload, *_ = await self._get_volume_payload(series_slug=result.series_slug, volume_slug=result.volume_slug, url=result.url)
-        except Exception as exc:  # pragma: no cover - enrichment must not break search
-            logger.debug('Unable to enrich search result titles for %s: %s', result.url, exc)
-            return
-
-        data = payload.get('data', {}) or {}
-        for field_name in SEARCH_TITLE_FIELDS:
-            value = clean_ws(data.get(field_name) or '')
-            if value:
-                setattr(result, field_name, value)
-
-    async def _enrich_search_results(self, results: list[ResolveResult]) -> None:
-        if not results:
-            return
-        await asyncio.gather(*(self._enrich_search_result_titles(result) for result in results))
+    async def _enrich_search_results(self, results: list[Any]) -> list[SearchResult]:
+        enriched: list[SearchResult] = []
+        for item in results:
+            payload = item.model_dump() if hasattr(item, 'model_dump') else dict(item)
+            try:
+                if payload.get('kind') == 'series' and payload.get('slug'):
+                    series_payload, *_ = await self._get_series_payload(slug=payload['slug'])
+                    data = series_payload.get('data', {}) or {}
+                    payload['title_vo'] = data.get('title_vo')
+                    payload['translated_title'] = data.get('translated_title')
+                elif payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug'):
+                    volume_payload, *_ = await self._get_volume_payload(series_slug=payload['series_slug'], volume_slug=payload['volume_slug'])
+                    data = volume_payload.get('data', {}) or {}
+                    payload['title_vo'] = data.get('title_vo')
+                    payload['translated_title'] = data.get('translated_title')
+            except Exception as exc:  # pragma: no cover - best-effort enrichment
+                logger.debug('Search result title enrichment failed for %s: %s', payload.get('url'), exc)
+            enriched.append(SearchResult.model_validate(payload))
+        return enriched
 
     async def resolve_search(self, query: str, kind: Literal['series', 'volume', 'all'], limit: int) -> Envelope:
         search_response = await self.search(query=query, kind=kind, mode='all', limit=limit)
@@ -293,8 +289,8 @@ class MangaNewsService:
             if mode == 'best' and results:
                 results = [results[0]]
             results = results[:limit]
-            await self._enrich_search_results(results)
-            return [item.model_dump() for item in results], search_urls[0] if search_urls else self.base_url
+            enriched = await self._enrich_search_results(results)
+            return [item.model_dump() for item in enriched], search_urls[0] if search_urls else self.base_url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,

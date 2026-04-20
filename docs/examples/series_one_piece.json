@@ -9,8 +9,7 @@
   "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-series-one-piece",
-  "pagination": null,
+  "fingerprint": "fp-series",
   "data": {
     "title": "One Piece",
     "title_vo": "ワンピース",
@@ -23,8 +22,7 @@
       "Eiichirô ODA"
     ],
     "translators": [
-      "Djamel RABAHI",
-      "Julien FAVEREAU"
+      "Djamel RABAHI"
     ],
     "publisher_fr": "Glénat",
     "publisher_vo": "Shûeisha",
@@ -37,7 +35,11 @@
     "prepublication": "Shônen Jump",
     "origin": "Japon - 1997",
     "illustration": "n&b + couleurs",
-    "illustration_details": null,
+    "illustration_details": {
+      "raw": "n&b + couleurs",
+      "pages": null,
+      "has_color_pages": true
+    },
     "advisory_age": "8+",
     "cover_image": "https://www.manga-news.com/public/images/series/one-piece.jpg",
     "vf": {
@@ -59,12 +61,24 @@
       "reader_score": 16.5
     },
     "themes": [
-      "manga incontournable",
       "aventure fantastique pirates"
     ],
     "strengths": "Un énorme succès populaire.",
-    "related": null,
-    "raw_sections": null,
+    "related": {
+      "series": [],
+      "volumes": [],
+      "anime": [],
+      "drama": [],
+      "dossiers": [],
+      "univers": [],
+      "external": [],
+      "misc": []
+    },
+    "raw_sections": {
+      "resume": [
+        "Résumé principal de la série."
+      ]
+    },
     "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
   }
 }
