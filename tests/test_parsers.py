@@ -171,6 +171,7 @@ def test_parse_series_page():
 def test_parse_volume_page():
     parsed = parse_volume_page(VOLUME_HTML, 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110')
     assert parsed.title == 'One Piece Vol.110'
+    assert parsed.number == '110'
     assert parsed.publication_date == '2025-09-27'
     assert parsed.isbn_ean == '9782344064092'
     assert parsed.editorial_score == 16.0

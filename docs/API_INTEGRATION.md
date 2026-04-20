@@ -7,6 +7,7 @@ This guide is for another project, service, or AI agent that needs to consume th
 This API wraps public Manga News pages and exposes normalized JSON for:
 - search
 - title resolution
+- direct volume lookup by series + number
 - series details
 - volume details
 - related links
@@ -79,7 +80,7 @@ Weak validators are also accepted by the API implementation.
 
 ## Best endpoint for automated title resolution
 
-Use `/search/resolve` instead of `/search` when you want one best result directly.
+Use `/search/resolve` instead of `/search` when you want one best result directly. Volume search results also expose a normalized `number` field when a volume number can be inferred.
 
 Example:
 
@@ -127,6 +128,13 @@ Response shape:
 2. read `data.best.series_slug` and `data.best.volume_slug`
 3. `GET /v1/volume/{series_slug}/{volume_slug}`
 
+### Find and load a volume from a title + number
+1. `GET /v1/lookup/volume?series=One%20Piece&number=91`
+2. read `data.resolved.series_slug` and `data.resolved.volume_slug`
+3. consume `data.volume`
+
+This is the simplest route when the caller already knows the series title and wants a precise numbered volume.
+
 ### Monitor planning
 1. call `GET /v1/planning?...`
 2. store `fingerprint` or `ETag`
@@ -152,12 +160,13 @@ Projection parameters on series endpoints:
 - `include_raw_sections=true`
 
 ### Volume
+- `GET /v1/lookup/volume?series=...&number=...&limit=10`
 - `GET /v1/volume/{series_slug}/{volume_slug}`
 - `GET /v1/volume/by-url?url=...`
 
 Projection parameters on volume endpoints:
 - `blocks=release,scores`
-- `fields=publication_date,isbn_ean`
+- `fields=number,publication_date,isbn_ean`
 - `include_raw_sections=true`
 
 ### News
@@ -187,3 +196,15 @@ The upstream client automatically retries on transient network failures and `429
 ## Minimal integration prompt for another AI
 
 Use this API as the primary manga metadata source. First call `/v1/search/resolve` with the user title. If a best result is returned, use its slug to call `/v1/series/{slug}` or `/v1/volume/{series_slug}/{volume_slug}`. Reuse the `ETag` header with `If-None-Match` to avoid reprocessing unchanged data. Log `X-Request-ID` when troubleshooting. Read the common envelope fields: `ok`, `found`, `partial`, `warnings`, `fingerprint`, and `data`. Prefer projection parameters only when the caller truly needs a reduced payload.
+
+
+## Ready-to-run One Piece examples
+
+- plain text command list: `docs/ONE_PIECE_API_TESTS.txt`
+- batch smoke test script: `scripts/run_api_smoke_tests.py`
+
+The smoke test script calls every current endpoint family against One Piece / volume 91, saves the raw JSON responses, and checks a few business assertions such as:
+- `lookup/volume` resolves to `One-Piece` + `vol-91`
+- the volume payload exposes `number=91`
+- the volume payload exposes `publisher_fr=Glénat`, `publication_date=2019-07-03`, and `isbn_ean=9782344037102`
+- the series payload exposes `title=One Piece`

@@ -136,6 +136,7 @@ def test_search_resolve_and_etag_304():
                         'slug': 'One-piece-Edition-originale',
                         'series_slug': None,
                         'volume_slug': None,
+                        'number': None,
                     },
                     'candidates': [],
                 },
@@ -228,8 +229,82 @@ def test_openapi_exposes_v1_and_admin_routes():
     assert response.status_code == 200
     payload = response.json()
     assert '/v1/search/resolve' in payload['paths']
+    assert '/lookup/volume' in payload['paths']
+    assert '/v1/lookup/volume' in payload['paths']
     assert '/admin/cache/stats' in payload['paths']
     assert '/v1/admin/cache/invalidate' in payload['paths']
     schemas = payload['components']['schemas']
     assert 'CacheStatsResponse' in schemas
     assert 'CacheInvalidateRequest' in schemas
+
+
+
+def test_lookup_volume_route_returns_resolved_volume():
+    class DummyService:
+        async def lookup_volume(self, **kwargs):
+            assert kwargs['series'] == 'One Piece'
+            assert kwargs['number'] == '91'
+            assert kwargs['limit'] == 10
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-lookup',
+                'data': {
+                    'query': 'One Piece tome 91',
+                    'requested_series': 'One Piece',
+                    'requested_number': '91',
+                    'resolved': {
+                        'title': 'One Piece Vol.91',
+                        'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
+                        'kind': 'volume',
+                        'score': 99,
+                        'slug': None,
+                        'series_slug': 'One-Piece',
+                        'volume_slug': 'vol-91',
+                        'number': '91',
+                    },
+                    'volume': {
+                        'title': 'One Piece Vol.91',
+                        'series_title': 'One Piece',
+                        'number': '91',
+                        'publisher_fr': 'Glénat',
+                        'publication_date': '2019-07-03',
+                        'isbn_ean': '9782344037102',
+                        'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
+                    },
+                    'candidates': [],
+                },
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/lookup/volume?series=One%20Piece&number=91')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['data']['resolved']['volume_slug'] == 'vol-91'
+    assert payload['data']['volume']['number'] == '91'
+    assert response.headers['ETag'] == '"fp-lookup"'
+
+
+
+def test_openapi_exposes_lookup_route_and_examples():
+    with TestClient(app) as client:
+        response = client.get('/openapi.json')
+    assert response.status_code == 200
+    payload = response.json()
+    assert '/lookup/volume' in payload['paths']
+    lookup_get = payload['paths']['/lookup/volume']['get']
+    assert lookup_get['responses']['200']['content']['application/json']['example']['data']['requested_number'] == '91'
+    search_get = payload['paths']['/search']['get']
+    q_param = next(param for param in search_get['parameters'] if param['name'] == 'q')
+    assert q_param['examples']['one_piece_volume']['value'] == 'one piece tome 91'
+    volume_schema = payload['components']['schemas']['VolumeData']
+    assert 'number' in volume_schema['properties']

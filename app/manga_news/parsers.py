@@ -23,7 +23,7 @@ from app.models import (
     SeriesStats,
     VolumeData,
 )
-from app.utils import clean_ws, ensure_absolute_url, normalize_text, parse_french_date, score_match, slugify, unique_list
+from app.utils import clean_ws, ensure_absolute_url, extract_volume_number, normalize_text, parse_french_date, score_match, slugify, unique_list
 
 DATE_LINE_RE = re.compile(
     r'^(Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi|Dimanche),?\s+(\d{1,2}\s+[A-Za-zéûîôàèùçÉÛÎÔÀÈÙÇ]+\s+\d{4})(?:\s+(.*))?$'
@@ -386,6 +386,7 @@ def parse_volume_page(html: str, page_url: str) -> VolumeData:
     return VolumeData(
         title=title_clean,
         series_title=series_title,
+        number=extract_volume_number(title_clean, parsed_path[-1] if parsed_path else None),
         title_vo=_extract_line_value(lines, VALUE_LABELS['title_vo']),
         translated_title=_extract_line_value(lines, VALUE_LABELS['translated_title']),
         summary=_extract_section(lines, 'Résumé') or _meta(soup, 'description'),
@@ -525,6 +526,7 @@ def parse_search_page(html: str, page_url: str, base_url: str, query: str, kind:
                 slug=slug,
                 series_slug=series_slug,
                 volume_slug=volume_slug,
+                number=extract_volume_number(text, volume_slug),
             )
         )
     results.sort(key=lambda item: item.score, reverse=True)
@@ -648,11 +650,7 @@ def parse_planning_page(html: str, page_url: str, base_url: str) -> PlanningPage
 
 
 def _guess_volume_number(title: str, volume_slug: str | None) -> str | None:
-    for candidate in (title, volume_slug or ''):
-        match = re.search(r'vol[\.-]?\s*([0-9A-Za-z-]+)', candidate, flags=re.IGNORECASE)
-        if match:
-            return match.group(1)
-    return None
+    return extract_volume_number(title, volume_slug)
 
 
 

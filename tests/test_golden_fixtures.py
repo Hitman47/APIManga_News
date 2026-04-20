@@ -44,6 +44,7 @@ def test_series_fixture_parses_core_fields():
 def test_volume_fixture_parses_core_fields():
     data = parse_volume_page(VOLUME_HTML, 'https://www.manga-news.com/index.php/manga/One-Piece/vol-108')
     assert data.title == 'One Piece - Tome 108'
+    assert data.number == '108'
     assert data.publisher_fr == 'Glénat'
     assert data.isbn_ean == '9782344051540'
     assert data.illustration_details is not None and data.illustration_details.pages == 208

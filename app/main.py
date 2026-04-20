@@ -29,10 +29,158 @@ from app.models import (
     SeriesEditionsResponse,
     SeriesRelatedResponse,
     SeriesResponse,
+    VolumeLookupResponse,
     VolumeResponse,
 )
 
 logger = logging.getLogger(__name__)
+
+
+OPENAPI_ERROR_RESPONSES = {
+    400: {
+        'description': 'Invalid request parameters.',
+        'content': {'application/json': {'example': {'detail': 'Unknown volume field path: bogus'}}},
+    },
+    404: {
+        'description': 'No matching resource was found.',
+        'content': {'application/json': {'example': {'detail': "No volume matched series='One Piece' and number='999'."}}},
+    },
+    502: {
+        'description': 'Upstream Manga News fetch/parsing failure.',
+        'content': {'application/json': {'example': {'detail': 'Unable to parse the Manga News page.'}}},
+    },
+}
+
+SEARCH_EXAMPLE = {
+    'schema_version': '1.0',
+    'ok': True,
+    'found': True,
+    'source': 'manga_news',
+    'source_url': 'https://www.manga-news.com/index.php/recherche/',
+    'cached': False,
+    'fetched_at': '2026-04-20T12:00:00+00:00',
+    'cache_expires_at': '2026-04-20T18:00:00+00:00',
+    'partial': False,
+    'warnings': [],
+    'fingerprint': 'fp-search-one-piece-91',
+    'data': [
+        {
+            'title': 'One Piece Vol.91',
+            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
+            'kind': 'volume',
+            'score': 98,
+            'slug': None,
+            'series_slug': 'One-Piece',
+            'volume_slug': 'vol-91',
+            'number': '91',
+        }
+    ],
+}
+
+RESOLVE_EXAMPLE = {
+    'schema_version': '1.0',
+    'ok': True,
+    'found': True,
+    'source': 'manga_news',
+    'source_url': 'https://www.manga-news.com/index.php/recherche/',
+    'cached': False,
+    'fetched_at': '2026-04-20T12:00:00+00:00',
+    'cache_expires_at': '2026-04-20T18:00:00+00:00',
+    'partial': False,
+    'warnings': [],
+    'fingerprint': 'fp-resolve-one-piece-91',
+    'data': {
+        'query': 'one piece tome 91',
+        'kind_requested': 'volume',
+        'confidence': 'high',
+        'best': {
+            'title': 'One Piece Vol.91',
+            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
+            'kind': 'volume',
+            'score': 98,
+            'slug': None,
+            'series_slug': 'One-Piece',
+            'volume_slug': 'vol-91',
+            'number': '91',
+        },
+        'candidates': [],
+    },
+}
+
+SERIES_EXAMPLE = {
+    'schema_version': '1.0',
+    'ok': True,
+    'found': True,
+    'source': 'manga_news',
+    'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+    'cached': False,
+    'fetched_at': '2026-04-20T12:00:00+00:00',
+    'cache_expires_at': '2026-04-21T12:00:00+00:00',
+    'partial': False,
+    'warnings': [],
+    'fingerprint': 'fp-series-one-piece',
+    'data': {
+        'title': 'One Piece',
+        'publisher_fr': 'Glénat',
+        'vf': {'volumes': 111, 'status': 'En cours'},
+        'vo': {'volumes': 113, 'status': 'En cours'},
+        'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+    },
+}
+
+VOLUME_EXAMPLE = {
+    'schema_version': '1.0',
+    'ok': True,
+    'found': True,
+    'source': 'manga_news',
+    'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
+    'cached': False,
+    'fetched_at': '2026-04-20T12:00:00+00:00',
+    'cache_expires_at': '2026-04-21T12:00:00+00:00',
+    'partial': False,
+    'warnings': [],
+    'fingerprint': 'fp-volume-one-piece-91',
+    'data': {
+        'title': 'One Piece Vol.91',
+        'series_title': 'One Piece',
+        'number': '91',
+        'publisher_fr': 'Glénat',
+        'publication_date': '2019-07-03',
+        'isbn_ean': '9782344037102',
+        'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
+    },
+}
+
+LOOKUP_VOLUME_EXAMPLE = {
+    'schema_version': '1.0',
+    'ok': True,
+    'found': True,
+    'source': 'manga_news',
+    'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
+    'cached': False,
+    'fetched_at': '2026-04-20T12:00:00+00:00',
+    'cache_expires_at': '2026-04-21T12:00:00+00:00',
+    'partial': False,
+    'warnings': [],
+    'fingerprint': 'fp-lookup-one-piece-91',
+    'data': {
+        'query': 'One Piece tome 91',
+        'requested_series': 'One Piece',
+        'requested_number': '91',
+        'resolved': {
+            'title': 'One Piece Vol.91',
+            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
+            'kind': 'volume',
+            'score': 98,
+            'slug': None,
+            'series_slug': 'One-Piece',
+            'volume_slug': 'vol-91',
+            'number': '91',
+        },
+        'volume': VOLUME_EXAMPLE['data'],
+        'candidates': [],
+    },
+}
 
 
 def configure_logging(settings: Settings) -> None:
@@ -67,7 +215,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title='Manga News Private API',
-    version='0.3.0',
+    version='0.4.0',
     docs_url=get_settings().docs_url,
     redoc_url=get_settings().redoc_url,
     lifespan=lifespan,
@@ -203,32 +351,57 @@ async def health():
     return {'ok': True}
 
 
-@app.get('/search', dependencies=[Depends(auth_dependency)], response_model=SearchResponse)
+@app.get(
+    '/search',
+    dependencies=[Depends(auth_dependency)],
+    response_model=SearchResponse,
+    responses={200: {'description': 'Search results.', 'content': {'application/json': {'example': SEARCH_EXAMPLE}}}, **OPENAPI_ERROR_RESPONSES},
+)
 async def search(
     request: Request,
-    q: str = Query(..., min_length=1),
-    kind: Literal['series', 'volume', 'all'] = Query(default='all'),
-    mode: Literal['best', 'all'] = Query(default='best'),
-    limit: int = Query(default=10, ge=1, le=50),
+    q: str = Query(
+        ...,
+        min_length=1,
+        description='Free-text query. Example: one piece tome 91',
+        openapi_examples={'one_piece_volume': {'summary': 'One Piece tome 91', 'value': 'one piece tome 91'}},
+    ),
+    kind: Literal['series', 'volume', 'all'] = Query(default='all', openapi_examples={'volume': {'value': 'volume'}, 'series': {'value': 'series'}}),
+    mode: Literal['best', 'all'] = Query(default='best', openapi_examples={'best': {'value': 'best'}, 'all': {'value': 'all'}}),
+    limit: int = Query(default=10, ge=1, le=50, openapi_examples={'default': {'value': 10}}),
     service: MangaNewsService = Depends(get_service),
 ):
     payload = await service.search(query=q, kind=kind, mode=mode, limit=limit)
     return _build_envelope_response(payload.model_dump(), request)
 
 
-@app.get('/search/resolve', dependencies=[Depends(auth_dependency)], response_model=ResolveResponse)
+@app.get(
+    '/search/resolve',
+    dependencies=[Depends(auth_dependency)],
+    response_model=ResolveResponse,
+    responses={200: {'description': 'Resolved best match.', 'content': {'application/json': {'example': RESOLVE_EXAMPLE}}}, **OPENAPI_ERROR_RESPONSES},
+)
 async def search_resolve(
     request: Request,
-    q: str = Query(..., min_length=1),
-    kind: Literal['series', 'volume', 'all'] = Query(default='all'),
-    limit: int = Query(default=10, ge=1, le=50),
+    q: str = Query(
+        ...,
+        min_length=1,
+        description='Free-text query. Example: one piece tome 91',
+        openapi_examples={'one_piece_volume': {'summary': 'One Piece tome 91', 'value': 'one piece tome 91'}},
+    ),
+    kind: Literal['series', 'volume', 'all'] = Query(default='all', openapi_examples={'volume': {'value': 'volume'}, 'series': {'value': 'series'}}),
+    limit: int = Query(default=10, ge=1, le=50, openapi_examples={'default': {'value': 10}}),
     service: MangaNewsService = Depends(get_service),
 ):
     payload = await service.resolve_search(query=q, kind=kind, limit=limit)
     return _build_envelope_response(payload.model_dump(), request)
 
 
-@app.get('/series/{slug}', dependencies=[Depends(auth_dependency)], response_model=SeriesResponse)
+@app.get(
+    '/series/{slug}',
+    dependencies=[Depends(auth_dependency)],
+    response_model=SeriesResponse,
+    responses={200: {'description': 'Series metadata.', 'content': {'application/json': {'example': SERIES_EXAMPLE}}}, **OPENAPI_ERROR_RESPONSES},
+)
 async def get_series(
     request: Request,
     slug: str,
@@ -288,7 +461,12 @@ async def get_series_editions_by_url(
     return _build_envelope_response(payload.model_dump(), request)
 
 
-@app.get('/volume/{series_slug}/{volume_slug}', dependencies=[Depends(auth_dependency)], response_model=VolumeResponse)
+@app.get(
+    '/volume/{series_slug}/{volume_slug}',
+    dependencies=[Depends(auth_dependency)],
+    response_model=VolumeResponse,
+    responses={200: {'description': 'Volume metadata.', 'content': {'application/json': {'example': VOLUME_EXAMPLE}}}, **OPENAPI_ERROR_RESPONSES},
+)
 async def get_volume(
     request: Request,
     series_slug: str,
@@ -312,6 +490,33 @@ async def get_volume_by_url(
     service: MangaNewsService = Depends(get_service),
 ):
     payload = await service.get_volume(url=url, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
+    return _build_envelope_response(payload.model_dump(), request)
+
+
+@app.get(
+    '/lookup/volume',
+    dependencies=[Depends(auth_dependency)],
+    response_model=VolumeLookupResponse,
+    responses={200: {'description': 'Resolve a series + number then return the volume metadata.', 'content': {'application/json': {'example': LOOKUP_VOLUME_EXAMPLE}}}, **OPENAPI_ERROR_RESPONSES},
+)
+async def lookup_volume(
+    request: Request,
+    series: str = Query(
+        ...,
+        min_length=1,
+        description='Series title to resolve. Example: One Piece',
+        openapi_examples={'one_piece': {'summary': 'One Piece', 'value': 'One Piece'}},
+    ),
+    number: str = Query(
+        ...,
+        min_length=1,
+        description='Requested volume number. Example: 91',
+        openapi_examples={'volume_91': {'summary': 'Volume 91', 'value': '91'}},
+    ),
+    limit: int = Query(default=10, ge=1, le=50, openapi_examples={'default': {'value': 10}}),
+    service: MangaNewsService = Depends(get_service),
+):
+    payload = await service.lookup_volume(series=series, number=number, limit=limit)
     return _build_envelope_response(payload.model_dump(), request)
 
 
@@ -427,6 +632,7 @@ _VERSIONED_ALIASES = [
     ('/v1/series/by-url/editions', get_series_editions_by_url, ['GET'], SeriesEditionsResponse),
     ('/v1/volume/{series_slug}/{volume_slug}', get_volume, ['GET'], VolumeResponse),
     ('/v1/volume/by-url', get_volume_by_url, ['GET'], VolumeResponse),
+    ('/v1/lookup/volume', lookup_volume, ['GET'], VolumeLookupResponse),
     ('/v1/news/global', get_global_news, ['GET'], NewsResponse),
     ('/v1/news/series/{slug}', get_series_news, ['GET'], NewsResponse),
     ('/v1/news/volume/{series_slug}/{volume_slug}', get_volume_news, ['GET'], NewsResponse),

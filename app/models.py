@@ -77,6 +77,7 @@ class SearchResult(BaseModel):
     slug: str | None = None
     series_slug: str | None = None
     volume_slug: str | None = None
+    number: str | None = None
 
 
 class SearchResponse(BaseEnvelope):
@@ -91,6 +92,7 @@ class ResolveResult(BaseModel):
     slug: str | None = None
     series_slug: str | None = None
     volume_slug: str | None = None
+    number: str | None = None
 
 
 class ResolveData(BaseModel):
@@ -189,6 +191,7 @@ class SeriesData(BaseModel):
 class VolumeData(BaseModel):
     title: str | None = None
     series_title: str | None = None
+    number: str | None = None
     title_vo: str | None = None
     translated_title: str | None = None
     summary: str | None = None
@@ -288,3 +291,16 @@ class SeriesRelatedData(BaseModel):
 
 class SeriesRelatedResponse(BaseEnvelope):
     data: SeriesRelatedData | None = None
+
+
+class VolumeLookupData(BaseModel):
+    query: str
+    requested_series: str
+    requested_number: str
+    resolved: ResolveResult | None = None
+    volume: VolumeData | dict[str, Any] | None = None
+    candidates: list[ResolveResult] = Field(default_factory=list)
+
+
+class VolumeLookupResponse(BaseEnvelope):
+    data: VolumeLookupData | None = None

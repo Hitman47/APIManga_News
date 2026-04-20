@@ -1,0 +1,114 @@
+API Manga News non officielle - exemples de tests One Piece
+=========================================================
+
+Base URL conseillée pour les nouveaux tests :
+  http://localhost:8017/v1
+
+Si API_TOKEN est configuré, ajouter :
+  Authorization: Bearer <token>
+
+Variables shell pratiques :
+  export BASE_URL="http://localhost:8017/v1"
+  export TOKEN="ton_token"
+
+Exemples curl
+-------------
+
+1) Health
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/health"
+
+2) Search - trouver le tome 91 de One Piece
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search?q=one%20piece%20tome%2091&kind=volume&mode=all&limit=10"
+
+3) Search resolve - meilleur match pour le tome 91
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search/resolve?q=one%20piece%20tome%2091&kind=volume&limit=10"
+
+4) Lookup volume - résoudre automatiquement série + numéro puis charger la fiche
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/lookup/volume?series=One%20Piece&number=91&limit=10"
+
+5) Volume - toutes les infos du tome 91
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/volume/One-Piece/vol-91"
+
+6) Volume by-url - même volume via URL source
+curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/volume/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-91"
+
+7) News volume - actualités liées au tome 91
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/news/volume/One-Piece/vol-91?limit=10"
+
+8) News volume by-url - actualités liées au tome 91 via URL
+curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/news/volume/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-91" \
+  --data-urlencode "limit=10"
+
+9) Search - trouver la série One Piece
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search?q=one%20piece&kind=series&mode=all&limit=10"
+
+10) Search resolve - meilleur match pour la série One Piece
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search/resolve?q=one%20piece&kind=series&limit=10"
+
+11) Series - toutes les infos de la série
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Edition-originale"
+
+12) Series by-url - même série via URL source
+curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+
+13) Series related - contenus liés à la série
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Edition-originale/related"
+
+14) Series related by-url
+curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/by-url/related" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+
+15) Series editions - toutes les éditions
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Edition-originale/editions?edition=all"
+
+16) Series editions by-url
+curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/by-url/editions" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale" \
+  --data-urlencode "edition=all"
+
+17) News global - actualités globales Manga News
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/news/global?limit=10"
+
+18) News series - actualités liées à One Piece
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/news/series/One-piece-Edition-originale?limit=10"
+
+19) Planning - recherche ciblée One Piece dans le planning VF
+curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/planning" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "sort=date_desc" \
+  --data-urlencode "limit=10"
+
+20) Admin cache stats
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/admin/cache/stats"
+
+21) Admin cache invalidate - invalider la fiche série One Piece
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$BASE_URL/admin/cache/invalidate" \
+  -d '{"resource_url":"https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"}'
+
+22) Admin cache invalidate - invalider le tome 91
+curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$BASE_URL/admin/cache/invalidate" \
+  -d '{"resource_url":"https://www.manga-news.com/index.php/manga/One-Piece/vol-91"}'
+
+23) Test ETag / 304 sur la série
+ETAG=$(curl -sSI -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Edition-originale" | grep -i ETag | sed 's/ETag: //I' | tr -d '\r')
+curl -i -H "Authorization: Bearer $TOKEN" -H "If-None-Match: $ETAG" "$BASE_URL/series/One-piece-Edition-originale"
+
+Attendus métier utiles
+----------------------
+- /lookup/volume doit résoudre One Piece + 91 vers series_slug=One-Piece et volume_slug=vol-91.
+- /volume/One-Piece/vol-91 doit contenir number=91, publisher_fr=Glénat, publication_date=2019-07-03 et isbn_ean=9782344037102.
+- /series/One-piece-Edition-originale doit renvoyer title=One Piece.
+- Les réponses doivent exposer X-Request-ID.
+- Les réponses cacheables doivent exposer ETag, X-Data-Fingerprint et X-Cache-Status.
+
+Automatisation
+--------------
+Le script Python prévu pour lancer tout ça d'un coup est :
+  scripts/run_api_smoke_tests.py
+
+Exemple :
+  python scripts/run_api_smoke_tests.py --base-url http://localhost:8017/v1 --token ton_token

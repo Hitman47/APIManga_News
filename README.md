@@ -7,14 +7,17 @@ API non officielle, légère et auto-hébergeable pour exposer en JSON des donn�
 - support ETag / `If-None-Match` ;
 - aliases versionnées sous `/v1` ;
 - endpoints d'administration du cache ;
-- observabilité minimale (request id, logs structurés, retries upstream).
+- observabilité minimale (request id, logs structurés, retries upstream) ;
+- exemples OpenAPI intégrés pour les cas One Piece série / tome 91.
 
 ## Périmètre actuel
 
 ### Fonctionnalités disponibles
 - recherche de séries et de volumes ;
 - résolution “best match” via `/search/resolve` ;
+- lookup direct d’un volume via `/lookup/volume?series=...&number=...` ;
 - fiches série et volume normalisées ;
+- numéro de volume normalisé via le champ `number` sur les résultats volume ;
 - éditions d'une série (`vf` / `vo`) ;
 - liens liés d'une série ;
 - news globales, news d'une série, news d'un volume ;
@@ -108,12 +111,16 @@ curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=
 ### Volume
 
 ```bash
-curl "http://localhost:8017/volume/One-Piece/vol-110"
+curl "http://localhost:8017/lookup/volume?series=One%20Piece&number=91"
+```
+
+```bash
+curl "http://localhost:8017/volume/One-Piece/vol-91"
 ```
 
 ```bash
 curl --get "http://localhost:8017/volume/by-url" \
-  --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-110"
+  --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-91"
 ```
 
 ### News
@@ -227,6 +234,9 @@ Si la ressource n'a pas changé, l'API retourne `304 Not Modified` sans body.
 ## Documentation d'intégration
 
 Le guide d'intégration détaillé est dans `docs/API_INTEGRATION.md`.
+
+Le fichier texte d'exemples de tests est dans `docs/ONE_PIECE_API_TESTS.txt`.
+Le script prêt à lancer tous les smoke tests One Piece est dans `scripts/run_api_smoke_tests.py`.
 
 ## GitHub / Docker / GHCR
 

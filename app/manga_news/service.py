@@ -22,6 +22,7 @@ from app.models import (
     SeriesEditionsBlock,
     SeriesEditionsData,
     SeriesRelatedData,
+    VolumeLookupData,
 )
 from app.manga_news.parsers import (
     parse_news_page,
@@ -31,7 +32,7 @@ from app.manga_news.parsers import (
     parse_series_page,
     parse_volume_page,
 )
-from app.utils import clean_ws, fingerprint_data, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
+from app.utils import clean_ws, extract_volume_number, fingerprint_data, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
 
 logger = logging.getLogger(__name__)
 
@@ -320,6 +321,59 @@ class MangaNewsService:
             warnings=warnings,
             fingerprint=fingerprint_data(payload.get('data', [])),
             data=payload.get('data', []),
+        )
+
+
+    async def lookup_volume(self, *, series: str, number: str, limit: int = 10) -> Envelope:
+        series = clean_ws(series)
+        number = clean_ws(number)
+        if not series:
+            raise BadRequestError('The series parameter cannot be empty.')
+        if not number:
+            raise BadRequestError('The number parameter cannot be empty.')
+
+        query = f'{series} tome {number}'
+        search_response = await self.search(query=query, kind='volume', mode='all', limit=limit)
+        candidates = [ResolveResult.model_validate(item) for item in (search_response.data or [])]
+        normalized_series = normalize_text(series)
+        normalized_number = number.replace(',', '.')
+
+        def is_match(candidate: ResolveResult) -> bool:
+            candidate_number = extract_volume_number(candidate.title, candidate.volume_slug)
+            if candidate_number != normalized_number:
+                return False
+            series_candidates = [candidate.title, candidate.series_slug or '', candidate.url]
+            return any(normalized_series and normalized_series in normalize_text(value) for value in series_candidates if value)
+
+        resolved = next((candidate for candidate in candidates if is_match(candidate)), None)
+        if resolved is None:
+            raise ResourceNotFound(f'No volume matched series={series!r} and number={number!r}.')
+        if not resolved.series_slug or not resolved.volume_slug:
+            raise ParseError('The resolved search result did not contain a usable series_slug/volume_slug.')
+
+        volume_response = await self.get_volume(series_slug=resolved.series_slug, volume_slug=resolved.volume_slug)
+        lookup_data = VolumeLookupData(
+            query=query,
+            requested_series=series,
+            requested_number=normalized_number,
+            resolved=resolved,
+            volume=volume_response.data,
+            candidates=candidates,
+        )
+        warnings = [*(search_response.warnings or []), *(volume_response.warnings or [])]
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url=volume_response.source_url or resolved.url,
+            cached=bool(search_response.cached or volume_response.cached),
+            fetched_at=volume_response.fetched_at,
+            cache_expires_at=volume_response.cache_expires_at,
+            partial=bool(search_response.partial or volume_response.partial),
+            warnings=warnings,
+            fingerprint=fingerprint_data(lookup_data.model_dump()),
+            data=lookup_data.model_dump(),
         )
 
     async def _get_series_payload(self, *, slug: str | None = None, url: str | None = None):

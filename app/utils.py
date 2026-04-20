@@ -74,6 +74,24 @@ def slugify(value: str) -> str:
     return normalized.replace(' ', '-')
 
 
+def extract_volume_number(*values: str | None) -> str | None:
+    patterns = [
+        re.compile(r'(?:^|\b)(?:tome|volume|vol(?:\.|ume)?)\s*[-.#:]?\s*([0-9]+(?:[.,][0-9]+)?)\b', flags=re.IGNORECASE),
+        re.compile(r'(?:^|[-_/])vol[-_/]?([0-9]+(?:[.,][0-9]+)?)\b', flags=re.IGNORECASE),
+        re.compile(r'\b([0-9]+(?:[.,][0-9]+)?)\b$'),
+    ]
+    for raw in values:
+        candidate = clean_ws(raw)
+        if not candidate:
+            continue
+        for pattern in patterns:
+            match = pattern.search(candidate)
+            if not match:
+                continue
+            return match.group(1).replace(',', '.')
+    return None
+
+
 def score_match(query: str, candidate: str, extra: str | None = None) -> int:
     normalized_query = normalize_text(query)
     normalized_candidate = normalize_text(candidate)
