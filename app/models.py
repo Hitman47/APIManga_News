@@ -39,6 +39,20 @@ class SearchResponse(BaseEnvelope):
     data: list[SearchResult] = Field(default_factory=list)
 
 
+
+
+class ResolveResult(BaseModel):
+    query: str
+    matched: bool
+    confidence: Literal['high', 'medium', 'low'] | None = None
+    result: SearchResult | None = None
+    alternatives: list[SearchResult] = Field(default_factory=list)
+
+
+class ResolveResponse(BaseEnvelope):
+    data: ResolveResult | None = None
+
+
 class NewsItem(BaseModel):
     title: str
     url: str | None = None
