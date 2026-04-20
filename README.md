@@ -14,10 +14,8 @@ API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d
 - filtres locaux sur le planning : éditeur, plage de dates, recherche textuelle, tri ;
 - cache SQLite persistant avec fallback sur cache périmé si l'upstream casse temporairement ;
 - docs OpenAPI natives de FastAPI sur `/docs` et `/redoc` ;
-- endpoint `/search/resolve` pour obtenir directement le meilleur slug exploitable ;
-- `schema_version` et `fingerprint` dans les enveloppes JSON ;
-- support HTTP `ETag` / `If-None-Match` / `304 Not Modified` pour éviter de retraiter les mêmes réponses côté client ;
-- fixtures HTML + golden tests JSON pour verrouiller les parseurs.
+- endpoints complémentaires pour les fiches série : `related`, `editions` ;
+- projection partielle par `blocks` et `fields` sur les endpoints série/volume.
 
 ## Ce que cette V1 ne fait pas encore
 
@@ -59,7 +57,7 @@ L'API sera alors disponible sur `http://localhost:8017`.
 Fichiers ajoutés pour un dépôt GitHub propre et une publication GHCR automatique :
 
 - `.github/workflows/ci.yml` : lance les tests sur push / pull request ;
-- `.github/workflows/publish.yml` : build multi-arch `linux/amd64` + `linux/arm64` et push vers GHCR ;
+- `.github/workflows/publish-ghcr.yml` : build multi-arch `linux/amd64` + `linux/arm64` et push vers GHCR ;
 - `.github/workflows/manifest.yml` : inspecte le manifest publié et stocke `manifest.json` en artifact ;
 - `.dockerignore` : évite d'envoyer les fichiers inutiles au build Docker ;
 - `.gitignore` : ignore l'environnement local, le cache et la base SQLite.
@@ -82,9 +80,9 @@ Pour **pull une image privée depuis Portainer, Docker Compose ou une autre mach
 
 ### Déclenchement conseillé
 
-- push sur `main` : publication continue ;
-- tag `vX.Y.Z` : publication versionnée ;
-- `workflow_dispatch` : exécution manuelle.
+- `ci.yml` tourne sur push / pull request ;
+- `publish-ghcr.yml` ne publie qu'après un `ci` vert sur `main` ;
+- `workflow_dispatch` permet une exécution manuelle de publication.
 
 
 ## Exemples curl
@@ -99,12 +97,6 @@ curl http://localhost:8017/health
 
 ```bash
 curl "http://localhost:8017/search?q=one%20piece&kind=series&mode=all&limit=5"
-```
-
-### Résolution directe du meilleur match
-
-```bash
-curl "http://localhost:8017/search/resolve?q=one%20piece&kind=series"
 ```
 
 ### Fiche série via slug
@@ -169,11 +161,30 @@ curl --get "http://localhost:8017/planning" \
 Après publication, le workflow `manifest.yml` peut inspecter l'image publiée et produire un `manifest.json` téléchargeable depuis les artifacts GitHub Actions. C'est utile pour vérifier qu'un manifest multi-arch a bien été généré.
 
 
-### Réutiliser l'ETag / 304
+## Endpoints additionnels
+
+### Fiche série avec projection partielle
 
 ```bash
-ETAG=$(curl -si "http://localhost:8017/series/One-piece-Edition-originale" | awk '/^ETag:/ {print $2}' | tr -d '\r')
-curl -i -H "If-None-Match: ${ETAG}" "http://localhost:8017/series/One-piece-Edition-originale"
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,vf.volumes"
 ```
 
-Si la donnée n'a pas changé, l'API répond `304 Not Modified`.
+### Blocs d'une fiche série
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "blocks=editions,stats"
+```
+
+### Liens associés d'une série
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/related"
+```
+
+### Editions VF/VO d'une série
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
+```

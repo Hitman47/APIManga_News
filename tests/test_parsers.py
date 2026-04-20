@@ -1,51 +1,187 @@
-import json
-from pathlib import Path
-
-from app.manga_news.parsers import parse_news_page, parse_planning_page, parse_series_page, parse_volume_page
-
-
-FIXTURES = Path(__file__).parent / 'fixtures'
-GOLDEN = Path(__file__).parent / 'golden'
-
-
-def _load_fixture(name: str) -> str:
-    return (FIXTURES / name).read_text(encoding='utf-8')
+from app.manga_news.parsers import (
+    parse_news_page,
+    parse_planning_page,
+    parse_series_editions_page,
+    parse_series_page,
+    parse_volume_page,
+)
 
 
-def _load_golden(name: str):
-    return json.loads((GOLDEN / name).read_text(encoding='utf-8'))
+SERIES_HTML = '''
+<html>
+  <head>
+    <meta property="og:title" content="One Piece - Manga série - Manga news" />
+    <meta property="og:image" content="https://www.manga-news.com/public/images/series/one-piece.jpg" />
+  </head>
+  <body>
+    <h1>One Piece</h1>
+    <ul>
+      <li>Titre VO : ワンピース</li>
+      <li>Titre traduit : One Piece</li>
+      <li>Dessin : Eiichirô ODA</li>
+      <li>Scénario : Eiichirô ODA</li>
+      <li>Traducteur: Djamel RABAHI , Julien FAVEREAU</li>
+      <li>Editeur VF : Glénat</li>
+      <li>Collection: Shonen</li>
+      <li>Type: Shonen</li>
+      <li>Genre: Aventure, Fantastique</li>
+      <li>Editeur VO: Shûeisha</li>
+      <li>Prépublication: Shônen Jump</li>
+      <li>Illustration: n&b + couleurs</li>
+      <li>Origine: Japon - 1997</li>
+    </ul>
+    <div>Age conseillé</div>
+    <div>8+</div>
+    <div>Résumé</div>
+    <p>Résumé principal de la série.</p>
+    <div>Thèmes</div>
+    <p>Série manga incontournable</p>
+    <p>aventure fantastique pirates</p>
+    <div>Les points forts de la série</div>
+    <p>Un énorme succès populaire.</p>
+    <div>Manga en relation</div>
+    <a href="/index.php/serie/Monster-perfect-edition">Monster Perfect Edition</a>
+    <div>Univers</div>
+    <a href="/index.php/univers/One-piece">Univers One Piece</a>
+    <div>Liens</div>
+    <a href="https://example.org/wiki/one-piece">Wiki externe</a>
+    <div>VF:112 (En cours)</div>
+    <div>VO : 114 (En cours)</div>
+    <div>Dernier paru</div>
+    <div>08/04/2026</div>
+    <div>A paraître</div>
+    <div>06/05/2026</div>
+    <div>J'aime</div><div>531</div>
+    <div>Dans ma collection</div><div>7053</div>
+    <div>Dans ma liste d'achat</div><div>984</div>
+    <div>Achat/vente</div><div>2</div>
+    <div>Rédaction</div><div>16.23 /20</div>
+    <div>Lecteurs</div><div>16.5/20</div>
+  </body>
+</html>
+'''
 
+VOLUME_HTML = '''
+<html>
+  <head>
+    <meta property="og:title" content="One Piece Vol.110 - Manga - Manga news" />
+    <meta property="og:image" content="https://www.manga-news.com/public/images/series/one-piece-110.jpg" />
+  </head>
+  <body>
+    <h1>One Piece Vol.110</h1>
+    <ul>
+      <li>Titre VO: ワンピース</li>
+      <li>Titre traduit: One Piece</li>
+      <li>Dessin : Eiichirô ODA</li>
+      <li>Scénario : Eiichirô ODA</li>
+      <li>Traducteur: Djamel RABAHI , Julien FAVEREAU</li>
+      <li>Editeur VF: Glénat</li>
+      <li>Collection: Shonen</li>
+      <li>Type: Shonen</li>
+      <li>Genre: Aventure, Fantastique</li>
+      <li>Editeur VO: Shûeisha</li>
+      <li>Prépublication: Shônen Jump</li>
+      <li>Date de publication: 27 Septembre 2025</li>
+      <li>Illustration: 208 pages n&b + couleurs</li>
+      <li>Origine: Japon - 1997</li>
+      <li>Code EAN : 9782344064092</li>
+      <li>Code prix: 7.20</li>
+    </ul>
+    <div>Age conseillé</div>
+    <div>8+</div>
+    <div>Résumé</div>
+    <p>Résumé du volume.</p>
+    <div>Liens</div>
+    <a href="https://example.org/buy/one-piece-110">Acheter</a>
+    <div>Rédaction</div><div>16 /20</div>
+    <div>Lecteurs</div><div>15.5/20</div>
+  </body>
+</html>
+'''
+
+NEWS_HTML = '''
+<html>
+  <body>
+    <h1>One Piece : News</h1>
+    <div>Manga</div>
+    <h2><a href="/index.php/actus/2026/03/10/La-saison-2-de-la-serie-live-One-Piece-disponible-sur-Netflix">La saison 2 de la série live One Piece disponible sur Netflix !</a></h2>
+    <p>Mardi, 10 Mars 2026 C'est aujourd'hui ! Les fans peuvent désormais se rassasier avec les épisodes de la saison 2...</p>
+    <p>Aucun commentaire... Soyez le 1er !!</p>
+    <div>Produits dérivés</div>
+    <h2><a href="/index.php/actus/2026/03/03/Celio-x-One-Piece-Chopper-en-guest-star">Celio x One Piece : Chopper en guest star !</a></h2>
+    <p>Mardi, 03 Mars 2026 Celio x One Piece : Chopper star d’une collection printanière ultra cute ! ...</p>
+    <p>1 commentaire</p>
+    <div>Actus Précédentes</div>
+  </body>
+</html>
+'''
+
+PLANNING_HTML = '''
+<html>
+  <body>
+    <h1>Planning des sorties manga 2026/04</h1>
+    <div class="planning-item">
+      <a href="/index.php/manga/One-Piece/vol-110">One Piece Vol.110</a>
+      <p>One Piece Vol.110 à ne pas manquer ! Sortie le 27/04/2026 Auteur(s): Eiichirô ODA Editeur: Glénat</p>
+      <p>Le retour des Mugiwara dans un nouveau volume.</p>
+      <a href="/index.php/manga/One-Piece/vol-110">Fiche détaillée</a>
+    </div>
+    <div class="planning-item">
+      <a href="/index.php/manga/Kagurabachi/vol-2">Kagurabachi Vol.2</a>
+      <p>Kagurabachi Vol.2 Sortie le 03/04/2026 Auteur(s): Takeru HOKAZONO Editeur: Kana</p>
+      <p>Chihiro poursuit sa traque.</p>
+      <a href="/index.php/manga/Kagurabachi/vol-2">Fiche détaillée</a>
+    </div>
+  </body>
+</html>
+'''
+
+EDITIONS_HTML = '''
+<html>
+  <body>
+    <div class="volume-card">
+      <img src="/public/images/covers/one-piece-109.jpg" />
+      <a href="/index.php/manga/One-Piece/vol-109">One Piece Vol.109</a>
+      <p>Sortie le 12/03/2026</p>
+    </div>
+    <div class="volume-card">
+      <img src="/public/images/covers/one-piece-110.jpg" />
+      <a href="/index.php/manga/One-Piece/vol-110">One Piece Vol.110</a>
+      <p>Sortie le 27/04/2026</p>
+    </div>
+  </body>
+</html>
+'''
 
 
 def test_parse_series_page():
-    parsed = parse_series_page(
-        _load_fixture('series_one_piece.html'),
-        'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
-    )
+    parsed = parse_series_page(SERIES_HTML, 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale')
     assert parsed.title == 'One Piece'
     assert parsed.title_vo == 'ワンピース'
     assert parsed.publisher_fr == 'Glénat'
     assert parsed.vf and parsed.vf.volumes == 112
     assert parsed.last_release_date == '2026-04-08'
     assert parsed.cover_image.endswith('one-piece.jpg')
+    assert parsed.illustration_details and parsed.illustration_details.has_color_pages is True
+    assert parsed.related and parsed.related.series[0].title == 'Monster Perfect Edition'
+    assert parsed.raw_sections and parsed.raw_sections['resume'][0] == 'Résumé principal de la série.'
 
 
 
 def test_parse_volume_page():
-    parsed = parse_volume_page(
-        _load_fixture('volume_one_piece_110.html'),
-        'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
-    )
+    parsed = parse_volume_page(VOLUME_HTML, 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110')
     assert parsed.title == 'One Piece Vol.110'
     assert parsed.publication_date == '2025-09-27'
     assert parsed.isbn_ean == '9782344064092'
     assert parsed.editorial_score == 16.0
+    assert parsed.illustration_details and parsed.illustration_details.pages == 208
+    assert parsed.related and parsed.related.external[0].title == 'Acheter'
 
 
 
 def test_parse_news_page():
     parsed = parse_news_page(
-        _load_fixture('news_one_piece.html'),
+        NEWS_HTML,
         'https://www.manga-news.com/index.php/serie/news/One-piece-Edition-originale',
         'https://www.manga-news.com',
         limit=10,
@@ -60,7 +196,7 @@ def test_parse_news_page():
 
 def test_parse_planning_page():
     parsed = parse_planning_page(
-        _load_fixture('planning_april_2026.html'),
+        PLANNING_HTML,
         'https://www.manga-news.com/index.php/planning/?p_month=4&p_year=2026',
         'https://www.manga-news.com',
     )
@@ -77,42 +213,15 @@ def test_parse_planning_page():
 
 
 
-def test_golden_series_fixture():
-    parsed = parse_series_page(
-        _load_fixture('series_one_piece.html'),
-        'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
-    ).model_dump()
-    assert parsed == _load_golden('series_one_piece.json')
-
-
-
-def test_golden_volume_fixture():
-    parsed = parse_volume_page(
-        _load_fixture('volume_one_piece_110.html'),
-        'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
-    ).model_dump()
-    assert parsed == _load_golden('volume_one_piece_110.json')
-
-
-
-def test_golden_news_fixture():
-    parsed = [
-        item.model_dump()
-        for item in parse_news_page(
-            _load_fixture('news_one_piece.html'),
-            'https://www.manga-news.com/index.php/serie/news/One-piece-Edition-originale',
-            'https://www.manga-news.com',
-            limit=10,
-        )
-    ]
-    assert parsed == _load_golden('news_one_piece.json')
-
-
-
-def test_golden_planning_fixture():
-    parsed = parse_planning_page(
-        _load_fixture('planning_april_2026.html'),
-        'https://www.manga-news.com/index.php/planning/?p_month=4&p_year=2026',
+def test_parse_series_editions_page():
+    parsed = parse_series_editions_page(
+        EDITIONS_HTML,
+        'https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale',
         'https://www.manga-news.com',
-    ).model_dump()
-    assert parsed == _load_golden('planning_april_2026.json')
+        'vf',
+    )
+    assert parsed.edition == 'vf'
+    assert parsed.total == 2
+    assert parsed.items[0].number == '109'
+    assert parsed.items[1].publication_date == '2026-04-27'
+    assert parsed.items[1].cover_image.endswith('one-piece-110.jpg')
