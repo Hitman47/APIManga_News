@@ -1,35 +1,148 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from datetime import date
-from typing import Literal
-from urllib.parse import urlencode
+from typing import Any, Literal
+from urllib.parse import urlencode, urlparse
 
 import feedparser
 
 from app.cache import SQLiteCache
 from app.config import Settings
-from app.exceptions import ParseError
+from app.exceptions import ParseError, ResourceNotFound
 from app.http import AsyncFetcher
 from app.models import (
-    BaseEnvelope,
+    Envelope,
     NewsItem,
-    NewsResponse,
-    PlanningData,
-    PlanningFilters,
-    PlanningResponse,
-    ResolveData,
-    ResolveResponse,
-    SCHEMA_VERSION,
-    SearchResponse,
-    SearchResult,
-    SeriesResponse,
-    VolumeResponse,
+    RelatedLinks,
+    SeriesEditionsBlock,
+    SeriesEditionsData,
+    SeriesRelatedData,
 )
-from app.manga_news.parsers import parse_news_page, parse_planning_page, parse_search_page, parse_series_page, parse_volume_page
+from app.manga_news.parsers import (
+    parse_news_page,
+    parse_planning_page,
+    parse_search_page,
+    parse_series_editions_page,
+    parse_series_page,
+    parse_volume_page,
+)
 from app.utils import clean_ws, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
 
 logger = logging.getLogger(__name__)
+
+SERIES_BLOCKS = {
+    'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
+    'staff': ['authors_story', 'authors_art', 'translators'],
+    'publishing': ['publisher_fr', 'publisher_vo', 'collection', 'type', 'genres', 'prepublication', 'origin', 'advisory_age'],
+    'presentation': ['summary', 'illustration', 'illustration_details', 'cover_image', 'themes', 'strengths'],
+    'editions': ['vf', 'vo', 'last_release_date', 'next_release_date'],
+    'stats': ['stats'],
+    'related': ['related'],
+    'raw': ['raw_sections'],
+    'raw_sections': ['raw_sections'],
+}
+VOLUME_BLOCKS = {
+    'identity': ['title', 'series_title', 'title_vo', 'translated_title', 'source_url'],
+    'staff': ['authors_story', 'authors_art', 'translators'],
+    'publishing': ['publisher_fr', 'publisher_vo', 'collection', 'type', 'genres', 'prepublication', 'origin', 'advisory_age'],
+    'presentation': ['summary', 'illustration', 'illustration_details', 'cover_image'],
+    'release': ['publication_date', 'isbn_ean', 'price_code'],
+    'scores': ['editorial_score', 'reader_score'],
+    'related': ['related'],
+    'raw': ['raw_sections'],
+    'raw_sections': ['raw_sections'],
+}
+
+
+def _split_csv_param(value: str | None) -> list[str]:
+    if not value:
+        return []
+    parts: list[str] = []
+    for raw in value.split(','):
+        cleaned = clean_ws(raw)
+        if cleaned:
+            parts.append(cleaned)
+    return parts
+
+
+
+def _has_path(data: dict[str, Any], path: str) -> bool:
+    current: Any = data
+    for part in path.split('.'):
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    return True
+
+
+
+def _get_path(data: dict[str, Any], path: str) -> Any:
+    current: Any = data
+    for part in path.split('.'):
+        if not isinstance(current, dict) or part not in current:
+            raise KeyError(path)
+        current = current[part]
+    return current
+
+
+
+def _set_path(target: dict[str, Any], path: str, value: Any) -> None:
+    current = target
+    parts = path.split('.')
+    for part in parts[:-1]:
+        current = current.setdefault(part, {})
+    current[parts[-1]] = deepcopy(value)
+
+
+
+def project_resource_payload(
+    payload: dict[str, Any],
+    *,
+    resource: Literal['series', 'volume'],
+    blocks: list[str] | None = None,
+    fields: list[str] | None = None,
+    include_raw_sections: bool = False,
+) -> dict[str, Any]:
+    full_data = deepcopy(payload)
+    if not include_raw_sections:
+        full_data.pop('raw_sections', None)
+
+    blocks = blocks or []
+    fields = fields or []
+    if not blocks and not fields and not include_raw_sections:
+        return full_data
+
+    if 'all' in [normalize_text(block) for block in blocks]:
+        return payload if include_raw_sections else full_data
+
+    mapping = SERIES_BLOCKS if resource == 'series' else VOLUME_BLOCKS
+    selected_paths: list[str] = []
+    for block in blocks:
+        normalized = slugify_block_name(block)
+        if normalized not in mapping:
+            raise ParseError(f'Unknown {resource} block: {block}')
+        selected_paths.extend(mapping[normalized])
+    selected_paths.extend(fields)
+    if include_raw_sections and 'raw_sections' not in selected_paths:
+        selected_paths.append('raw_sections')
+
+    if not selected_paths:
+        return payload if include_raw_sections else full_data
+
+    projected: dict[str, Any] = {}
+    source_data = payload if include_raw_sections else full_data
+    for path in selected_paths:
+        if not _has_path(source_data, path):
+            raise ParseError(f'Unknown {resource} field path: {path}')
+        _set_path(projected, path, _get_path(source_data, path))
+    return projected
+
+
+
+def slugify_block_name(block: str) -> str:
+    return normalize_text(block).replace(' ', '_').replace('-', '_')
 
 
 class MangaNewsService:
@@ -59,21 +172,21 @@ class MangaNewsService:
                 return entry.payload, entry, True, True, [warning]
             raise
 
-    def _base_envelope_kwargs(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool = True) -> dict:
-        return {
-            'schema_version': SCHEMA_VERSION,
-            'ok': True,
-            'found': found,
-            'source': 'manga_news',
-            'source_url': payload.get('source_url'),
-            'cached': cached,
-            'fetched_at': entry.fetched_at.isoformat() if entry else now_utc().isoformat(),
-            'cache_expires_at': entry.expires_at.isoformat() if entry else None,
-            'partial': partial,
-            'warnings': warnings,
-        }
+    def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str]) -> Envelope:
+        return Envelope(
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url=payload.get('source_url'),
+            cached=cached,
+            fetched_at=entry.fetched_at.isoformat() if entry else now_utc().isoformat(),
+            cache_expires_at=entry.expires_at.isoformat() if entry else None,
+            partial=partial,
+            warnings=warnings,
+            data=payload.get('data'),
+        )
 
-    async def _search_results(self, query: str, kind: Literal['series', 'volume', 'all'], limit: int) -> tuple[list[SearchResult], str]:
+    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> Envelope:
         query = clean_ws(query)
         if not query:
             raise ParseError('The search query cannot be empty.')
@@ -88,88 +201,54 @@ class MangaNewsService:
                 f'{self.base_url}/index.php/recherche/?cat=manga-volume-vf&q={query}',
                 f'{self.base_url}/index.php/recherche/?cat=manga-volume-vo&q={query}',
             ])
-        aggregated: list[SearchResult] = []
-        for url in search_urls:
-            result = await self.fetcher.get_text(url)
-            aggregated.extend(
-                parse_search_page(
-                    html=result.text,
-                    page_url=result.url,
-                    base_url=self.base_url,
-                    query=query,
-                    kind=kind,
-                    score_threshold=self.settings.search_score_threshold,
-                    limit=max(limit, self.settings.max_limit),
-                )
-            )
-        deduped: dict[str, SearchResult] = {}
-        for item in aggregated:
-            existing = deduped.get(item.url)
-            if existing is None or item.score > existing.score:
-                deduped[item.url] = item
-        results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)
-        return results[:limit], search_urls[0] if search_urls else self.base_url
-
-    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> SearchResponse:
-        query = clean_ws(query)
-        if not query:
-            raise ParseError('The search query cannot be empty.')
-        cache_key = make_cache_key('search', query, kind, mode, str(limit))
+        cache_key = make_cache_key('search', query, kind, mode, str(limit), *search_urls)
 
         async def loader():
-            results, source_url = await self._search_results(query=query, kind=kind, limit=max(limit, self.settings.max_limit))
+            aggregated = []
+            for url in search_urls:
+                result = await self.fetcher.get_text(url)
+                aggregated.extend(
+                    parse_search_page(
+                        html=result.text,
+                        page_url=result.url,
+                        base_url=self.base_url,
+                        query=query,
+                        kind=kind,
+                        score_threshold=self.settings.search_score_threshold,
+                        limit=max(limit, self.settings.max_limit),
+                    )
+                )
+            deduped: dict[str, object] = {}
+            for item in aggregated:
+                existing = deduped.get(item.url)
+                if existing is None or item.score > existing.score:
+                    deduped[item.url] = item
+            results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)
             if mode == 'best' and results:
                 results = [results[0]]
-            return [item.model_dump() for item in results[:limit]], source_url
+            results = results[:limit]
+            return [item.model_dump() for item in results], search_urls[0] if search_urls else self.base_url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_search_seconds,
             loader=loader,
         )
-        data = [SearchResult.model_validate(item) for item in payload.get('data', [])]
-        return SearchResponse(
-            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(data)),
-            data=data,
+        found = bool(payload.get('data'))
+        return Envelope(
+            ok=True,
+            found=found,
+            source='manga_news',
+            source_url=payload.get('source_url'),
+            cached=cached,
+            fetched_at=entry.fetched_at.isoformat(),
+            cache_expires_at=entry.expires_at.isoformat(),
+            partial=partial,
+            warnings=warnings,
+            data=payload.get('data', []),
         )
 
-    async def resolve_search(self, query: str, kind: Literal['series', 'volume', 'all']) -> ResolveResponse:
-        query = clean_ws(query)
-        if not query:
-            raise ParseError('The search query cannot be empty.')
-        cache_key = make_cache_key('search-resolve', query, kind)
-
-        async def loader():
-            results, source_url = await self._search_results(query=query, kind=kind, limit=self.settings.max_limit)
-            best = results[0] if results else None
-            if best is None:
-                confidence = 'none'
-            elif best.score >= 90:
-                confidence = 'high'
-            elif best.score >= 75:
-                confidence = 'medium'
-            else:
-                confidence = 'low'
-            data = ResolveData(
-                query=query,
-                result=best,
-                confidence=confidence,
-                alternatives_count=max(len(results) - 1, 0),
-            )
-            return data.model_dump(), source_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_search_seconds,
-            loader=loader,
-        )
-        data = ResolveData.model_validate(payload.get('data', {}))
-        return ResolveResponse(
-            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=data.result is not None),
-            data=data,
-        )
-
-    async def get_series(self, *, slug: str | None = None, url: str | None = None) -> SeriesResponse:
+    async def _get_series_payload(self, *, slug: str | None = None, url: str | None = None):
         target_url = self._resolve_series_url(slug=slug, url=url)
         cache_key = make_cache_key('series', target_url)
 
@@ -178,17 +257,13 @@ class MangaNewsService:
             parsed = parse_series_page(result.text, result.url)
             return parsed.model_dump(), result.url
 
-        payload, entry, cached, partial, warnings = await self._cached_payload(
+        return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_series_seconds,
             loader=loader,
         )
-        return SeriesResponse(
-            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings),
-            data=payload.get('data'),
-        )
 
-    async def get_volume(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None) -> VolumeResponse:
+    async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
         cache_key = make_cache_key('volume', target_url)
 
@@ -197,17 +272,92 @@ class MangaNewsService:
             parsed = parse_volume_page(result.text, result.url)
             return parsed.model_dump(), result.url
 
-        payload, entry, cached, partial, warnings = await self._cached_payload(
+        return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_volume_seconds,
             loader=loader,
         )
-        return VolumeResponse(
-            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings),
-            data=payload.get('data'),
-        )
 
-    async def get_global_news(self, *, limit: int) -> NewsResponse:
+    async def get_series(
+        self,
+        *,
+        slug: str | None = None,
+        url: str | None = None,
+        blocks: str | None = None,
+        fields: str | None = None,
+        include_raw_sections: bool = False,
+    ) -> Envelope:
+        payload, entry, cached, partial, warnings = await self._get_series_payload(slug=slug, url=url)
+        projected = project_resource_payload(
+            payload.get('data', {}) or {},
+            resource='series',
+            blocks=_split_csv_param(blocks),
+            fields=_split_csv_param(fields),
+            include_raw_sections=include_raw_sections,
+        )
+        return self._envelope({'data': projected, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def get_volume(
+        self,
+        *,
+        series_slug: str | None = None,
+        volume_slug: str | None = None,
+        url: str | None = None,
+        blocks: str | None = None,
+        fields: str | None = None,
+        include_raw_sections: bool = False,
+    ) -> Envelope:
+        payload, entry, cached, partial, warnings = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug, url=url)
+        projected = project_resource_payload(
+            payload.get('data', {}) or {},
+            resource='volume',
+            blocks=_split_csv_param(blocks),
+            fields=_split_csv_param(fields),
+            include_raw_sections=include_raw_sections,
+        )
+        return self._envelope({'data': projected, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def get_series_related(self, *, slug: str | None = None, url: str | None = None) -> Envelope:
+        payload, entry, cached, partial, warnings = await self._get_series_payload(slug=slug, url=url)
+        data = payload.get('data', {}) or {}
+        related_data = SeriesRelatedData(
+            title=data.get('title'),
+            related=RelatedLinks.model_validate(data.get('related') or {}),
+            source_url=payload.get('source_url'),
+        )
+        return self._envelope({'data': related_data.model_dump(), 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def get_series_editions(self, *, slug: str | None = None, url: str | None = None, edition: Literal['all', 'vf', 'vo'] = 'all') -> Envelope:
+        target_url = self._resolve_series_url(slug=slug, url=url)
+        target_slug = self._extract_series_slug(target_url)
+        cache_key = make_cache_key('series-editions', target_url, edition)
+
+        async def loader():
+            series_result = await self.fetcher.get_text(target_url)
+            series_payload = parse_series_page(series_result.text, series_result.url)
+            data = SeriesEditionsData(title=series_payload.title, series_slug=target_slug, source_url=series_result.url)
+            editions_to_fetch = ['vf', 'vo'] if edition == 'all' else [edition]
+            for current in editions_to_fetch:
+                current_url = f'{self.base_url}/index.php/serie/{"editionsVo" if current == "vo" else "editions"}/{target_slug}'
+                try:
+                    result = await self.fetcher.get_text(current_url)
+                    parsed = parse_series_editions_page(result.text, result.url, self.base_url, current)
+                except ResourceNotFound:
+                    parsed = SeriesEditionsBlock(edition=current, source_url=current_url, total=0, items=[])
+                if current == 'vf':
+                    data.vf = parsed
+                else:
+                    data.vo = parsed
+            return data.model_dump(), series_result.url
+
+        payload, entry, cached, partial, warnings = await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_series_seconds,
+            loader=loader,
+        )
+        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def get_global_news(self, *, limit: int) -> Envelope:
         rss_url = f'{self.base_url}/index.php/feed/news'
         cache_key = make_cache_key('news-global', rss_url, str(limit))
 
@@ -232,17 +382,13 @@ class MangaNewsService:
             ttl_seconds=self.settings.cache_ttl_news_global_seconds,
             loader=loader,
         )
-        data = [NewsItem.model_validate(item) for item in payload.get('data', [])]
-        return NewsResponse(
-            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(data)),
-            data=data,
-        )
+        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
-    async def get_series_news(self, *, slug: str, limit: int) -> NewsResponse:
+    async def get_series_news(self, *, slug: str, limit: int) -> Envelope:
         target_url = f'{self.base_url}/index.php/serie/news/{slug}'
         return await self._get_news_page(target_url=target_url, cache_namespace='news-series', ttl=self.settings.cache_ttl_news_series_seconds, limit=limit)
 
-    async def get_volume_news(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None, limit: int) -> NewsResponse:
+    async def get_volume_news(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None, limit: int) -> Envelope:
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
         if '/index.php/manga/' not in target_url:
             raise ParseError('The provided volume URL is not a Manga News volume page.')
@@ -265,7 +411,7 @@ class MangaNewsService:
         date_to: str | None,
         sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'],
         limit: int,
-    ) -> PlanningResponse:
+    ) -> Envelope:
         path = '/index.php/planning/' if section == 'manga-vf' else '/index.php/planning/mangas-vo'
         params: dict[str, object] = {}
         if year is not None:
@@ -340,24 +486,32 @@ class MangaNewsService:
 
         total_items = len(items)
         items = items[:limit]
-        data = PlanningData(
-            section=planning.get('section') or section,
-            year=planning.get('year') or year,
-            month=planning.get('month') or month,
-            page=planning.get('page') or page,
-            filters=PlanningFilters(
-                publisher=publisher,
-                query=query,
-                date_from=date_from,
-                date_to=date_to,
-            ),
-            sort=sort,
-            total_items=total_items,
-            items=items,
-        )
+        data = {
+            'section': planning.get('section') or section,
+            'year': planning.get('year') or year,
+            'month': planning.get('month') or month,
+            'page': planning.get('page') or page,
+            'filters': {
+                'publisher': publisher,
+                'query': query,
+                'date_from': date_from,
+                'date_to': date_to,
+            },
+            'sort': sort,
+            'total_items': total_items,
+            'items': items,
+        }
 
-        return PlanningResponse(
-            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(items)),
+        return Envelope(
+            ok=True,
+            found=bool(items),
+            source='manga_news',
+            source_url=payload.get('source_url'),
+            cached=cached,
+            fetched_at=entry.fetched_at.isoformat(),
+            cache_expires_at=entry.expires_at.isoformat(),
+            partial=partial,
+            warnings=warnings,
             data=data,
         )
 
@@ -372,7 +526,7 @@ class MangaNewsService:
         except ValueError as exc:
             raise ParseError(f'{field_name} must be a valid date.') from exc
 
-    async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> NewsResponse:
+    async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> Envelope:
         cache_key = make_cache_key(cache_namespace, target_url, str(limit))
 
         async def loader():
@@ -385,11 +539,7 @@ class MangaNewsService:
             ttl_seconds=ttl,
             loader=loader,
         )
-        data = [NewsItem.model_validate(item) for item in payload.get('data', [])]
-        return NewsResponse(
-            **self._base_envelope_kwargs(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(data)),
-            data=data,
-        )
+        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
     def _resolve_series_url(self, *, slug: str | None, url: str | None) -> str:
         if url:
@@ -408,3 +558,9 @@ class MangaNewsService:
         if not series_slug or not volume_slug:
             raise ParseError('series_slug and volume_slug are required when no direct URL is provided.')
         return f'{self.base_url}/index.php/manga/{series_slug}/{volume_slug}'
+
+    def _extract_series_slug(self, series_url: str) -> str:
+        path_parts = [part for part in urlparse(series_url).path.split('/') if part]
+        if not path_parts:
+            raise ParseError('Unable to infer the series slug from the provided URL.')
+        return path_parts[-1]
