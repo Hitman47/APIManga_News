@@ -5,6 +5,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+class PaginationMeta(BaseModel):
+    page: int = 1
+    limit: int
+    returned: int
+    total: int
+    has_more: bool = False
+
+
 class BaseEnvelope(BaseModel):
     schema_version: str = '1.0'
     ok: bool = True
@@ -17,17 +25,35 @@ class BaseEnvelope(BaseModel):
     partial: bool = False
     warnings: list[str] = Field(default_factory=list)
     fingerprint: str | None = None
+    pagination: PaginationMeta | None = None
 
 
 class Envelope(BaseEnvelope):
     data: Any = None
 
 
+class ApiErrorResponse(BaseModel):
+    ok: bool = False
+    code: str
+    detail: str
+
+
 class CacheNamespaceStats(BaseModel):
     entries: int
     fresh: int
-    stale_usable: int
+    stale_usable: int = 0
     expired: int
+
+
+class NegativeCacheStats(BaseModel):
+    entries: int
+    fresh: int
+    expired: int
+
+
+class NegativeCacheDetails(BaseModel):
+    totals: NegativeCacheStats
+    by_namespace: dict[str, NegativeCacheStats] = Field(default_factory=dict)
 
 
 class WatchSnapshotStats(BaseModel):
@@ -40,6 +66,7 @@ class CacheStatsData(BaseModel):
     db_path: str
     totals: CacheNamespaceStats
     by_namespace: dict[str, CacheNamespaceStats] = Field(default_factory=dict)
+    negative_cache: NegativeCacheDetails
     watch_snapshots: WatchSnapshotStats
     oldest_fetched_at: str | None = None
     newest_fetched_at: str | None = None
@@ -48,6 +75,17 @@ class CacheStatsData(BaseModel):
 class CacheStatsResponse(BaseModel):
     ok: bool = True
     data: CacheStatsData
+
+
+class MetricsData(BaseModel):
+    started_at: str
+    counters: dict[str, int] = Field(default_factory=dict)
+    ratios: dict[str, float] = Field(default_factory=dict)
+
+
+class MetricsResponse(BaseModel):
+    ok: bool = True
+    data: MetricsData
 
 
 class CacheInvalidateRequest(BaseModel):
@@ -192,6 +230,10 @@ class VolumeData(BaseModel):
     title: str | None = None
     series_title: str | None = None
     number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
     title_vo: str | None = None
     translated_title: str | None = None
     summary: str | None = None
@@ -260,6 +302,7 @@ class SeriesEditionItem(BaseModel):
     series_slug: str | None = None
     volume_slug: str | None = None
     number: str | None = None
+    number_int: int | None = None
     publication_date: str | None = None
     cover_image: str | None = None
 

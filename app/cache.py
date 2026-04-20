@@ -40,6 +40,22 @@ class WatchSnapshot:
     updated_at: datetime
 
 
+@dataclass(slots=True)
+class NegativeCacheEntry:
+    key: str
+    error_code: str
+    detail: str
+    created_at: datetime
+    expires_at: datetime
+    namespace: str | None = None
+    resource_url: str | None = None
+    debug_dump_path: str | None = None
+
+    @property
+    def is_fresh(self) -> bool:
+        return now_utc() <= self.expires_at
+
+
 class SQLiteCache:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -80,6 +96,20 @@ class SQLiteCache:
                     payload TEXT NOT NULL,
                     fingerprint TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                )
+                '''
+            )
+            conn.execute(
+                '''
+                CREATE TABLE IF NOT EXISTS negative_cache_entries (
+                    cache_key TEXT PRIMARY KEY,
+                    error_code TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    namespace TEXT,
+                    resource_url TEXT,
+                    debug_dump_path TEXT
                 )
                 '''
             )
@@ -151,11 +181,94 @@ class SQLiteCache:
             resource_url=resource_url,
         )
 
+    def get_negative(self, cache_key: str) -> NegativeCacheEntry | None:
+        with self._lock, self._connect() as conn:
+            row = conn.execute(
+                '''
+                SELECT cache_key, error_code, detail, created_at, expires_at, namespace, resource_url, debug_dump_path
+                FROM negative_cache_entries
+                WHERE cache_key = ?
+                ''',
+                (cache_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        return NegativeCacheEntry(
+            key=row['cache_key'],
+            error_code=row['error_code'],
+            detail=row['detail'],
+            created_at=datetime.fromisoformat(row['created_at']).astimezone(UTC),
+            expires_at=datetime.fromisoformat(row['expires_at']).astimezone(UTC),
+            namespace=row['namespace'],
+            resource_url=row['resource_url'],
+            debug_dump_path=row['debug_dump_path'],
+        )
+
+    def set_negative(
+        self,
+        cache_key: str,
+        *,
+        error_code: str,
+        detail: str,
+        ttl_seconds: int,
+        namespace: str | None = None,
+        resource_url: str | None = None,
+        debug_dump_path: str | None = None,
+    ) -> NegativeCacheEntry:
+        created_at = now_utc()
+        expires_at = created_at.fromtimestamp(created_at.timestamp() + max(ttl_seconds, 1), tz=UTC)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                '''
+                INSERT INTO negative_cache_entries (
+                    cache_key, error_code, detail, created_at, expires_at, namespace, resource_url, debug_dump_path
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    error_code=excluded.error_code,
+                    detail=excluded.detail,
+                    created_at=excluded.created_at,
+                    expires_at=excluded.expires_at,
+                    namespace=excluded.namespace,
+                    resource_url=excluded.resource_url,
+                    debug_dump_path=excluded.debug_dump_path
+                ''',
+                (
+                    cache_key,
+                    error_code,
+                    detail,
+                    created_at.isoformat(),
+                    expires_at.isoformat(),
+                    namespace,
+                    resource_url,
+                    debug_dump_path,
+                ),
+            )
+            conn.commit()
+        return NegativeCacheEntry(
+            key=cache_key,
+            error_code=error_code,
+            detail=detail,
+            created_at=created_at,
+            expires_at=expires_at,
+            namespace=namespace,
+            resource_url=resource_url,
+            debug_dump_path=debug_dump_path,
+        )
+
+    def clear_negative(self, cache_key: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute('DELETE FROM negative_cache_entries WHERE cache_key = ?', (cache_key,))
+            conn.commit()
+
     def stats(self) -> dict[str, Any]:
         now = now_utc()
         with self._lock, self._connect() as conn:
             rows = conn.execute(
                 'SELECT cache_key, fetched_at, expires_at, stale_until, namespace, resource_url FROM cache_entries'
+            ).fetchall()
+            negative_rows = conn.execute(
+                'SELECT cache_key, error_code, created_at, expires_at, namespace, resource_url FROM negative_cache_entries'
             ).fetchall()
             watch_rows = conn.execute('SELECT watch_key, updated_at FROM watch_snapshots').fetchall()
 
@@ -184,10 +297,26 @@ class SQLiteCache:
             if newest_fetched_at is None or fetched_at.isoformat() > newest_fetched_at:
                 newest_fetched_at = fetched_at.isoformat()
 
+        negative_by_namespace: dict[str, dict[str, int]] = {}
+        negative_totals = {'entries': 0, 'fresh': 0, 'expired': 0}
+        for row in negative_rows:
+            namespace = row['namespace'] or 'unknown'
+            namespace_stats = negative_by_namespace.setdefault(namespace, {'entries': 0, 'fresh': 0, 'expired': 0})
+            namespace_stats['entries'] += 1
+            negative_totals['entries'] += 1
+            expires_at = datetime.fromisoformat(row['expires_at']).astimezone(UTC)
+            state_key = 'fresh' if now <= expires_at else 'expired'
+            namespace_stats[state_key] += 1
+            negative_totals[state_key] += 1
+
         return {
             'db_path': str(self.db_path),
             'totals': totals,
             'by_namespace': by_namespace,
+            'negative_cache': {
+                'totals': negative_totals,
+                'by_namespace': negative_by_namespace,
+            },
             'watch_snapshots': {
                 'entries': len(watch_rows),
                 'oldest_updated_at': min((row['updated_at'] for row in watch_rows), default=None),
@@ -219,16 +348,29 @@ class SQLiteCache:
         if resource_url:
             clauses.append('resource_url = ?')
             params.append(resource_url)
+        entry_clauses = list(clauses)
+        entry_params = list(params)
+        negative_clauses = list(clauses)
+        negative_params = list(params)
+        now_iso = now_utc().isoformat()
         if expired_only:
-            clauses.append('stale_until < ?')
-            params.append(now_utc().isoformat())
-        where_clause = ''
-        if not all_entries or clauses:
-            where_clause = ' WHERE ' + (' AND '.join(clauses) if clauses else '1 = 0')
+            entry_clauses.append('stale_until < ?')
+            entry_params.append(now_iso)
+            negative_clauses.append('expires_at < ?')
+            negative_params.append(now_iso)
+
+        def _where_sql(table_clauses: list[str]) -> str:
+            if all_entries and not table_clauses:
+                return ''
+            return ' WHERE ' + (' AND '.join(table_clauses) if table_clauses else '1 = 0')
+
+        entry_where_clause = _where_sql(entry_clauses)
+        negative_where_clause = _where_sql(negative_clauses)
         with self._lock, self._connect() as conn:
-            cursor = conn.execute(f'DELETE FROM cache_entries{where_clause}', tuple(params))
+            cursor = conn.execute(f'DELETE FROM cache_entries{entry_where_clause}', tuple(entry_params))
+            negative_cursor = conn.execute(f'DELETE FROM negative_cache_entries{negative_where_clause}', tuple(negative_params))
             conn.commit()
-            return int(cursor.rowcount or 0)
+            return int((cursor.rowcount or 0) + (negative_cursor.rowcount or 0))
 
     def get_watch_snapshot(self, watch_key: str) -> WatchSnapshot | None:
         with self._lock, self._connect() as conn:

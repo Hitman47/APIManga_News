@@ -1,39 +1,37 @@
-# Guide d’intégration API Manga News
+# API Integration Guide
 
-Ce guide décrit le contrat utile pour un client externe, sans avoir à relire tout le code.
+Guide de consommation de l'API pour un autre service, agent, script ou outil.
 
-## Contrat à utiliser
+## Base URL
 
-Utilise **uniquement** les routes `/v1/...`.
-
-Les anciennes routes sans préfixe existent seulement en **mode compatibilité** et sont **désactivées par défaut**.
-Elles ne doivent plus être utilisées pour une nouvelle intégration.
-
-Base URL typiques :
-- même réseau Docker : `http://manga-news-api:8000/v1`
+Contrat canonique :
+- Docker : `http://manga-news-api:8000/v1`
 - machine hôte : `http://localhost:8017/v1`
-- LAN : `http://<ip-hote>:8017/v1`
+- LAN : `http://<host-ip>:8017/v1`
 
-## Authentification
+Ne t'appuie pas sur les routes non versionnées. Elles sont bloquées par défaut.
 
-### Lecture
+## Auth
+
+### Endpoints publics
+
 Si `API_TOKEN` est défini :
 
 ```http
-Authorization: Bearer <api_token>
+Authorization: Bearer <api-token>
 ```
 
-### Administration
-Les endpoints admin utilisent `ADMIN_TOKEN`.
-Si `ADMIN_TOKEN` est vide, l’API retombe sur `API_TOKEN`.
+### Endpoints admin
+
+Si `ADMIN_TOKEN` est défini, les routes `/v1/admin/...` attendent :
 
 ```http
-Authorization: Bearer <admin_token>
+Authorization: Bearer <admin-token>
 ```
 
-## Enveloppe de réponse standard
+Si `ADMIN_TOKEN` est vide, fallback sur `API_TOKEN`.
 
-La plupart des endpoints renvoient :
+## Enveloppe commune
 
 ```json
 {
@@ -44,102 +42,71 @@ La plupart des endpoints renvoient :
   "source_url": "https://www.manga-news.com/...",
   "cached": false,
   "fetched_at": "2026-04-20T12:00:00+00:00",
-  "cache_expires_at": "2026-04-20T18:00:00+00:00",
+  "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
   "fingerprint": "...",
-  "pagination": null,
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "returned": 10,
+    "total": 34,
+    "has_more": true
+  },
   "data": {}
 }
 ```
 
-## Headers utiles
+`pagination` est optionnel, mais présent sur les endpoints de liste.
 
-Les réponses peuvent inclure :
-- `ETag: "<fingerprint>"`
-- `X-Data-Fingerprint: <fingerprint>`
-- `X-Cache-Status: MISS|HIT|STALE`
-- `X-Request-ID: <request-id>`
-- `Vary: Authorization, If-None-Match`
-
-### Revalidation conditionnelle
-
-Réutilise l’ETag :
-
-```http
-If-None-Match: "<fingerprint>"
-```
-
-Si rien n’a changé, l’API renvoie `304 Not Modified`.
-Les weak ETag sont aussi acceptés.
-
-## Pagination structurée
-
-Les endpoints liste renvoient un bloc `pagination` :
-
-```json
-{
-  "pagination": {
-    "page": 2,
-    "limit": 10,
-    "returned": 10,
-    "total": 17,
-    "has_more": false,
-    "next_page": null,
-    "prev_page": 1
-  }
-}
-```
-
-Endpoints concernés :
-- `GET /search`
-- `GET /news/global`
-- `GET /news/series/{slug}`
-- `GET /news/volume/{series_slug}/{volume_slug}`
-- `GET /news/volume/by-url`
-- `GET /planning`
-
-## Erreurs structurées
-
-Exemple :
+## Erreurs stables
 
 ```json
 {
   "ok": false,
   "code": "INVALID_REQUEST",
-  "detail": "Unknown volume field path: bogus",
-  "request_id": "..."
+  "detail": "Unknown volume field path: bogus"
 }
 ```
 
-Codes stables actuellement exposés :
+Codes à gérer côté client :
 - `INVALID_REQUEST`
-- `UNAUTHORIZED`
+- `AUTH_REQUIRED`
 - `RESOURCE_NOT_FOUND`
 - `UPSTREAM_FETCH_ERROR`
 - `UPSTREAM_PARSE_ERROR`
 - `RATE_LIMITED`
+- `ENDPOINT_NOT_FOUND`
 
-Mapping HTTP principal :
-- `400` : paramètres invalides
-- `401` : token manquant ou invalide
-- `404` : ressource absente
-- `429` : limite de débit atteinte
-- `502` : échec réseau upstream ou parsing upstream non fiable
-- `304` : ressource inchangée avec `If-None-Match`
+## Headers utiles
+
+- `ETag`
+- `X-Data-Fingerprint`
+- `X-Cache-Status`
+- `X-Request-ID`
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining`
+- `X-RateLimit-Reset`
+- `Retry-After` si `429`
+
+### Requête conditionnelle
+
+```http
+If-None-Match: "<fingerprint>"
+```
+
+Si rien n'a changé : `304 Not Modified`.
 
 ## Endpoints principaux
 
-### Search
-- `GET /search?q=...&kind=series|volume|all&mode=best|all&limit=10&page=1`
+### Santé
+- `GET /health`
+
+### Recherche
+- `GET /search?q=...&kind=series|volume|all&mode=best|all&limit=10`
 - `GET /search/resolve?q=...&kind=series|volume|all&limit=10`
 
-### Lookup volume direct
-- `GET /lookup/volume?series=One%20Piece&number=91&limit=10`
-
-Ce endpoint est le plus simple quand le client connaît déjà un titre de série et un numéro de tome.
-
-### Series
+### Série
 - `GET /series/{slug}`
 - `GET /series/by-url?url=...`
 - `GET /series/{slug}/related`
@@ -147,117 +114,177 @@ Ce endpoint est le plus simple quand le client connaît déjà un titre de séri
 - `GET /series/{slug}/editions?edition=all|vf|vo`
 - `GET /series/by-url/editions?url=...&edition=all|vf|vo`
 
-Projection sur les fiches série :
-- `blocks=editions,stats`
-- `fields=title,vf.volumes`
-- `include_raw_sections=true`
-
 ### Volume
+- `GET /lookup/volume?series=...&number=...&limit=10`
 - `GET /volume/{series_slug}/{volume_slug}`
 - `GET /volume/by-url?url=...`
 
-Projection sur les fiches volume :
-- `blocks=release,scores`
-- `fields=number,number_int,publication_date,isbn_ean`
-- `include_raw_sections=true`
-
 ### News
-- `GET /news/global?limit=10&page=1`
-- `GET /news/series/{slug}?limit=10&page=1`
-- `GET /news/volume/{series_slug}/{volume_slug}?limit=10&page=1`
-- `GET /news/volume/by-url?url=...&limit=10&page=1`
+- `GET /news/global?limit=10`
+- `GET /news/series/{slug}?limit=10`
+- `GET /news/volume/{series_slug}/{volume_slug}?limit=10`
+- `GET /news/volume/by-url?url=...&limit=10`
 
 ### Planning
 - `GET /planning?section=manga-vf|manga-vo&year=2026&month=4&page=1&publisher=...&q=...&date_from=...&date_to=...&sort=date_asc|date_desc|title_asc|title_desc&limit=25`
 
-### Admin cache
+### Admin
 - `GET /admin/cache/stats`
 - `POST /admin/cache/invalidate`
+- `GET /admin/metrics`
 
-Payload d’invalidation :
+## Flux recommandés
 
-```json
-{
-  "cache_key": null,
-  "namespace": "planning",
-  "resource_url": null,
-  "expired_only": true,
-  "all_entries": false
-}
-```
-
-## Normalisation volume utile côté client
-
-Les volumes exposent désormais plusieurs champs normalisés :
-- `number` : représentation texte simple du numéro, ex. `"91"`
-- `number_int` : entier normalisé, ex. `91`
-- `edition_label` : libellé d’édition détecté, ex. `"Collector"`
-- `is_special` : booléen pour artbook, guidebook, databook, coffret, etc.
-- `is_one_shot` : booléen pour one-shot détecté
-
-Ça évite au client de reparser le titre lui-même.
-
-## Rate limiting
-
-Le rate limit se configure par variables d’environnement, pas seulement via Compose :
-- `RATE_LIMIT_ENABLED=true|false`
-- `RATE_LIMIT_MAX_REQUESTS=60`
-- `RATE_LIMIT_WINDOW_SECONDS=60`
-- `RATE_LIMIT_SCOPE=ip|token|ip_or_token`
-- `RATE_LIMIT_INCLUDE_ADMIN=true|false`
-- `TRUST_X_FORWARDED_FOR=true|false`
-
-Quand il s’active, l’API renvoie aussi :
-- `Retry-After`
-- `X-RateLimit-Limit`
-- `X-RateLimit-Remaining`
-- `X-RateLimit-Window`
-
-## Routes legacy
-
-Par défaut, les routes non versionnées sont coupées.
-
-Pour les réactiver temporairement :
-
-```env
-ENABLE_LEGACY_ROUTES=true
-```
-
-Utilité réelle : **uniquement** ne pas casser un vieux client.
-Fonctionnellement, elles sont identiques aux routes `/v1`.
-
-## Flux recommandé
-
-### Trouver une série
+### Charger une série
 1. `GET /search/resolve?q=<titre>&kind=series`
 2. lire `data.best.slug`
 3. `GET /series/{slug}`
-4. stocker l’`ETag`
+4. stocker l'`ETag`
+5. réutiliser `If-None-Match`
 
-### Trouver un tome
-1. `GET /lookup/volume?series=<titre>&number=<n>`
+### Charger un volume à partir du titre de série et du numéro
+1. `GET /lookup/volume?series=One%20Piece&number=91`
 2. lire `data.resolved.series_slug` et `data.resolved.volume_slug`
-3. consommer `data.volume`
+3. consommer directement `data.volume`
 
-### Suivre des nouveautés / planning
-1. appeler un endpoint liste
-2. stocker `ETag` ou `fingerprint`
-3. refaire la requête avec `If-None-Match`
+C'est la route la plus propre si tu connais déjà la série et le numéro.
 
-## Tests manuels et batch
+### Charger un volume déjà résolu
+1. `GET /volume/{series_slug}/{volume_slug}`
+2. stocker l'`ETag`
+3. réutiliser `If-None-Match`
 
-Exemples manuels : `docs/ONE_PIECE_API_TESTS.txt`
+## Pagination
 
-Batch :
+Appliquée à :
+- `/search`
+- `/search/resolve`
+- `/news/*`
+- `/planning`
+- `/lookup/volume`
 
-```bash
-python scripts/run_api_smoke_tests.py --base-url http://localhost:8017/v1 --token <api_token> --admin-token <admin_token>
+Le client ne doit plus deviner la taille logique de la réponse.
+
+## Champs volume normalisés
+
+Les payloads volume exposent :
+- `number`
+- `number_int`
+- `edition_label`
+- `is_special`
+- `is_one_shot`
+
+Exemple :
+
+```json
+{
+  "number": "91",
+  "number_int": 91,
+  "edition_label": "edition_originale",
+  "is_special": false,
+  "is_one_shot": null
+}
 ```
 
-Le script écrit une réponse JSON par requête dans `api_test_outputs/` par défaut.
+## Cache négatif
 
-Tests projet :
+Le cache négatif évite de re-solliciter trop vite Manga-News quand une ressource est :
+- absente (`RESOURCE_NOT_FOUND`)
+- temporairement indisponible (`UPSTREAM_FETCH_ERROR`)
+- cassée côté parsing (`UPSTREAM_PARSE_ERROR`)
+
+Ce cache doit rester court. Son but n'est pas de masquer les erreurs, juste d'éviter les rafales inutiles.
+
+Variables utiles :
+- `NEGATIVE_CACHE_ENABLED`
+- `NEGATIVE_CACHE_TTL_SECONDS`
+
+## Dump HTML de debug
+
+Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, l'API sauvegarde le HTML brut et un JSON compagnon sur erreur de parsing.
+
+Variables utiles :
+- `DEBUG_CAPTURE_HTML_ON_ERROR`
+- `DEBUG_HTML_DUMP_DIR`
+
+Usage conseillé :
+- active-le uniquement pour diagnostiquer un parseur cassé ;
+- récupère le dump ;
+- corrige le parseur ;
+- désactive ensuite.
+
+## Métriques admin
+
+`GET /admin/metrics` expose des compteurs simples, utiles pour un opérateur :
+- réponses HTTP par classe
+- cache hits / misses / stale fallbacks
+- hits de cache négatif
+- erreurs de parsing
+- erreurs upstream
+- retries upstream
+- nombre de `429`
+- ratios dérivés (`cache_hit_ratio`, `negative_cache_hit_ratio`, `upstream_error_ratio`)
+
+## Cache stats admin
+
+`GET /admin/cache/stats` expose :
+- stats du cache principal
+- stats du cache négatif
+- stats des snapshots watch
+
+`POST /admin/cache/invalidate` permet d'invalider :
+- par `cache_key`
+- par `namespace`
+- par `resource_url`
+- seulement les expirés
+- ou tout le cache
+
+## Rate limiting
+
+Variables utiles :
+- `RATE_LIMIT_ENABLED`
+- `RATE_LIMIT_REQUESTS`
+- `RATE_LIMIT_WINDOW_SECONDS`
+- `RATE_LIMIT_SCOPE`
+- `RATE_LIMIT_INCLUDE_ADMIN`
+- `RATE_LIMIT_EXEMPT_PATHS`
+
+Le client doit :
+- respecter `429`
+- lire `Retry-After`
+- éviter les boucles agressives sur les endpoints admin
+
+## Tests et validation
+
+### Smoke tests HTTP
+
+```bash
+python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN"
+```
+
+### Si le dossier de sortie n'est pas inscriptible
+
+```bash
+python scripts/run_api_smoke_tests.py --output-dir /tmp/api_test_outputs
+```
+
+ou
+
+```bash
+python scripts/run_api_smoke_tests.py --output-dir ""
+```
+
+### Suite projet
 
 ```bash
 pytest
 ```
+
+## Recommandations de client
+
+- consomme uniquement `/v1`
+- conserve et rejoue les `ETag`
+- gère explicitement `429`, `401`, `404`, `502`
+- exploite `lookup/volume` au lieu de reconstruire des recherches floues
+- ne traite pas `UPSTREAM_PARSE_ERROR` comme une absence définitive de donnée
+- si l'API est critique, surveille `/v1/admin/metrics`

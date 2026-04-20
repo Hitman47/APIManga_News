@@ -1,21 +1,26 @@
 from __future__ import annotations
 
+import json
 import logging
+import hashlib
 from copy import deepcopy
 from datetime import date
+from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlencode, urlparse
 
 import feedparser
 
-from app.cache import SQLiteCache
+from app.cache import NegativeCacheEntry, SQLiteCache
 from app.config import Settings
-from app.exceptions import BadRequestError, ParseError, ResourceNotFound
+from app.exceptions import BadRequestError, ParseError, ResourceNotFound, UpstreamError
 from app.http import AsyncFetcher
 from app.logging_utils import log_event
+from app.metrics import MetricsStore
 from app.models import (
     Envelope,
     NewsItem,
+    PaginationMeta,
     RelatedLinks,
     ResolveData,
     ResolveResult,
@@ -150,16 +155,124 @@ def slugify_block_name(block: str) -> str:
 
 
 class MangaNewsService:
-    def __init__(self, settings: Settings, fetcher: AsyncFetcher, cache: SQLiteCache):
+    def __init__(self, settings: Settings, fetcher: AsyncFetcher, cache: SQLiteCache, metrics: MetricsStore | None = None):
         self.settings = settings
         self.fetcher = fetcher
         self.cache = cache
+        self.metrics = metrics
         self.base_url = settings.manga_news_base_url.rstrip('/')
         self._log_json = settings.log_format.lower() == 'json'
+
+    def _metric(self, key: str, value: int = 1) -> None:
+        if self.metrics is not None:
+            self.metrics.increment(key, value)
+
+    def _rehydrate_negative_cache_error(self, entry: NegativeCacheEntry) -> Exception:
+        mapping = {
+            ResourceNotFound.code: ResourceNotFound,
+            ParseError.code: ParseError,
+            UpstreamError.code: UpstreamError,
+        }
+        exc_type = mapping.get(entry.error_code, UpstreamError)
+        return exc_type(entry.detail)
+
+    def _cache_negative_error(self, *, cache_key: str, namespace: str, resource_url: str | None, exc: Exception) -> None:
+        if not self.settings.negative_cache_enabled:
+            return
+        if not isinstance(exc, (ResourceNotFound, ParseError, UpstreamError)):
+            return
+        debug_dump_path = getattr(exc, 'debug_dump_path', None)
+        self.cache.set_negative(
+            cache_key,
+            error_code=getattr(exc, 'code', 'UPSTREAM_FETCH_ERROR'),
+            detail=str(exc),
+            ttl_seconds=self.settings.negative_cache_ttl_seconds,
+            namespace=namespace,
+            resource_url=resource_url,
+            debug_dump_path=debug_dump_path,
+        )
+        self._metric('negative_cache_store')
+
+    def _safe_parse(self, *, parser_name: str, target_url: str, html: str, parser, **kwargs):
+        try:
+            return parser(html, target_url, **kwargs)
+        except ParseError as exc:
+            debug_dump_path = self._dump_debug_html(parser_name=parser_name, target_url=target_url, html=html, error=exc)
+            if debug_dump_path:
+                exc.debug_dump_path = debug_dump_path
+                exc.detail = f'{exc.detail} Debug HTML saved to {debug_dump_path}.'
+                exc.args = (exc.detail,)
+            self._metric('parse_errors')
+            raise exc
+        except Exception as exc:
+            debug_dump_path = self._dump_debug_html(parser_name=parser_name, target_url=target_url, html=html, error=exc)
+            detail = f'Unable to parse the Manga News page for {parser_name}.'
+            if debug_dump_path:
+                detail = f'{detail} Debug HTML saved to {debug_dump_path}.'
+            wrapped = ParseError(detail)
+            wrapped.debug_dump_path = debug_dump_path
+            self._metric('parse_errors')
+            raise wrapped from exc
+
+    def _resolve_debug_dump_dir(self) -> Path | None:
+        candidate = self.settings.debug_html_dump_dir.expanduser()
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return candidate
+        except OSError:
+            fallback = Path('/tmp') / 'manga-news-debug-html'
+            try:
+                fallback.mkdir(parents=True, exist_ok=True)
+                return fallback
+            except OSError:
+                return None
+
+    def _dump_debug_html(self, *, parser_name: str, target_url: str, html: str, error: Exception) -> str | None:
+        if not self.settings.debug_capture_html_on_error:
+            return None
+        dump_dir = self._resolve_debug_dump_dir()
+        if dump_dir is None:
+            return None
+        digest = hashlib.sha1(target_url.encode('utf-8')).hexdigest()[:12]
+        timestamp = now_utc().strftime('%Y%m%dT%H%M%SZ')
+        stem = f'{timestamp}-{parser_name}-{digest}'
+        html_path = dump_dir / f'{stem}.html'
+        meta_path = dump_dir / f'{stem}.json'
+        try:
+            html_path.write_text(html, encoding='utf-8', errors='ignore')
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        'parser': parser_name,
+                        'url': target_url,
+                        'error': type(error).__name__,
+                        'detail': str(error),
+                        'saved_at': now_utc().isoformat(),
+                        'html_path': str(html_path),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding='utf-8',
+            )
+        except OSError:
+            return None
+        log_event(
+            logger,
+            logging.WARNING,
+            'debug_html_dump_saved',
+            json_mode=self._log_json,
+            parser=parser_name,
+            resource_url=target_url,
+            html_path=str(html_path),
+            meta_path=str(meta_path),
+        )
+        return str(html_path)
 
     async def _cached_payload(self, *, cache_key: str, namespace: str, ttl_seconds: int, loader, resource_url: str | None = None):
         entry = self.cache.get(cache_key)
         if entry and entry.is_fresh:
+            self._metric('cache_hits')
             log_event(
                 logger,
                 logging.INFO,
@@ -169,8 +282,23 @@ class MangaNewsService:
                 resource_url=entry.resource_url or resource_url,
             )
             return entry.payload, entry, True, False, []
+        negative_entry = self.cache.get_negative(cache_key) if self.settings.negative_cache_enabled else None
+        if negative_entry and negative_entry.is_fresh:
+            self._metric('negative_cache_hits')
+            log_event(
+                logger,
+                logging.INFO,
+                'negative_cache_hit',
+                json_mode=self._log_json,
+                namespace=namespace,
+                resource_url=negative_entry.resource_url or resource_url,
+                error_code=negative_entry.error_code,
+            )
+            raise self._rehydrate_negative_cache_error(negative_entry)
+        self._metric('cache_misses')
         try:
             payload, source_url = await loader()
+            self.cache.clear_negative(cache_key)
             cached_entry = self.cache.set(
                 cache_key=cache_key,
                 payload={'data': payload, 'source_url': source_url},
@@ -191,6 +319,7 @@ class MangaNewsService:
             return cached_entry.payload, cached_entry, False, False, []
         except Exception as exc:
             if entry and entry.is_stale_usable:
+                self._metric('cache_stale_fallbacks')
                 warning = f'Using stale cached data because the upstream fetch failed: {exc}'
                 log_event(
                     logger,
@@ -202,9 +331,10 @@ class MangaNewsService:
                     reason=str(exc),
                 )
                 return entry.payload, entry, True, True, [warning]
+            self._cache_negative_error(cache_key=cache_key, namespace=namespace, resource_url=resource_url, exc=exc)
             raise
 
-    def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool | None = None) -> Envelope:
+    def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool | None = None, pagination: PaginationMeta | None = None) -> Envelope:
         data = payload.get('data')
         if found is None:
             found = data not in (None, [], {})
@@ -220,6 +350,7 @@ class MangaNewsService:
             partial=partial,
             warnings=warnings,
             fingerprint=fingerprint_data(data),
+            pagination=pagination,
             data=data,
         )
 
@@ -254,6 +385,7 @@ class MangaNewsService:
             partial=search_response.partial,
             warnings=search_response.warnings,
             fingerprint=fingerprint_data(data.model_dump()),
+            pagination=search_response.pagination,
             data=data.model_dump(),
         )
 
@@ -279,9 +411,11 @@ class MangaNewsService:
             for url in search_urls:
                 result = await self.fetcher.get_text(url)
                 aggregated.extend(
-                    parse_search_page(
+                    self._safe_parse(
+                        parser_name='search',
+                        target_url=result.url,
                         html=result.text,
-                        page_url=result.url,
+                        parser=parse_search_page,
                         base_url=self.base_url,
                         query=query,
                         kind=kind,
@@ -294,11 +428,13 @@ class MangaNewsService:
                 existing = deduped.get(item.url)
                 if existing is None or item.score > existing.score:
                     deduped[item.url] = item
-            results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)
+            ordered_results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)
+            total_results = len(ordered_results)
+            results = ordered_results
             if mode == 'best' and results:
                 results = [results[0]]
             results = results[:limit]
-            return [item.model_dump() for item in results], search_urls[0] if search_urls else self.base_url
+            return {'items': [item.model_dump() for item in results], 'total': total_results}, search_urls[0] if search_urls else self.base_url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
@@ -307,7 +443,14 @@ class MangaNewsService:
             loader=loader,
             resource_url=search_urls[0] if search_urls else self.base_url,
         )
-        found = bool(payload.get('data'))
+        raw_data = payload.get('data', [])
+        if isinstance(raw_data, dict):
+            items = raw_data.get('items', []) or []
+            total = int(raw_data.get('total', len(items)) or 0)
+        else:
+            items = raw_data or []
+            total = len(items)
+        found = bool(items)
         return Envelope(
             schema_version='1.0',
             ok=True,
@@ -319,8 +462,9 @@ class MangaNewsService:
             cache_expires_at=entry.expires_at.isoformat(),
             partial=partial,
             warnings=warnings,
-            fingerprint=fingerprint_data(payload.get('data', [])),
-            data=payload.get('data', []),
+            fingerprint=fingerprint_data(items),
+            pagination=PaginationMeta(page=1, limit=limit, returned=len(items), total=total, has_more=total > len(items)),
+            data=items,
         )
 
 
@@ -372,6 +516,7 @@ class MangaNewsService:
             cache_expires_at=volume_response.cache_expires_at,
             partial=bool(search_response.partial or volume_response.partial),
             warnings=warnings,
+            pagination=search_response.pagination,
             fingerprint=fingerprint_data(lookup_data.model_dump()),
             data=lookup_data.model_dump(),
         )
@@ -382,7 +527,7 @@ class MangaNewsService:
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
-            parsed = parse_series_page(result.text, result.url)
+            parsed = self._safe_parse(parser_name='series', target_url=result.url, html=result.text, parser=parse_series_page)
             return parsed.model_dump(), result.url
 
         return await self._cached_payload(
@@ -399,7 +544,7 @@ class MangaNewsService:
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
-            parsed = parse_volume_page(result.text, result.url)
+            parsed = self._safe_parse(parser_name='volume', target_url=result.url, html=result.text, parser=parse_volume_page)
             return parsed.model_dump(), result.url
 
         return await self._cached_payload(
@@ -466,14 +611,21 @@ class MangaNewsService:
 
         async def loader():
             series_result = await self.fetcher.get_text(target_url)
-            series_payload = parse_series_page(series_result.text, series_result.url)
+            series_payload = self._safe_parse(parser_name='series', target_url=series_result.url, html=series_result.text, parser=parse_series_page)
             data = SeriesEditionsData(title=series_payload.title, series_slug=target_slug, source_url=series_result.url)
             editions_to_fetch = ['vf', 'vo'] if edition == 'all' else [edition]
             for current in editions_to_fetch:
                 current_url = f'{self.base_url}/index.php/serie/{"editionsVo" if current == "vo" else "editions"}/{target_slug}'
                 try:
                     result = await self.fetcher.get_text(current_url)
-                    parsed = parse_series_editions_page(result.text, result.url, self.base_url, current)
+                    parsed = self._safe_parse(
+                        parser_name=f'series-editions-{current}',
+                        target_url=result.url,
+                        html=result.text,
+                        parser=parse_series_editions_page,
+                        base_url=self.base_url,
+                        edition=current,
+                    )
                 except ResourceNotFound:
                     parsed = SeriesEditionsBlock(edition=current, source_url=current_url, total=0, items=[])
                 if current == 'vf':
@@ -489,7 +641,8 @@ class MangaNewsService:
             loader=loader,
             resource_url=target_url,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
+        raw_data = payload.get('data', {}) or {}
+        return self._envelope({'data': raw_data, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
     async def get_global_news(self, *, limit: int) -> Envelope:
         rss_url = f'{self.base_url}/index.php/feed/news'
@@ -499,6 +652,7 @@ class MangaNewsService:
             result = await self.fetcher.get_text(rss_url)
             feed = feedparser.parse(result.text)
             items: list[NewsItem] = []
+            total_items = len(feed.entries)
             for entry in feed.entries[:limit]:
                 items.append(
                     NewsItem(
@@ -509,7 +663,7 @@ class MangaNewsService:
                         category=clean_ws(entry.tags[0].term) if getattr(entry, 'tags', None) else None,
                     )
                 )
-            return [item.model_dump() for item in items], result.url
+            return {'items': [item.model_dump() for item in items], 'total': total_items}, result.url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
@@ -518,7 +672,16 @@ class MangaNewsService:
             loader=loader,
             resource_url=rss_url,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
+        raw_data = payload.get('data', [])
+        if isinstance(raw_data, dict):
+            items = raw_data.get('items', []) or []
+            total = int(raw_data.get('total', len(items)) or 0)
+        else:
+            items = raw_data or []
+            total = len(items)
+        news_payload = {'data': items, 'source_url': payload.get('source_url')}
+        pagination = PaginationMeta(page=1, limit=limit, returned=len(items), total=total, has_more=total > len(items))
+        return self._envelope(news_payload, entry, cached=cached, partial=partial, warnings=warnings, pagination=pagination)
 
     async def get_series_news(self, *, slug: str, limit: int) -> Envelope:
         target_url = f'{self.base_url}/index.php/serie/news/{slug}'
@@ -564,7 +727,7 @@ class MangaNewsService:
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
-            parsed = parse_planning_page(result.text, result.url, self.base_url)
+            parsed = self._safe_parse(parser_name='planning', target_url=result.url, html=result.text, parser=parse_planning_page, base_url=self.base_url)
             parsed.page = page
             return parsed.model_dump(), result.url
 
@@ -652,6 +815,7 @@ class MangaNewsService:
             partial=partial,
             warnings=warnings,
             fingerprint=fingerprint_data(data),
+            pagination=PaginationMeta(page=page, limit=limit, returned=len(items), total=total_items, has_more=total_items > len(items)),
             data=data,
         )
 
@@ -671,8 +835,17 @@ class MangaNewsService:
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
-            parsed = parse_news_page(result.text, result.url, self.base_url, limit=limit)
-            return [item.model_dump() for item in parsed], result.url
+            parsed = self._safe_parse(
+                parser_name='news',
+                target_url=result.url,
+                html=result.text,
+                parser=parse_news_page,
+                base_url=self.base_url,
+                limit=max(limit, self.settings.max_limit),
+            )
+            total_items = len(parsed)
+            items = parsed[:limit]
+            return {'items': [item.model_dump() for item in items], 'total': total_items}, result.url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
@@ -681,7 +854,16 @@ class MangaNewsService:
             loader=loader,
             resource_url=target_url,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
+        raw_data = payload.get('data', [])
+        if isinstance(raw_data, dict):
+            items = raw_data.get('items', []) or []
+            total = int(raw_data.get('total', len(items)) or 0)
+        else:
+            items = raw_data or []
+            total = len(items)
+        news_payload = {'data': items, 'source_url': payload.get('source_url')}
+        pagination = PaginationMeta(page=1, limit=limit, returned=len(items), total=total, has_more=total > len(items))
+        return self._envelope(news_payload, entry, cached=cached, partial=partial, warnings=warnings, pagination=pagination)
 
     def _resolve_series_url(self, *, slug: str | None, url: str | None) -> str:
         if url:

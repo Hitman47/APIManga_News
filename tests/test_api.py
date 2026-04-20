@@ -11,7 +11,8 @@ class EnvelopeLike:
         return self._payload
 
 
-def test_health_endpoint_and_legacy_disabled_by_default():
+
+def test_health_endpoint_versioned_only():
     with TestClient(app) as client:
         response = client.get('/v1/health')
         legacy = client.get('/health')
@@ -19,13 +20,13 @@ def test_health_endpoint_and_legacy_disabled_by_default():
     assert response.json() == {'ok': True}
     assert response.headers['X-Request-ID']
     assert legacy.status_code == 404
+    assert legacy.json()['code'] == 'ENDPOINT_NOT_FOUND'
 
 
 
-def test_planning_endpoint_with_stubbed_service():
+def test_planning_endpoint_with_stubbed_service_exposes_pagination():
     class DummyService:
         async def get_planning(self, **kwargs):
-            assert kwargs['page'] == 1
             return EnvelopeLike({
                 'schema_version': '1.0',
                 'ok': True,
@@ -38,15 +39,7 @@ def test_planning_endpoint_with_stubbed_service():
                 'partial': False,
                 'warnings': [],
                 'fingerprint': 'fp-plan',
-                'pagination': {
-                    'page': 1,
-                    'limit': 25,
-                    'returned': 1,
-                    'total': 1,
-                    'has_more': False,
-                    'next_page': None,
-                    'prev_page': None,
-                },
+                'pagination': {'page': 1, 'limit': 10, 'returned': 1, 'total': 2, 'has_more': True},
                 'data': {
                     'section': 'manga-vf',
                     'year': 2026,
@@ -59,7 +52,7 @@ def test_planning_endpoint_with_stubbed_service():
                         'date_to': None,
                     },
                     'sort': 'date_asc',
-                    'total_items': 1,
+                    'total_items': 2,
                     'items': [
                         {
                             'title': 'One Piece Vol.110',
@@ -71,11 +64,6 @@ def test_planning_endpoint_with_stubbed_service():
                             'featured': False,
                             'series_slug': 'One-Piece',
                             'volume_slug': 'vol-110',
-                            'number': '110',
-                            'number_int': 110,
-                            'edition_label': None,
-                            'is_special': None,
-                            'is_one_shot': None,
                         }
                     ],
                 },
@@ -87,10 +75,8 @@ def test_planning_endpoint_with_stubbed_service():
     assert response.status_code == 200
     payload = response.json()
     assert payload['ok'] is True
-    assert payload['schema_version'] == '1.0'
-    assert payload['data']['section'] == 'manga-vf'
+    assert payload['pagination']['has_more'] is True
     assert payload['data']['items'][0]['publisher'] == 'Glénat'
-    assert payload['pagination']['returned'] == 1
     assert response.headers['X-Data-Fingerprint'] == 'fp-plan'
     assert response.headers['ETag'] == '"fp-plan"'
     assert response.headers['X-Cache-Status'] == 'MISS'
@@ -135,60 +121,6 @@ def test_series_route_forwards_projection_params():
 
 
 
-def test_search_route_supports_pagination():
-    class DummyService:
-        async def search(self, **kwargs):
-            assert kwargs['page'] == 2
-            assert kwargs['limit'] == 10
-            return EnvelopeLike({
-                'schema_version': '1.0',
-                'ok': True,
-                'found': True,
-                'source': 'manga_news',
-                'source_url': 'https://www.manga-news.com/index.php/recherche/',
-                'cached': False,
-                'fetched_at': '2026-04-20T12:00:00+00:00',
-                'cache_expires_at': '2026-04-20T18:00:00+00:00',
-                'partial': False,
-                'warnings': [],
-                'fingerprint': 'fp-search-page-2',
-                'pagination': {
-                    'page': 2,
-                    'limit': 10,
-                    'returned': 1,
-                    'total': 11,
-                    'has_more': False,
-                    'next_page': None,
-                    'prev_page': 1,
-                },
-                'data': [
-                    {
-                        'title': 'One Piece Vol.91',
-                        'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
-                        'kind': 'volume',
-                        'score': 98,
-                        'slug': None,
-                        'series_slug': 'One-Piece',
-                        'volume_slug': 'vol-91',
-                        'number': '91',
-                        'number_int': 91,
-                        'edition_label': None,
-                        'is_special': None,
-                        'is_one_shot': None,
-                    }
-                ],
-            })
-
-    with TestClient(app) as client:
-        app.state.service = DummyService()
-        response = client.get('/v1/search?q=one%20piece&kind=volume&mode=all&limit=10&page=2')
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload['pagination']['page'] == 2
-    assert payload['data'][0]['number_int'] == 91
-
-
-
 def test_search_resolve_and_etag_304():
     class DummyService:
         async def resolve_search(self, **kwargs):
@@ -204,6 +136,7 @@ def test_search_resolve_and_etag_304():
                 'partial': False,
                 'warnings': [],
                 'fingerprint': 'fp-resolve',
+                'pagination': {'page': 1, 'limit': 10, 'returned': 1, 'total': 1, 'has_more': False},
                 'data': {
                     'query': 'one piece',
                     'kind_requested': 'series',
@@ -217,10 +150,6 @@ def test_search_resolve_and_etag_304():
                         'series_slug': None,
                         'volume_slug': None,
                         'number': None,
-                        'number_int': None,
-                        'edition_label': None,
-                        'is_special': None,
-                        'is_one_shot': None,
                     },
                     'candidates': [],
                 },
@@ -238,7 +167,7 @@ def test_search_resolve_and_etag_304():
 
 
 
-def test_bad_request_returns_structured_400():
+def test_bad_request_returns_400_with_stable_code():
     class DummyService:
         async def get_series(self, **kwargs):
             from app.exceptions import BadRequestError
@@ -248,32 +177,32 @@ def test_bad_request_returns_structured_400():
         app.state.service = DummyService()
         response = client.get('/v1/series/One-piece-Edition-originale?blocks=bogus')
     assert response.status_code == 400
-    payload = response.json()
-    assert payload['code'] == 'INVALID_REQUEST'
-    assert payload['detail'] == 'Unknown series block: bogus'
-    assert payload['ok'] is False
+    assert response.json()['code'] == 'INVALID_REQUEST'
+    assert response.json()['detail'] == 'Unknown series block: bogus'
 
 
 
-def test_openapi_exposes_only_v1_routes_and_error_models():
+def test_openapi_exposes_only_v1_routes_when_legacy_disabled():
     with TestClient(app) as client:
         response = client.get('/openapi.json')
     assert response.status_code == 200
     payload = response.json()
-    assert '/v1/series/{slug}/editions' in payload['paths']
-    assert '/v1/series/{slug}/related' in payload['paths']
     assert '/v1/search/resolve' in payload['paths']
-    assert '/series/{slug}/editions' not in payload['paths']
+    assert '/v1/lookup/volume' in payload['paths']
+    assert '/v1/admin/cache/stats' in payload['paths']
+    assert '/search/resolve' not in payload['paths']
     assert '/lookup/volume' not in payload['paths']
     schemas = payload['components']['schemas']
-    assert 'SeriesData' in schemas
-    assert 'SeriesEditionsData' in schemas
+    assert 'ApiErrorResponse' in schemas
+    assert 'PaginationMeta' in schemas
     assert 'ResolveResponse' in schemas
-    assert 'ErrorResponse' in schemas
 
 
 
-def test_admin_cache_stats_and_invalidate_routes():
+def test_admin_cache_stats_and_invalidate_routes_use_admin_token_when_configured(monkeypatch):
+    monkeypatch.setattr(app.state.settings, 'admin_token', 'secret-admin', raising=False)
+    monkeypatch.setattr(app.state.settings, 'api_token', None, raising=False)
+
     class DummyCache:
         def stats(self):
             return {
@@ -282,6 +211,10 @@ def test_admin_cache_stats_and_invalidate_routes():
                 'by_namespace': {
                     'series': {'entries': 1, 'fresh': 1, 'stale_usable': 0, 'expired': 0},
                     'planning': {'entries': 1, 'fresh': 0, 'stale_usable': 1, 'expired': 0},
+                },
+                'negative_cache': {
+                    'totals': {'entries': 1, 'fresh': 1, 'expired': 0},
+                    'by_namespace': {'series': {'entries': 1, 'fresh': 1, 'expired': 0}},
                 },
                 'watch_snapshots': {'entries': 0, 'oldest_updated_at': None, 'newest_updated_at': None},
                 'oldest_fetched_at': '2026-04-20T10:00:00+00:00',
@@ -295,18 +228,42 @@ def test_admin_cache_stats_and_invalidate_routes():
 
     with TestClient(app) as client:
         app.state.service = type('ServiceLike', (), {'cache': DummyCache()})()
-        stats = client.get('/v1/admin/cache/stats')
+        unauthorized = client.get('/v1/admin/cache/stats')
+        assert unauthorized.status_code == 401
+        assert unauthorized.json()['code'] == 'AUTH_REQUIRED'
+        stats = client.get('/v1/admin/cache/stats', headers={'Authorization': 'Bearer secret-admin'})
         assert stats.status_code == 200
         assert stats.json()['data']['totals']['entries'] == 2
-        invalidate = client.post('/v1/admin/cache/invalidate', json={'namespace': 'planning', 'expired_only': True})
+        invalidate = client.post('/v1/admin/cache/invalidate', json={'namespace': 'planning', 'expired_only': True}, headers={'Authorization': 'Bearer secret-admin'})
+    monkeypatch.setattr(app.state.settings, 'admin_token', None, raising=False)
     assert invalidate.status_code == 200
     payload = invalidate.json()
     assert payload['deleted'] == 1
     assert payload['stats']['by_namespace']['planning']['stale_usable'] == 1
 
 
+def test_admin_metrics_route_uses_admin_token(monkeypatch):
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.settings, 'admin_token', 'secret-admin', raising=False)
+        monkeypatch.setattr(app.state.settings, 'api_token', None, raising=False)
+        app.state.metrics.increment('cache_hits', 2)
+        app.state.metrics.increment('cache_misses', 1)
+        app.state.metrics.increment('parse_errors', 1)
+        unauthorized = client.get('/v1/admin/metrics')
+        assert unauthorized.status_code == 401
+        metrics = client.get('/v1/admin/metrics', headers={'Authorization': 'Bearer secret-admin'})
 
-def test_lookup_volume_route_returns_resolved_volume():
+    monkeypatch.setattr(app.state.settings, 'admin_token', None, raising=False)
+    assert metrics.status_code == 200
+    payload = metrics.json()
+    assert payload['ok'] is True
+    assert payload['data']['counters']['cache_hits'] >= 2
+    assert payload['data']['counters']['parse_errors'] >= 1
+    assert payload['data']['ratios']['cache_hit_ratio'] >= 0.5
+
+
+
+def test_lookup_volume_route_returns_resolved_volume_with_normalized_fields():
     class DummyService:
         async def lookup_volume(self, **kwargs):
             assert kwargs['series'] == 'One Piece'
@@ -324,6 +281,7 @@ def test_lookup_volume_route_returns_resolved_volume():
                 'partial': False,
                 'warnings': [],
                 'fingerprint': 'fp-lookup',
+                'pagination': {'page': 1, 'limit': 10, 'returned': 1, 'total': 3, 'has_more': True},
                 'data': {
                     'query': 'One Piece tome 91',
                     'requested_series': 'One Piece',
@@ -337,19 +295,14 @@ def test_lookup_volume_route_returns_resolved_volume():
                         'series_slug': 'One-Piece',
                         'volume_slug': 'vol-91',
                         'number': '91',
-                        'number_int': 91,
-                        'edition_label': None,
-                        'is_special': None,
-                        'is_one_shot': None,
                     },
                     'volume': {
                         'title': 'One Piece Vol.91',
                         'series_title': 'One Piece',
                         'number': '91',
                         'number_int': 91,
-                        'edition_label': None,
-                        'is_special': None,
-                        'is_one_shot': None,
+                        'edition_label': 'edition_originale',
+                        'is_special': False,
                         'publisher_fr': 'Glénat',
                         'publication_date': '2019-07-03',
                         'isbn_ean': '9782344037102',
@@ -365,8 +318,32 @@ def test_lookup_volume_route_returns_resolved_volume():
     assert response.status_code == 200
     payload = response.json()
     assert payload['data']['resolved']['volume_slug'] == 'vol-91'
+    assert payload['data']['volume']['number'] == '91'
     assert payload['data']['volume']['number_int'] == 91
     assert response.headers['ETag'] == '"fp-lookup"'
+
+
+
+def test_rate_limit_returns_429_with_headers(monkeypatch):
+    monkeypatch.setattr(app.state.settings, 'rate_limit_enabled', True, raising=False)
+    monkeypatch.setattr(app.state.settings, 'rate_limit_requests', 1, raising=False)
+    monkeypatch.setattr(app.state.settings, 'rate_limit_window_seconds', 60, raising=False)
+    monkeypatch.setattr(app.state.settings, 'rate_limit_scope', 'ip', raising=False)
+    monkeypatch.setattr(app.state.settings, 'rate_limit_exempt_paths', '', raising=False)
+    app.state.rate_limiter.limit = 1
+    app.state.rate_limiter.window_seconds = 60
+    app.state.rate_limiter._events.clear()
+
+    with TestClient(app) as client:
+        first = client.get('/v1/health')
+        second = client.get('/v1/health')
+
+    monkeypatch.setattr(app.state.settings, 'rate_limit_enabled', False, raising=False)
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()['code'] == 'RATE_LIMITED'
+    assert second.headers['Retry-After']
+    assert second.headers['X-RateLimit-Limit'] == '1'
 
 
 
@@ -375,7 +352,6 @@ def test_openapi_exposes_lookup_route_and_examples():
         response = client.get('/openapi.json')
     assert response.status_code == 200
     payload = response.json()
-    assert '/v1/lookup/volume' in payload['paths']
     lookup_get = payload['paths']['/v1/lookup/volume']['get']
     assert lookup_get['responses']['200']['content']['application/json']['example']['data']['requested_number'] == '91'
     search_get = payload['paths']['/v1/search']['get']

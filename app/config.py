@@ -32,12 +32,19 @@ class Settings(BaseSettings):
     max_limit: int = Field(default=50, alias='MAX_LIMIT')
     enable_docs: bool = Field(default=True, alias='ENABLE_DOCS')
     enable_legacy_routes: bool = Field(default=False, alias='ENABLE_LEGACY_ROUTES')
+    debug_capture_html_on_error: bool = Field(default=False, alias='DEBUG_CAPTURE_HTML_ON_ERROR')
+    debug_html_dump_dir: Path = Field(default=Path('/tmp/manga-news-debug-html'), alias='DEBUG_HTML_DUMP_DIR')
+    negative_cache_enabled: bool = Field(default=True, alias='NEGATIVE_CACHE_ENABLED')
+    negative_cache_ttl_seconds: int = Field(default=120, alias='NEGATIVE_CACHE_TTL_SECONDS')
     rate_limit_enabled: bool = Field(default=False, alias='RATE_LIMIT_ENABLED')
-    rate_limit_max_requests: int = Field(default=60, alias='RATE_LIMIT_MAX_REQUESTS')
+    rate_limit_requests: int = Field(default=60, alias='RATE_LIMIT_REQUESTS')
     rate_limit_window_seconds: int = Field(default=60, alias='RATE_LIMIT_WINDOW_SECONDS')
     rate_limit_scope: str = Field(default='ip_or_token', alias='RATE_LIMIT_SCOPE')
     rate_limit_include_admin: bool = Field(default=False, alias='RATE_LIMIT_INCLUDE_ADMIN')
-    trust_x_forwarded_for: bool = Field(default=False, alias='TRUST_X_FORWARDED_FOR')
+    rate_limit_exempt_paths: str = Field(
+        default='/openapi.json,/docs,/redoc,/v1/health,/health',
+        alias='RATE_LIMIT_EXEMPT_PATHS',
+    )
 
     @property
     def docs_url(self) -> str | None:
@@ -46,6 +53,10 @@ class Settings(BaseSettings):
     @property
     def redoc_url(self) -> str | None:
         return '/redoc' if self.enable_docs else None
+
+    @property
+    def rate_limit_exempt_path_list(self) -> list[str]:
+        return [part.strip() for part in self.rate_limit_exempt_paths.split(',') if part.strip()]
 
 
 

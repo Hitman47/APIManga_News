@@ -6,22 +6,27 @@ from contextlib import asynccontextmanager
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import Body, Depends, FastAPI, Header, Query, Request
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.openapi.utils import get_openapi
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 
-from app.auth import require_api_token
+from app.auth import require_admin_token, require_api_token
 from app.cache import SQLiteCache
 from app.config import Settings, get_settings
 from app.exceptions import BadRequestError, ParseError, ResourceNotFound, UpstreamError
 from app.http import AsyncFetcher
 from app.logging_utils import log_event, reset_request_id, set_request_id
 from app.manga_news.service import MangaNewsService
+from app.metrics import MetricsStore
+from app.rate_limit import InMemoryRateLimiter
 from app.models import (
+    ApiErrorResponse,
     CacheInvalidateRequest,
     CacheInvalidateResponse,
     CacheStatsResponse,
     HealthResponse,
+    MetricsResponse,
     NewsResponse,
     PlanningResponse,
     ResolveResponse,
@@ -39,15 +44,28 @@ logger = logging.getLogger(__name__)
 OPENAPI_ERROR_RESPONSES = {
     400: {
         'description': 'Invalid request parameters.',
-        'content': {'application/json': {'example': {'detail': 'Unknown volume field path: bogus'}}},
+        'model': ApiErrorResponse,
+        'content': {'application/json': {'example': {'ok': False, 'code': 'INVALID_REQUEST', 'detail': 'Unknown volume field path: bogus'}}},
+    },
+    401: {
+        'description': 'Authentication failure.',
+        'model': ApiErrorResponse,
+        'content': {'application/json': {'example': {'ok': False, 'code': 'AUTH_REQUIRED', 'detail': 'Missing or invalid bearer token.'}}},
     },
     404: {
         'description': 'No matching resource was found.',
-        'content': {'application/json': {'example': {'detail': "No volume matched series='One Piece' and number='999'."}}},
+        'model': ApiErrorResponse,
+        'content': {'application/json': {'example': {'ok': False, 'code': 'RESOURCE_NOT_FOUND', 'detail': "No volume matched series='One Piece' and number='999'."}}},
+    },
+    429: {
+        'description': 'Rate limit exceeded.',
+        'model': ApiErrorResponse,
+        'content': {'application/json': {'example': {'ok': False, 'code': 'RATE_LIMITED', 'detail': 'Too many requests for the current window.'}}},
     },
     502: {
         'description': 'Upstream Manga News fetch/parsing failure.',
-        'content': {'application/json': {'example': {'detail': 'Unable to parse the Manga News page.'}}},
+        'model': ApiErrorResponse,
+        'content': {'application/json': {'example': {'ok': False, 'code': 'UPSTREAM_PARSE_ERROR', 'detail': 'Unable to parse the Manga News page.'}}},
     },
 }
 
@@ -63,6 +81,7 @@ SEARCH_EXAMPLE = {
     'partial': False,
     'warnings': [],
     'fingerprint': 'fp-search-one-piece-91',
+    'pagination': {'page': 1, 'limit': 10, 'returned': 1, 'total': 4, 'has_more': True},
     'data': [
         {
             'title': 'One Piece Vol.91',
@@ -89,6 +108,7 @@ RESOLVE_EXAMPLE = {
     'partial': False,
     'warnings': [],
     'fingerprint': 'fp-resolve-one-piece-91',
+    'pagination': {'page': 1, 'limit': 10, 'returned': 4, 'total': 4, 'has_more': False},
     'data': {
         'query': 'one piece tome 91',
         'kind_requested': 'volume',
@@ -144,6 +164,10 @@ VOLUME_EXAMPLE = {
         'title': 'One Piece Vol.91',
         'series_title': 'One Piece',
         'number': '91',
+        'number_int': 91,
+        'edition_label': 'edition_originale',
+        'is_special': False,
+        'is_one_shot': None,
         'publisher_fr': 'Glénat',
         'publication_date': '2019-07-03',
         'isbn_ean': '9782344037102',
@@ -167,6 +191,7 @@ LOOKUP_VOLUME_EXAMPLE = {
         'query': 'One Piece tome 91',
         'requested_series': 'One Piece',
         'requested_number': '91',
+        'pagination': {'page': 1, 'limit': 10, 'returned': 1, 'total': 4, 'has_more': True},
         'resolved': {
             'title': 'One Piece Vol.91',
             'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-91',
@@ -183,6 +208,58 @@ LOOKUP_VOLUME_EXAMPLE = {
 }
 
 
+def _error_response(status_code: int, code: str, detail: str, *, headers: dict[str, str] | None = None) -> JSONResponse:
+    payload = {'ok': False, 'code': code, 'detail': detail}
+    return JSONResponse(status_code=status_code, content=payload, headers=headers or {})
+
+
+def _is_schema_or_docs_path(path: str, settings: Settings) -> bool:
+    if path == '/openapi.json' or path == '/docs/oauth2-redirect':
+        return True
+    if settings.docs_url and path.startswith(settings.docs_url):
+        return True
+    if settings.redoc_url and path.startswith(settings.redoc_url):
+        return True
+    return False
+
+
+def _is_legacy_path(path: str, settings: Settings) -> bool:
+    if path.startswith('/v1') or _is_schema_or_docs_path(path, settings):
+        return False
+    return path.startswith('/')
+
+
+def _rate_limit_key(request: Request, settings: Settings) -> str:
+    auth = request.headers.get('authorization', '').strip()
+    client_ip = request.client.host if request.client else 'unknown'
+    scope = settings.rate_limit_scope.lower()
+    if scope == 'token' and auth:
+        return f'token:{auth}'
+    if scope == 'ip':
+        return f'ip:{client_ip}'
+    if auth:
+        return f'token:{auth}'
+    return f'ip:{client_ip}'
+
+
+def _should_rate_limit(request: Request, settings: Settings) -> bool:
+    path = request.url.path
+    if path in set(settings.rate_limit_exempt_path_list):
+        return False
+    if _is_schema_or_docs_path(path, settings):
+        return False
+    if path.startswith('/v1/admin/') and not settings.rate_limit_include_admin:
+        return False
+    return True
+
+
+def _apply_rate_limit_headers(response: Response, decision) -> None:
+    response.headers['X-RateLimit-Limit'] = str(decision.limit)
+    response.headers['X-RateLimit-Remaining'] = str(decision.remaining)
+    response.headers['X-RateLimit-Reset'] = str(decision.reset_after_seconds)
+
+
+
 def configure_logging(settings: Settings) -> None:
     json_logs = settings.log_format.lower() == 'json'
     logging.basicConfig(
@@ -197,16 +274,20 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings)
     cache = SQLiteCache(settings.db_path)
+    metrics = MetricsStore()
     fetcher = AsyncFetcher(
         settings.user_agent,
         settings.request_timeout_seconds,
         max_retries=settings.request_max_retries,
         backoff_seconds=settings.request_backoff_seconds,
         log_json=settings.log_format.lower() == 'json',
+        metrics=metrics,
     )
-    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=cache)
+    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=cache, metrics=metrics)
     app.state.settings = settings
     app.state.service = service
+    app.state.metrics = metrics
+    app.state.rate_limiter = InMemoryRateLimiter(limit=settings.rate_limit_requests, window_seconds=settings.rate_limit_window_seconds)
     try:
         yield
     finally:
@@ -239,6 +320,30 @@ async def request_context_middleware(request: Request, call_next):
         path=request.url.path,
         query=str(request.url.query) or None,
     )
+
+    decision = None
+    if not settings.enable_legacy_routes and _is_legacy_path(request.url.path, settings):
+        response = _error_response(404, 'ENDPOINT_NOT_FOUND', 'Legacy unversioned routes are disabled. Use /v1/... instead.')
+        response.headers['X-Request-ID'] = request_id
+        request.app.state.metrics.record_response(response.status_code)
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        log_event(logger, logging.INFO, 'request_completed', json_mode=json_logs, request_id=request_id, method=request.method, path=request.url.path, status_code=response.status_code, duration_ms=duration_ms)
+        reset_request_id(token)
+        return response
+
+    if settings.rate_limit_enabled and _should_rate_limit(request, settings):
+        decision = request.app.state.rate_limiter.check(_rate_limit_key(request, settings))
+        if not decision.allowed:
+            response = _error_response(429, 'RATE_LIMITED', 'Too many requests for the current window.', headers={'Retry-After': str(decision.retry_after_seconds)})
+            response.headers['X-Request-ID'] = request_id
+            _apply_rate_limit_headers(response, decision)
+            request.app.state.metrics.increment('rate_limited_requests')
+            request.app.state.metrics.record_response(response.status_code)
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            log_event(logger, logging.WARNING, 'request_rate_limited', json_mode=json_logs, request_id=request_id, method=request.method, path=request.url.path, status_code=response.status_code, duration_ms=duration_ms)
+            reset_request_id(token)
+            return response
+
     try:
         response = await call_next(request)
     except Exception:
@@ -257,6 +362,9 @@ async def request_context_middleware(request: Request, call_next):
         raise
     duration_ms = round((time.perf_counter() - started) * 1000, 2)
     response.headers['X-Request-ID'] = request_id
+    if decision is not None:
+        _apply_rate_limit_headers(response, decision)
+    request.app.state.metrics.record_response(response.status_code)
     log_event(
         logger,
         logging.INFO,
@@ -279,6 +387,10 @@ def get_service() -> MangaNewsService:
 
 def get_settings_dep() -> Settings:
     return app.state.settings
+
+
+def get_metrics():
+    return app.state.metrics
 
 
 def _etag_matches(if_none_match: str | None, etag: str | None) -> bool:
@@ -326,24 +438,38 @@ async def auth_dependency(
     return await require_api_token(settings, authorization)
 
 
+async def admin_auth_dependency(
+    authorization: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings_dep),
+):
+    return await require_admin_token(settings, authorization)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(_, exc: HTTPException):
+    code = 'AUTH_REQUIRED' if exc.status_code == 401 else 'HTTP_ERROR'
+    detail = str(exc.detail)
+    return _error_response(exc.status_code, code, detail, headers=getattr(exc, 'headers', None))
+
+
 @app.exception_handler(ResourceNotFound)
 async def not_found_handler(_, exc: ResourceNotFound):
-    return JSONResponse(status_code=404, content={'detail': str(exc)})
+    return _error_response(404, exc.code, str(exc))
 
 
 @app.exception_handler(BadRequestError)
 async def bad_request_handler(_, exc: BadRequestError):
-    return JSONResponse(status_code=400, content={'detail': str(exc)})
+    return _error_response(400, exc.code, str(exc))
 
 
 @app.exception_handler(ParseError)
 async def parse_error_handler(_, exc: ParseError):
-    return JSONResponse(status_code=502, content={'detail': str(exc)})
+    return _error_response(502, exc.code, str(exc))
 
 
 @app.exception_handler(UpstreamError)
 async def upstream_error_handler(_, exc: UpstreamError):
-    return JSONResponse(status_code=502, content={'detail': str(exc)})
+    return _error_response(502, exc.code, str(exc))
 
 
 @app.get('/health', dependencies=[Depends(auth_dependency)], response_model=HealthResponse)
@@ -594,12 +720,17 @@ async def get_planning(
     return _build_envelope_response(payload.model_dump(), request)
 
 
-@app.get('/admin/cache/stats', dependencies=[Depends(auth_dependency)], response_model=CacheStatsResponse)
+@app.get('/admin/cache/stats', dependencies=[Depends(admin_auth_dependency)], response_model=CacheStatsResponse)
 async def get_cache_stats(service: MangaNewsService = Depends(get_service)):
     return {'ok': True, 'data': service.cache.stats()}
 
 
-@app.post('/admin/cache/invalidate', dependencies=[Depends(auth_dependency)], response_model=CacheInvalidateResponse)
+@app.get('/admin/metrics', dependencies=[Depends(admin_auth_dependency)], response_model=MetricsResponse)
+async def get_admin_metrics(metrics: MetricsStore = Depends(get_metrics)):
+    return {'ok': True, 'data': metrics.snapshot().model_dump()}
+
+
+@app.post('/admin/cache/invalidate', dependencies=[Depends(admin_auth_dependency)], response_model=CacheInvalidateResponse)
 async def invalidate_cache(
     payload: CacheInvalidateRequest | None = Body(default=None),
     service: MangaNewsService = Depends(get_service),
@@ -640,13 +771,36 @@ _VERSIONED_ALIASES = [
     ('/v1/planning', get_planning, ['GET'], PlanningResponse),
     ('/v1/admin/cache/stats', get_cache_stats, ['GET'], CacheStatsResponse),
     ('/v1/admin/cache/invalidate', invalidate_cache, ['POST'], CacheInvalidateResponse),
+    ('/v1/admin/metrics', get_admin_metrics, ['GET'], MetricsResponse),
 ]
 
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version=app.version, description=app.description, routes=app.routes)
+    if not get_settings().enable_legacy_routes:
+        original_paths = dict(schema.get('paths', {}))
+        versioned_paths = {}
+        for path, value in original_paths.items():
+            if not path.startswith('/v1'):
+                continue
+            legacy_path = path[3:] or '/'
+            versioned_paths[path] = original_paths.get(legacy_path, value)
+        schema['paths'] = versioned_paths
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
+
+
 for path, endpoint, methods, response_model in _VERSIONED_ALIASES:
+    dependency = admin_auth_dependency if path.startswith('/v1/admin/') else auth_dependency
     app.add_api_route(
         path,
         endpoint,
         methods=methods,
         response_model=response_model,
-        dependencies=[Depends(auth_dependency)],
+        dependencies=[Depends(dependency)],
     )

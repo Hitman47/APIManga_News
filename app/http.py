@@ -9,6 +9,7 @@ import httpx
 
 from app.exceptions import ResourceNotFound, UpstreamError
 from app.logging_utils import log_event
+from app.metrics import MetricsStore
 
 logger = logging.getLogger(__name__)
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -29,11 +30,13 @@ class AsyncFetcher:
         max_retries: int = 2,
         backoff_seconds: float = 0.5,
         log_json: bool = False,
+        metrics: MetricsStore | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ):
         self._log_json = log_json
         self._max_retries = max(0, max_retries)
         self._backoff_seconds = max(0.0, backoff_seconds)
+        self._metrics = metrics
         self._client = httpx.AsyncClient(
             timeout=timeout_seconds,
             follow_redirects=True,
@@ -70,13 +73,19 @@ class AsyncFetcher:
                     retrying=retrying,
                 )
                 if retrying:
+                    if self._metrics is not None:
+                        self._metrics.increment('upstream_fetch_retries')
                     await asyncio.sleep(self._backoff_seconds * (2 ** attempt))
                     continue
+                if self._metrics is not None:
+                    self._metrics.increment('upstream_fetch_errors')
                 raise UpstreamError(f'Unable to reach Manga News: {exc}') from exc
 
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             retrying = response.status_code in RETRYABLE_STATUS_CODES and attempt < self._max_retries
             if response.status_code == 404:
+                if self._metrics is not None:
+                    self._metrics.increment('upstream_fetch_not_found')
                 log_event(
                     logger,
                     logging.INFO,
@@ -90,6 +99,8 @@ class AsyncFetcher:
                 )
                 raise ResourceNotFound('Resource not found on Manga News.')
             if retrying:
+                if self._metrics is not None:
+                    self._metrics.increment('upstream_fetch_retries')
                 log_event(
                     logger,
                     logging.WARNING,
@@ -104,6 +115,8 @@ class AsyncFetcher:
                 await asyncio.sleep(self._backoff_seconds * (2 ** attempt))
                 continue
             if response.status_code >= 400:
+                if self._metrics is not None:
+                    self._metrics.increment('upstream_fetch_errors')
                 log_event(
                     logger,
                     logging.ERROR,
@@ -117,6 +130,8 @@ class AsyncFetcher:
                 )
                 raise UpstreamError(f'Manga News returned HTTP {response.status_code}.')
             if not response.text.strip():
+                if self._metrics is not None:
+                    self._metrics.increment('upstream_fetch_errors')
                 log_event(
                     logger,
                     logging.ERROR,
@@ -128,6 +143,8 @@ class AsyncFetcher:
                     max_attempts=self._max_retries + 1,
                 )
                 raise UpstreamError('Manga News returned an empty response.')
+            if self._metrics is not None:
+                self._metrics.increment('upstream_fetch_success')
             log_event(
                 logger,
                 logging.INFO,
