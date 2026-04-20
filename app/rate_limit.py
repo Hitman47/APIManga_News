@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import dataclass
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class RateLimitDecision:
     allowed: bool
     limit: int
@@ -16,7 +16,7 @@ class RateLimitDecision:
 
 
 class InMemoryRateLimiter:
-    def __init__(self, *, limit: int, window_seconds: int):
+    def __init__(self, *, limit: int, window_seconds: int) -> None:
         self.limit = max(1, int(limit))
         self.window_seconds = max(1, int(window_seconds))
         self._lock = threading.Lock()

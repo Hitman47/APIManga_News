@@ -258,38 +258,37 @@ SPECIAL_VOLUME_KEYWORDS = {
     'spin off', 'spécial', 'special edition', 'collector', 'deluxe'
 }
 
+SPECIAL_VOLUME_PATTERNS = [
+    re.compile(r'\b(one\s*shot|one-shot|roman|novel|light\s*novel|guide\s*book|guidebook|fan\s*book|fanbook|art\s*book|artbook|databook|anime\s*comics?|special|collector|deluxe|hors[-\s]?s[eé]rie|sp[ée]cial|spinoff|spin\s*off)\b', flags=re.IGNORECASE),
+]
+
+EDITION_LABEL_PATTERNS = [
+    ('edition_originale', re.compile(r'\b(edition originale|ed\.? originale)\b', flags=re.IGNORECASE)),
+    ('collector', re.compile(r'\bcollector\b', flags=re.IGNORECASE)),
+    ('deluxe', re.compile(r'\bdeluxe\b', flags=re.IGNORECASE)),
+    ('perfect', re.compile(r'\bperfect\b', flags=re.IGNORECASE)),
+    ('ultimate', re.compile(r'\bultimate\b', flags=re.IGNORECASE)),
+    ('kanzenban', re.compile(r'\bkanzenban\b', flags=re.IGNORECASE)),
+    ('double', re.compile(r'\bdouble\b', flags=re.IGNORECASE)),
+    ('triple', re.compile(r'\btriple\b', flags=re.IGNORECASE)),
+    ('grand_format', re.compile(r'\bgrand format\b', flags=re.IGNORECASE)),
+]
+
 
 def infer_volume_edition_label(*values: str | None) -> str | None:
-    normalized = ' '.join(normalize_text(value) for value in values if value)
-    if not normalized:
-        return None
-    label_checks = [
-        ('edition_originale', {'edition originale', 'ed originale'}),
-        ('collector', {'collector'}),
-        ('deluxe', {'deluxe'}),
-        ('perfect', {'perfect'}),
-        ('ultimate', {'ultimate'}),
-        ('kanzenban', {'kanzenban'}),
-        ('double', {'double'}),
-        ('triple', {'triple'}),
-        ('grand_format', {'grand format'}),
-        ('roman', {'roman', 'novel', 'light novel'}),
-    ]
-    for label, patterns in label_checks:
-        if any(pattern in normalized for pattern in patterns):
-            return label
-    return None
+    for raw in values:
+        candidate = clean_ws(raw)
+        if not candidate:
+            continue
+        for label, pattern in EDITION_LABEL_PATTERNS:
+            if pattern.search(candidate):
+                return label
+    return 'edition_originale'
 
 
-
-def infer_volume_flags(*values: str | None) -> tuple[bool, bool | None]:
-    normalized = ' '.join(normalize_text(value) for value in values if value)
-    if not normalized:
-        return False, None
-    is_special = any(keyword in normalized for keyword in SPECIAL_VOLUME_KEYWORDS)
-    is_one_shot = None
-    if 'one shot' in normalized or 'oneshot' in normalized:
-        is_one_shot = True
-    elif 'en cours' in normalized or 'termine' in normalized or 'terminee' in normalized or 'tome' in normalized or 'vol' in normalized:
-        is_one_shot = False
+def infer_volume_flags(*values: str | None) -> tuple[bool, bool]:
+    texts = [clean_ws(value).lower() for value in values if clean_ws(value)]
+    joined = ' '.join(texts)
+    is_special = any(pattern.search(joined) for pattern in SPECIAL_VOLUME_PATTERNS)
+    is_one_shot = 'one shot' in joined or 'one-shot' in joined
     return is_special, is_one_shot

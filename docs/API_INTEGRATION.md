@@ -277,6 +277,8 @@ python scripts/run_api_smoke_tests.py --output-dir ""
 ### Suite projet
 
 ```bash
+Note: les tests asynchrones sont pris en charge directement via `pytest-asyncio`, déjà inclus dans `requirements.txt`. Aucun plugin supplémentaire n’est à installer si tu fais `pip install -r requirements.txt`.
+
 pytest
 ```
 

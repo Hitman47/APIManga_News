@@ -237,7 +237,7 @@ def _extract_page_title(soup: BeautifulSoup, lines: list[str], *, kind: str) -> 
     fallback = clean_ws(lines[0] if lines else '')
     normalized_fallback = normalize_text(fallback)
     looks_like_value_line = any(
-        normalize_text(fallback).startswith(normalize_text(prefix))
+        normalized_fallback.startswith(normalize_text(prefix))
         for prefix_list in VALUE_LABELS.values()
         for prefix in prefix_list
     ) or ':' in fallback
@@ -250,8 +250,6 @@ def _extract_page_title(soup: BeautifulSoup, lines: list[str], *, kind: str) -> 
         return fallback
 
     raise ParseError(f'Unable to extract the {kind} title.')
-
-
 def _parse_illustration_details(raw: str | None) -> IllustrationDetails | None:
     if not raw:
         return None
