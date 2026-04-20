@@ -120,7 +120,8 @@ La plupart des endpoints renvoient une enveloppe commune :
 ```
 
 Les réponses détaillées série / volume contiennent `title_vo` et `translated_title`.
-Les résultats de recherche et de résolution exposent aussi ces champs quand ils sont disponibles.
+Les fiches volume exposent aussi `number`, `number_int`, `edition_label`, `is_special` et `is_one_shot`.
+Les résultats de recherche et de résolution exposent aussi `title_vo` et `translated_title` quand ils sont disponibles.
 
 ## Caching côté client
 

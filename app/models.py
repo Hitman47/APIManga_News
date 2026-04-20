@@ -156,6 +156,11 @@ class SeriesData(BaseModel):
 class VolumeData(BaseModel):
     title: str | None = None
     series_title: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
     title_vo: str | None = None
     translated_title: str | None = None
     summary: str | None = None
@@ -201,6 +206,11 @@ class PlanningItem(BaseModel):
     featured: bool = False
     series_slug: str | None = None
     volume_slug: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
 
 
 class PlanningPage(BaseModel):
@@ -224,6 +234,10 @@ class SeriesEditionItem(BaseModel):
     series_slug: str | None = None
     volume_slug: str | None = None
     number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
     publication_date: str | None = None
     cover_image: str | None = None
 

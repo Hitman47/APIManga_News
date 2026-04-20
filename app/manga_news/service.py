@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 from copy import deepcopy
 from datetime import date
+from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlencode, urlparse
 
@@ -47,7 +49,7 @@ SERIES_BLOCKS = {
     'raw_sections': ['raw_sections'],
 }
 VOLUME_BLOCKS = {
-    'identity': ['title', 'series_title', 'title_vo', 'translated_title', 'source_url'],
+    'identity': ['title', 'series_title', 'number', 'number_int', 'edition_label', 'is_special', 'is_one_shot', 'title_vo', 'translated_title', 'source_url'],
     'staff': ['authors_story', 'authors_art', 'translators'],
     'publishing': ['publisher_fr', 'publisher_vo', 'collection', 'type', 'genres', 'prepublication', 'origin', 'advisory_age'],
     'presentation': ['summary', 'illustration', 'illustration_details', 'cover_image'],
@@ -155,19 +157,85 @@ class MangaNewsService:
         self.cache = cache
         self.base_url = settings.manga_news_base_url.rstrip('/')
 
-    async def _cached_payload(self, *, cache_key: str, ttl_seconds: int, loader):
+    def _negative_cache_exception(self, entry):
+        if entry.error_code == ResourceNotFound.code:
+            return ResourceNotFound(entry.detail)
+        return ParseError(entry.detail, debug_dump_path=entry.debug_dump_path)
+
+    def _dump_debug_html(self, *, html: str, source_url: str, cache_key: str, resource_kind: str, error: ParseError) -> str | None:
+        if not getattr(self.settings, 'debug_capture_html_on_error', False):
+            return None
+        dump_dir = Path(getattr(self.settings, 'debug_html_dump_dir', Path('/tmp/manga-news-debug-html')))
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        stamp = now_utc().strftime('%Y%m%dT%H%M%S%fZ')
+        prefix = f'{resource_kind}-{cache_key[:12]}-{stamp}'
+        html_path = dump_dir / f'{prefix}.html'
+        meta_path = dump_dir / f'{prefix}.json'
+        html_path.write_text(html, encoding='utf-8')
+        meta_payload = {
+            'resource_kind': resource_kind,
+            'source_url': source_url,
+            'cache_key': cache_key,
+            'error_code': error.code,
+            'detail': error.detail,
+            'saved_at': now_utc().isoformat(),
+        }
+        meta_path.write_text(json.dumps(meta_payload, ensure_ascii=False, indent=2), encoding='utf-8')
+        return str(html_path)
+
+    def _with_debug_dump(self, *, error: ParseError, html: str, source_url: str, cache_key: str, resource_kind: str) -> ParseError:
+        dump_path = self._dump_debug_html(
+            html=html,
+            source_url=source_url,
+            cache_key=cache_key,
+            resource_kind=resource_kind,
+            error=error,
+        )
+        if not dump_path:
+            return error
+        detail = error.detail
+        if 'Debug HTML saved to' not in detail:
+            detail = f'{detail} Debug HTML saved to {dump_path}'
+        return ParseError(detail, debug_dump_path=dump_path)
+
+    async def _cached_payload(self, *, cache_key: str, ttl_seconds: int, loader, namespace: str | None = None, resource_url: str | None = None):
         entry = self.cache.get(cache_key)
         if entry and entry.is_fresh:
             return entry.payload, entry, True, False, []
+
+        if getattr(self.settings, 'negative_cache_enabled', True):
+            negative_entry = self.cache.get_negative(cache_key)
+            if negative_entry and negative_entry.is_fresh:
+                raise self._negative_cache_exception(negative_entry)
+
         try:
             payload, source_url = await loader()
+            self.cache.clear_negative(cache_key)
             cached_entry = self.cache.set(
                 cache_key=cache_key,
                 payload={'data': payload, 'source_url': source_url},
                 ttl_seconds=ttl_seconds,
                 stale_grace_seconds=self.settings.cache_stale_grace_seconds,
+                namespace=namespace,
+                resource_url=source_url or resource_url,
             )
             return cached_entry.payload, cached_entry, False, False, []
+        except (ParseError, ResourceNotFound) as exc:
+            if getattr(self.settings, 'negative_cache_enabled', True):
+                self.cache.set_negative(
+                    cache_key=cache_key,
+                    error_code=exc.code,
+                    detail=str(exc),
+                    ttl_seconds=getattr(self.settings, 'negative_cache_ttl_seconds', 120),
+                    namespace=namespace,
+                    resource_url=getattr(exc, 'resource_url', None) or resource_url,
+                    debug_dump_path=getattr(exc, 'debug_dump_path', None),
+                )
+            if entry and entry.is_stale_usable:
+                warning = f'Using stale cached data because the upstream fetch failed: {exc}'
+                logger.warning(warning)
+                return entry.payload, entry, True, True, [warning]
+            raise
         except Exception as exc:
             if entry and entry.is_stale_usable:
                 warning = f'Using stale cached data because the upstream fetch failed: {exc}'
@@ -319,13 +387,24 @@ class MangaNewsService:
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
-            parsed = parse_series_page(result.text, result.url)
+            try:
+                parsed = parse_series_page(result.text, result.url)
+            except ParseError as exc:
+                raise self._with_debug_dump(
+                    error=exc,
+                    html=result.text,
+                    source_url=result.url,
+                    cache_key=cache_key,
+                    resource_kind='series',
+                ) from exc
             return parsed.model_dump(), result.url
 
         return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_series_seconds,
             loader=loader,
+            namespace='series',
+            resource_url=target_url,
         )
 
     async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
@@ -334,13 +413,24 @@ class MangaNewsService:
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
-            parsed = parse_volume_page(result.text, result.url)
+            try:
+                parsed = parse_volume_page(result.text, result.url)
+            except ParseError as exc:
+                raise self._with_debug_dump(
+                    error=exc,
+                    html=result.text,
+                    source_url=result.url,
+                    cache_key=cache_key,
+                    resource_kind='volume',
+                ) from exc
             return parsed.model_dump(), result.url
 
         return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_volume_seconds,
             loader=loader,
+            namespace='volume',
+            resource_url=target_url,
         )
 
     async def get_series(
@@ -419,6 +509,8 @@ class MangaNewsService:
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_series_seconds,
             loader=loader,
+            namespace='series-editions',
+            resource_url=target_url,
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
@@ -446,6 +538,8 @@ class MangaNewsService:
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_news_global_seconds,
             loader=loader,
+            namespace='news-global',
+            resource_url=rss_url,
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
@@ -501,6 +595,8 @@ class MangaNewsService:
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_planning_seconds,
             loader=loader,
+            namespace='planning',
+            resource_url=target_url,
         )
 
         planning = payload.get('data', {}) or {}
@@ -605,6 +701,8 @@ class MangaNewsService:
             cache_key=cache_key,
             ttl_seconds=ttl,
             loader=loader,
+            namespace=cache_namespace,
+            resource_url=target_url,
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 

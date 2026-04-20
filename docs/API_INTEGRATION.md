@@ -98,6 +98,11 @@ GET /volume/by-url?url=...
 Useful fields include:
 - `title`
 - `series_title`
+- `number`
+- `number_int`
+- `edition_label`
+- `is_special`
+- `is_one_shot`
 - `title_vo`
 - `translated_title`
 - `publication_date`
@@ -203,3 +208,9 @@ Use these files together:
 python scripts/validate_contract_and_docs.py
 pytest
 ```
+
+## 11. Parse errors, debug HTML, and negative cache
+
+When `DEBUG_CAPTURE_HTML_ON_ERROR=true`, a parsing failure on a cached endpoint can save the raw upstream HTML and a sidecar JSON metadata file in `DEBUG_HTML_DUMP_DIR`. The raised `UPSTREAM_PARSE_ERROR` detail then includes `Debug HTML saved to ...`.
+
+When `NEGATIVE_CACHE_ENABLED=true`, parse failures and not-found responses are cached briefly using `NEGATIVE_CACHE_TTL_SECONDS`. This prevents repeated identical upstream fetches while the upstream page stays broken or absent.
