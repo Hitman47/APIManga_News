@@ -16,6 +16,8 @@ from app.models import (
     Envelope,
     NewsItem,
     RelatedLinks,
+    SearchResolveData,
+    SearchResult,
     SeriesEditionsBlock,
     SeriesEditionsData,
     SeriesRelatedData,
@@ -28,7 +30,16 @@ from app.manga_news.parsers import (
     parse_series_page,
     parse_volume_page,
 )
-from app.utils import clean_ws, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
+from app.utils import (
+    clean_ws,
+    fingerprint_data,
+    is_manga_news_url,
+    make_cache_key,
+    normalize_text,
+    now_utc,
+    parse_french_date,
+    score_match,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,10 +183,11 @@ class MangaNewsService:
                 return entry.payload, entry, True, True, [warning]
             raise
 
-    def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str]) -> Envelope:
+    def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool = True) -> Envelope:
+        data = payload.get('data')
         return Envelope(
             ok=True,
-            found=True,
+            found=found,
             source='manga_news',
             source_url=payload.get('source_url'),
             cached=cached,
@@ -183,10 +195,11 @@ class MangaNewsService:
             cache_expires_at=entry.expires_at.isoformat() if entry else None,
             partial=partial,
             warnings=warnings,
-            data=payload.get('data'),
+            fingerprint=fingerprint_data(data),
+            data=data,
         )
 
-    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> Envelope:
+    async def _search_results(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int):
         query = clean_ws(query)
         if not query:
             raise ParseError('The search query cannot be empty.')
@@ -218,7 +231,7 @@ class MangaNewsService:
                         limit=max(limit, self.settings.max_limit),
                     )
                 )
-            deduped: dict[str, object] = {}
+            deduped: dict[str, SearchResult] = {}
             for item in aggregated:
                 existing = deduped.get(item.url)
                 if existing is None or item.score > existing.score:
@@ -234,19 +247,33 @@ class MangaNewsService:
             ttl_seconds=self.settings.cache_ttl_search_seconds,
             loader=loader,
         )
+        return payload, entry, cached, partial, warnings
+
+    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> Envelope:
+        payload, entry, cached, partial, warnings = await self._search_results(query=query, kind=kind, mode=mode, limit=limit)
         found = bool(payload.get('data'))
-        return Envelope(
-            ok=True,
-            found=found,
-            source='manga_news',
-            source_url=payload.get('source_url'),
-            cached=cached,
-            fetched_at=entry.fetched_at.isoformat(),
-            cache_expires_at=entry.expires_at.isoformat(),
-            partial=partial,
-            warnings=warnings,
-            data=payload.get('data', []),
+        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, found=found)
+
+    async def resolve_search(self, query: str, kind: Literal['series', 'volume', 'all'], limit: int = 5) -> Envelope:
+        payload, entry, cached, partial, warnings = await self._search_results(query=query, kind=kind, mode='all', limit=max(limit, 1))
+        candidates = [SearchResult.model_validate(item) for item in payload.get('data', [])]
+        best = candidates[0] if candidates else None
+        if best is None:
+            confidence: Literal['high', 'medium', 'low', 'none'] = 'none'
+        elif best.score >= 90:
+            confidence = 'high'
+        elif best.score >= 75:
+            confidence = 'medium'
+        else:
+            confidence = 'low'
+        data = SearchResolveData(
+            query=clean_ws(query),
+            kind=kind,
+            confidence=confidence,
+            result=best,
+            candidates=candidates[1:limit],
         )
+        return self._envelope({'data': data.model_dump(), 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings, found=best is not None)
 
     async def _get_series_payload(self, *, slug: str | None = None, url: str | None = None):
         target_url = self._resolve_series_url(slug=slug, url=url)
@@ -382,7 +409,7 @@ class MangaNewsService:
             ttl_seconds=self.settings.cache_ttl_news_global_seconds,
             loader=loader,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
+        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(payload.get('data')))
 
     async def get_series_news(self, *, slug: str, limit: int) -> Envelope:
         target_url = f'{self.base_url}/index.php/serie/news/{slug}'
@@ -502,18 +529,7 @@ class MangaNewsService:
             'items': items,
         }
 
-        return Envelope(
-            ok=True,
-            found=bool(items),
-            source='manga_news',
-            source_url=payload.get('source_url'),
-            cached=cached,
-            fetched_at=entry.fetched_at.isoformat(),
-            cache_expires_at=entry.expires_at.isoformat(),
-            partial=partial,
-            warnings=warnings,
-            data=data,
-        )
+        return self._envelope({'data': data, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings, found=bool(items))
 
     def _parse_iso_date(self, value: str | None, field_name: str) -> date | None:
         if value is None:
@@ -539,7 +555,7 @@ class MangaNewsService:
             ttl_seconds=ttl,
             loader=loader,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
+        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(payload.get('data')))
 
     def _resolve_series_url(self, *, slug: str | None, url: str | None) -> str:
         if url:

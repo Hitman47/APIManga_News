@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+SCHEMA_VERSION = '1.0'
 
 
 class BaseEnvelope(BaseModel):
+    schema_version: str = SCHEMA_VERSION
     ok: bool = True
     found: bool = True
     source: Literal['manga_news'] = 'manga_news'
@@ -15,6 +18,7 @@ class BaseEnvelope(BaseModel):
     cache_expires_at: str | None = None
     partial: bool = False
     warnings: list[str] = Field(default_factory=list)
+    fingerprint: str | None = None
 
 
 class Envelope(BaseEnvelope):
@@ -23,6 +27,11 @@ class Envelope(BaseEnvelope):
 
 class HealthResponse(BaseModel):
     ok: bool = True
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {'ok': True},
+        }
+    )
 
 
 class SearchResult(BaseModel):
@@ -37,6 +46,78 @@ class SearchResult(BaseModel):
 
 class SearchResponse(BaseEnvelope):
     data: list[SearchResult] = Field(default_factory=list)
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'schema_version': SCHEMA_VERSION,
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/recherche/?cat=manga-serie-vf&q=one%20piece',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-21T12:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': '9f3a3a',
+                'data': [
+                    {
+                        'title': 'One Piece',
+                        'url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                        'kind': 'series',
+                        'score': 100,
+                        'slug': 'One-piece-Edition-originale',
+                        'series_slug': None,
+                        'volume_slug': None,
+                    }
+                ],
+            }
+        }
+    )
+
+
+class SearchResolveData(BaseModel):
+    query: str
+    kind: Literal['series', 'volume', 'all']
+    confidence: Literal['high', 'medium', 'low', 'none']
+    result: SearchResult | None = None
+    candidates: list[SearchResult] = Field(default_factory=list)
+
+
+class SearchResolveResponse(BaseEnvelope):
+    data: SearchResolveData
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'schema_version': SCHEMA_VERSION,
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/recherche/?cat=manga-serie-vf&q=one%20piece',
+                'cached': True,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-21T12:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': '4f2c31',
+                'data': {
+                    'query': 'one piece',
+                    'kind': 'series',
+                    'confidence': 'high',
+                    'result': {
+                        'title': 'One Piece',
+                        'url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                        'kind': 'series',
+                        'score': 100,
+                        'slug': 'One-piece-Edition-originale',
+                        'series_slug': None,
+                        'volume_slug': None,
+                    },
+                    'candidates': [],
+                },
+            }
+        }
+    )
 
 
 class NewsItem(BaseModel):
@@ -152,6 +233,30 @@ class VolumeData(BaseModel):
 
 class SeriesResponse(BaseEnvelope):
     data: SeriesData | dict[str, Any] | None = None
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'schema_version': SCHEMA_VERSION,
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-21T12:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': '7a1f88',
+                'data': {
+                    'title': 'One Piece',
+                    'title_vo': 'ワンピース',
+                    'publisher_fr': 'Glénat',
+                    'vf': {'volumes': 112, 'status': 'En cours'},
+                    'next_release_date': '2026-05-06',
+                },
+            }
+        }
+    )
 
 
 class VolumeResponse(BaseEnvelope):
@@ -183,6 +288,45 @@ class PlanningPage(BaseModel):
 
 class PlanningResponse(BaseEnvelope):
     data: PlanningPage | dict[str, Any] | None = None
+    model_config = ConfigDict(
+        json_schema_extra={
+            'example': {
+                'schema_version': SCHEMA_VERSION,
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/planning/?p_year=2026&p_month=4',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': '7f90d1',
+                'data': {
+                    'section': 'manga-vf',
+                    'year': 2026,
+                    'month': 4,
+                    'page': 1,
+                    'filters': {'publisher': 'Glénat', 'query': None, 'date_from': None, 'date_to': None},
+                    'sort': 'date_asc',
+                    'total_items': 1,
+                    'items': [
+                        {
+                            'title': 'One Piece Vol.110',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+                            'release_date': '2026-04-27',
+                            'authors': ['Eiichirô ODA'],
+                            'publisher': 'Glénat',
+                            'summary': 'Résumé',
+                            'featured': False,
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'vol-110',
+                        }
+                    ],
+                },
+            }
+        }
+    )
 
 
 class SeriesEditionItem(BaseModel):

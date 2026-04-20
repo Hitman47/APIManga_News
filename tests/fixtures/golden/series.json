@@ -1,0 +1,131 @@
+{
+  "title": "One Piece",
+  "title_vo": "ワンピース",
+  "translated_title": "One Piece",
+  "summary": "Résumé principal de la série.",
+  "authors_story": [
+    "Eiichirô ODA"
+  ],
+  "authors_art": [
+    "Eiichirô ODA"
+  ],
+  "translators": [
+    "Djamel RABAHI",
+    "Julien FAVEREAU"
+  ],
+  "publisher_fr": "Glénat",
+  "publisher_vo": "Shûeisha",
+  "collection": "Shonen",
+  "type": "Shonen",
+  "genres": [
+    "Aventure",
+    "Fantastique"
+  ],
+  "prepublication": "Shônen Jump",
+  "origin": "Japon - 1997",
+  "illustration": "n&b + couleurs",
+  "illustration_details": {
+    "raw": "n&b + couleurs",
+    "pages": null,
+    "has_color_pages": true
+  },
+  "advisory_age": "8+",
+  "cover_image": "https://www.manga-news.com/public/images/series/one-piece.jpg",
+  "vf": {
+    "volumes": 112,
+    "status": "En cours"
+  },
+  "vo": {
+    "volumes": 114,
+    "status": "En cours"
+  },
+  "last_release_date": "2026-04-08",
+  "next_release_date": "2026-05-06",
+  "stats": {
+    "likes": 531,
+    "in_collection": 7053,
+    "in_wishlist": 984,
+    "marketplace": 2,
+    "editorial_score": 16.23,
+    "reader_score": 16.5
+  },
+  "themes": [
+    "manga incontournable",
+    "aventure fantastique pirates",
+    "Les points forts de la série",
+    "Un énorme succès populaire."
+  ],
+  "strengths": "Un énorme succès populaire.",
+  "related": {
+    "series": [
+      {
+        "title": "Monster Perfect Edition",
+        "url": "https://www.manga-news.com/index.php/serie/Monster-perfect-edition",
+        "kind": "series"
+      }
+    ],
+    "volumes": [],
+    "anime": [],
+    "drama": [],
+    "dossiers": [],
+    "univers": [
+      {
+        "title": "Univers One Piece",
+        "url": "https://www.manga-news.com/index.php/univers/One-piece",
+        "kind": "univers"
+      }
+    ],
+    "external": [
+      {
+        "title": "Wiki externe",
+        "url": "https://example.org/wiki/one-piece",
+        "kind": "external"
+      }
+    ],
+    "misc": []
+  },
+  "raw_sections": {
+    "age_conseille": [
+      "8+"
+    ],
+    "resume": [
+      "Résumé principal de la série."
+    ],
+    "themes": [
+      "Série manga incontournable",
+      "aventure fantastique pirates",
+      "Les points forts de la série",
+      "Un énorme succès populaire."
+    ],
+    "manga_en_relation": [
+      "Monster Perfect Edition"
+    ],
+    "univers": [
+      "Univers One Piece"
+    ],
+    "liens": [
+      "Wiki externe",
+      "VF:112 (En cours)",
+      "VO : 114 (En cours)"
+    ],
+    "dernier_paru": [
+      "08/04/2026"
+    ],
+    "a_paraitre": [
+      "06/05/2026",
+      "J'aime",
+      "531",
+      "Dans ma collection",
+      "7053",
+      "Dans ma liste d'achat",
+      "984",
+      "Achat/vente",
+      "2",
+      "Rédaction",
+      "16.23 /20",
+      "Lecteurs",
+      "16.5/20"
+    ]
+  },
+  "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+}

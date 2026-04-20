@@ -1,0 +1,37 @@
+{
+  "section": "manga-vf",
+  "year": 2026,
+  "month": 4,
+  "page": null,
+  "filters": null,
+  "sort": null,
+  "total_items": null,
+  "items": [
+    {
+      "title": "One Piece Vol.110",
+      "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-110",
+      "release_date": "2026-04-27",
+      "authors": [
+        "Eiichirô ODA"
+      ],
+      "publisher": "Glénat",
+      "summary": "Le retour des Mugiwara dans un nouveau volume.",
+      "featured": true,
+      "series_slug": "One-Piece",
+      "volume_slug": "vol-110"
+    },
+    {
+      "title": "Kagurabachi Vol.2",
+      "url": "https://www.manga-news.com/index.php/manga/Kagurabachi/vol-2",
+      "release_date": "2026-04-03",
+      "authors": [
+        "Takeru HOKAZONO"
+      ],
+      "publisher": "Kana",
+      "summary": "Chihiro poursuit sa traque.",
+      "featured": false,
+      "series_slug": "Kagurabachi",
+      "volume_slug": "vol-2"
+    }
+  ]
+}

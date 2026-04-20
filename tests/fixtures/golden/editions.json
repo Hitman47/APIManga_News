@@ -1,0 +1,25 @@
+{
+  "edition": "vf",
+  "source_url": "https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale",
+  "total": 2,
+  "items": [
+    {
+      "title": "One Piece Vol.109",
+      "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-109",
+      "series_slug": "One-Piece",
+      "volume_slug": "vol-109",
+      "number": "109",
+      "publication_date": "2026-03-12",
+      "cover_image": "https://www.manga-news.com/public/images/covers/one-piece-109.jpg"
+    },
+    {
+      "title": "One Piece Vol.110",
+      "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-110",
+      "series_slug": "One-Piece",
+      "volume_slug": "vol-110",
+      "number": "110",
+      "publication_date": "2026-04-27",
+      "cover_image": "https://www.manga-news.com/public/images/covers/one-piece-110.jpg"
+    }
+  ]
+}

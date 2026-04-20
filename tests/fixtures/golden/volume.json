@@ -1,0 +1,72 @@
+{
+  "title": "One Piece Vol.110",
+  "series_title": "One Piece",
+  "title_vo": "ワンピース",
+  "translated_title": "One Piece",
+  "summary": "Résumé du volume.",
+  "authors_story": [
+    "Eiichirô ODA"
+  ],
+  "authors_art": [
+    "Eiichirô ODA"
+  ],
+  "translators": [
+    "Djamel RABAHI",
+    "Julien FAVEREAU"
+  ],
+  "publisher_fr": "Glénat",
+  "publisher_vo": "Shûeisha",
+  "collection": "Shonen",
+  "type": "Shonen",
+  "genres": [
+    "Aventure",
+    "Fantastique"
+  ],
+  "prepublication": "Shônen Jump",
+  "origin": "Japon - 1997",
+  "illustration": "208 pages n&b + couleurs",
+  "illustration_details": {
+    "raw": "208 pages n&b + couleurs",
+    "pages": 208,
+    "has_color_pages": true
+  },
+  "advisory_age": "8+",
+  "publication_date": "2025-09-27",
+  "isbn_ean": "9782344064092",
+  "price_code": "7.20",
+  "cover_image": "https://www.manga-news.com/public/images/series/one-piece-110.jpg",
+  "editorial_score": 16.0,
+  "reader_score": 15.5,
+  "related": {
+    "series": [],
+    "volumes": [],
+    "anime": [],
+    "drama": [],
+    "dossiers": [],
+    "univers": [],
+    "external": [
+      {
+        "title": "Acheter",
+        "url": "https://example.org/buy/one-piece-110",
+        "kind": "external"
+      }
+    ],
+    "misc": []
+  },
+  "raw_sections": {
+    "age_conseille": [
+      "8+"
+    ],
+    "resume": [
+      "Résumé du volume."
+    ],
+    "liens": [
+      "Acheter",
+      "Rédaction",
+      "16 /20",
+      "Lecteurs",
+      "15.5/20"
+    ]
+  },
+  "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-110"
+}

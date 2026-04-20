@@ -1,28 +1,50 @@
 # Manga News Private API
 
-API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d'interroger Manga News avec un cache SQLite et une authentification Bearer optionnelle.
+API privée, légère, pensée pour un usage personnel ou auto-hébergé, afin d'interroger Manga News avec cache SQLite, authentification Bearer optionnelle, schéma de réponse stable, ETag, et docs OpenAPI natives.
 
-## Ce que fait cette V1
+## Ce que fait la version actuelle
 
 - recherche de séries et volumes ;
+- résolution directe d'un titre vers le meilleur slug exploitable ;
 - récupération d'une fiche série ;
 - récupération d'une fiche volume ;
+- récupération des relations d'une série ;
+- récupération des éditions VF/VO d'une série ;
 - récupération des news globales via RSS ;
 - récupération des news d'une série ;
 - récupération des news d'un volume ;
 - récupération du planning manga VF et manga VO ;
-- filtres locaux sur le planning : éditeur, plage de dates, recherche textuelle, tri ;
+- projections partielles sur les endpoints série/volume via `blocks` et `fields` ;
 - cache SQLite persistant avec fallback sur cache périmé si l'upstream casse temporairement ;
-- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc`
-- endpoints de résumé stables pour l’automatisation (`/summary`, `/release-summary`, `/news-summary`) ;
-- comparaison de deux fiches série ou de deux fiches volume ;
-- projection locale de champs choisis via les endpoints `select`.
+- ETag + `X-Data-Fingerprint` + support `If-None-Match` ;
+- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc` ;
+- corpus de fixtures HTML et golden tests pour verrouiller les parseurs.
 
-## Ce que cette V1 ne fait pas encore
+## Ce que cette version ne fait pas encore
 
 - provider anime séparé ;
 - enrichissement cross-source ;
-- pagination multi-pages automatisée côté upstream.
+- pagination multi-pages automatisée côté upstream ;
+- endpoints d'admin du cache.
+
+## Contrat de réponse
+
+Toutes les réponses enveloppées exposent maintenant :
+
+- `schema_version`
+- `ok`
+- `found`
+- `source`
+- `source_url`
+- `cached`
+- `fetched_at`
+- `cache_expires_at`
+- `partial`
+- `warnings`
+- `fingerprint`
+- `data`
+
+Le champ `fingerprint` est aussi renvoyé dans l'en-tête `X-Data-Fingerprint` et sert de base à l'`ETag` HTTP.
 
 ## Variables d'environnement principales
 
@@ -53,38 +75,10 @@ docker compose up -d --build
 
 L'API sera alors disponible sur `http://localhost:8017`.
 
-## GitHub / GHCR
+## Documentation
 
-Fichiers ajoutés pour un dépôt GitHub propre et une publication GHCR automatique :
-
-- `.github/workflows/ci.yml` : lance les tests sur push / pull request ;
-- `.github/workflows/publish.yml` : build multi-arch `linux/amd64` + `linux/arm64` et push vers GHCR ;
-- `.github/workflows/manifest.yml` : inspecte le manifest publié et stocke `manifest.json` en artifact ;
-- `.dockerignore` : évite d'envoyer les fichiers inutiles au build Docker ;
-- `.gitignore` : ignore l'environnement local, le cache et la base SQLite.
-
-Image publiée par défaut : `ghcr.io/<owner>/<repo>` en minuscules.
-
-Tags générés automatiquement par le workflow de publication :
-
-- `latest` sur la branche par défaut ;
-- tag de branche ;
-- tag Git ;
-- semver (`1.2.3`, `1.2`) si le tag Git suit `v1.2.3` ;
-- tag SHA court.
-
-### Secrets et permissions
-
-Pour publier vers GHCR depuis GitHub Actions, aucun secret supplémentaire n'est nécessaire tant que le package est publié par le dépôt lui-même : le workflow utilise `GITHUB_TOKEN`.
-
-Pour **pull une image privée depuis Portainer, Docker Compose ou une autre machine**, prévois en revanche un **PAT GitHub classic** avec au minimum `read:packages`.
-
-### Déclenchement conseillé
-
-- push sur `main` : publication continue ;
-- tag `vX.Y.Z` : publication versionnée ;
-- `workflow_dispatch` : exécution manuelle.
-
+- `http://localhost:8017/docs`
+- `http://localhost:8017/redoc`
 
 ## Exemples curl
 
@@ -100,17 +94,23 @@ curl http://localhost:8017/health
 curl "http://localhost:8017/search?q=one%20piece&kind=series&mode=all&limit=5"
 ```
 
+### Résolution directe du meilleur résultat
+
+```bash
+curl "http://localhost:8017/search/resolve?q=one%20piece&kind=series"
+```
+
 ### Fiche série via slug
 
 ```bash
 curl "http://localhost:8017/series/One-piece-Edition-originale"
 ```
 
-### Fiche série via URL
+### Fiche série avec projection partielle
 
 ```bash
-curl --get "http://localhost:8017/series/by-url" \
-  --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,vf.volumes,next_release_date"
 ```
 
 ### Fiche volume via slug
@@ -125,25 +125,6 @@ curl "http://localhost:8017/volume/One-Piece/vol-110"
 curl "http://localhost:8017/news/global?limit=10"
 ```
 
-### News d'une série
-
-```bash
-curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
-```
-
-### Avec Bearer token
-
-```bash
-curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/search?q=one%20piece"
-```
-
-## Notes de conception
-
-- L'API repose sur le HTML public et le flux RSS de Manga News. C'est un usage privé ; ne t'en sers pas pour republier massivement leur contenu.
-- Le cache persistant limite les appels et réduit le risque de casser ton automatisation sur une panne temporaire du site.
-- Les parsers sont volontairement tolérants : beaucoup de logique est basée sur les libellés textuels visibles plutôt que sur des sélecteurs CSS trop fragiles.
-
-
 ### Planning manga VF
 
 ```bash
@@ -157,127 +138,43 @@ curl --get "http://localhost:8017/planning" \
   --data-urlencode "sort=date_asc"
 ```
 
-### Manifest GHCR
+### Requête conditionnelle avec ETag
 
-Après publication, le workflow `manifest.yml` peut inspecter l'image publiée et produire un `manifest.json` téléchargeable depuis les artifacts GitHub Actions. C'est utile pour vérifier qu'un manifest multi-arch a bien été généré.
-
-
-## Endpoints d’automatisation ajoutés
-
-### Résumé série minimal et stable
+Premier appel :
 
 ```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/summary"
+curl -i "http://localhost:8017/series/One-piece-Edition-originale"
 ```
 
-### Résumé des sorties série
+Réutilisation de l'ETag retourné :
 
 ```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/release-summary"
+curl -i \
+  -H 'If-None-Match: "<fingerprint>"' \
+  "http://localhost:8017/series/One-piece-Edition-originale"
 ```
 
-### Résumé news série
+Si rien n'a changé, l'API renvoie `304 Not Modified`.
+
+### Avec Bearer token
 
 ```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/news-summary?limit=20"
+curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/search?q=one%20piece"
 ```
 
-### Résumé volume minimal et stable
+## GitHub / GHCR
 
-```bash
-curl "http://localhost:8017/volume/One-Piece/vol-110/summary"
-```
+Fichiers présents pour un dépôt GitHub propre et une publication GHCR automatique :
 
-### Projection ciblée de champs
+- `.github/workflows/ci.yml` : lance les tests sur push / pull request ;
+- `.github/workflows/publish-ghcr.yml` : build multi-arch et push vers GHCR ;
+- `.github/workflows/manifest.yml` : inspecte le manifest publié et stocke `manifest.json` en artifact ;
+- `.dockerignore` : évite d'envoyer les fichiers inutiles au build Docker ;
+- `.gitignore` : ignore l'environnement local, le cache et la base SQLite.
 
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale/select" \
-  --data-urlencode "fields=title,vf.volumes,next_release_date"
-```
+## Notes de conception
 
-```bash
-curl --get "http://localhost:8017/volume/One-Piece/vol-110/select" \
-  --data-urlencode "fields=title,publication_date,isbn_ean"
-```
-
-### Comparer deux séries
-
-```bash
-curl --get "http://localhost:8017/compare/series" \
-  --data-urlencode "left_slug=One-piece-Edition-originale" \
-  --data-urlencode "right_slug=One-piece"
-```
-
-### Comparer deux volumes
-
-```bash
-curl --get "http://localhost:8017/compare/volume" \
-  --data-urlencode "left_series_slug=One-Piece" \
-  --data-urlencode "left_volume_slug=vol-109" \
-  --data-urlencode "right_series_slug=One-Piece" \
-  --data-urlencode "right_volume_slug=vol-110"
-```
-
-## Nouvelles options utiles pour l'automatisation
-
-### Projection par blocs métier
-
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale/blocks" \
-  --data-urlencode "blocks=identity,release"
-```
-
-```bash
-curl --get "http://localhost:8017/volume/One-Piece/vol-110/blocks" \
-  --data-urlencode "blocks=publication,scores" \
-  --data-urlencode "format=flat"
-```
-
-### Timeline série
-
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/timeline?news_limit=5"
-```
-
-### Watch / fingerprint pour savoir si quelque chose a changé
-
-Premier appel :
-
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/watch"
-```
-
-Appel suivant en réutilisant le fingerprint précédent :
-
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale/watch" \
-  --data-urlencode "previous_fingerprint=<fingerprint_precedent>" \
-  --data-urlencode "fields=vf.volumes,next_release_date" \
-  --data-urlencode "format=flat"
-```
-
-### Valeur unique pour les cas ultra simples
-
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale/vf-volumes"
-```
-
-```bash
-curl "http://localhost:8017/volume/One-Piece/vol-110/isbn-ean"
-```
-
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale/value" \
-  --data-urlencode "field=vf.volumes"
-```
-
-## Avis sur la sélection partielle
-
-Oui, c’est utile. Pas pour économiser massivement le scraping upstream, mais pour rendre l’intégration bien plus propre côté client.
-
-Exemple concret : si ton autre conteneur veut juste `vf.volumes`, un endpoint `summary` ou `select` évite d’avaler toute la fiche série complète. Le gain principal est donc :
-- réponse plus petite ;
-- parsing plus simple dans le client ;
-- contrat JSON plus stable pour l’automatisation.
-
-Le site source reste quand même chargé et parsé côté API privée. Donc ce n’est pas une optimisation miracle du scraping. C’est surtout une optimisation d’interface et de maintenabilité.
+- L'API repose sur le HTML public et le flux RSS de Manga News. C'est un usage privé ; ne t'en sers pas pour republier massivement leur contenu.
+- Le cache persistant limite les appels et réduit le risque de casser ton automatisation sur une panne temporaire du site.
+- Les parseurs sont volontairement tolérants : beaucoup de logique repose sur les libellés textuels visibles plutôt que sur des sélecteurs CSS trop fragiles.
+- Les fixtures HTML dans `tests/fixtures/html` et les golden outputs dans `tests/fixtures/golden` servent de garde-fou contre les régressions de parsing.
