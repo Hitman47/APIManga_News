@@ -41,7 +41,6 @@ Capacités concrètes :
 
 - elle n'utilise pas d'API officielle Manga News ;
 - elle ne garantit pas que le HTML source ne changera jamais ;
-- elle ne fournit **pas** de namespace `/v1` ;
 - elle n'expose **pas** aujourd'hui de routes admin publiques ;
 - elle ne remplace pas un vrai moteur de suivi ou d'alerting.
 
@@ -258,7 +257,6 @@ Réglages utiles et réellement actifs aujourd'hui :
 
 Variables présentes dans la configuration mais **pas exploitées par une route publique aujourd'hui** :
 - `ADMIN_TOKEN`
-- `ENABLE_LEGACY_ROUTES`
 - `DEBUG_CAPTURE_HTML_ON_ERROR`
 - `DEBUG_HTML_DUMP_DIR`
 - `NEGATIVE_CACHE_ENABLED`

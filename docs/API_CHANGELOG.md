@@ -44,7 +44,7 @@ Pour chaque version :
 
 ### Changed
 - La documentation de déploiement et d'intégration a été réalignée sur le **contrat réellement exposé**.
-- Le projet documente explicitement qu'il n'existe **pas** de namespace `/v1` aujourd'hui.
+- Suppression des derniers restes de préfixage de version dans les exemples et scripts ; les routes documentées sont désormais les seules routes à appeler.
 - Le projet documente explicitement qu'il n'existe **pas** de routes admin publiques aujourd'hui.
 
 ### Deprecated

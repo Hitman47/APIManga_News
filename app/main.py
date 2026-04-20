@@ -38,7 +38,7 @@ Elle sert surtout à :
 - réutiliser les réponses via `ETag` / `If-None-Match`.
 
 Points importants :
-- ce projet n'utilise **pas** de `/v1` aujourd'hui ;
+- les routes décrites ici sont les routes réelles à appeler, sans préfixe de version supplémentaire ;
 - les routes décrites dans l'OpenAPI sont le contrat réel ;
 - la source de vérité publique est `GET /openapi.json` ;
 - si `API_TOKEN` est défini, il faut envoyer `Authorization: Bearer <token>`.

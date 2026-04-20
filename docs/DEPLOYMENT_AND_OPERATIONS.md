@@ -66,7 +66,6 @@ Toutes les variables déclarées vivent dans `.env.example`, mais toutes n'ont p
 ### 2.2 Réglages présents dans la config mais non exposés comme feature publique aujourd'hui
 
 - `ADMIN_TOKEN`
-- `ENABLE_LEGACY_ROUTES`
 - `DEBUG_CAPTURE_HTML_ON_ERROR`
 - `DEBUG_HTML_DUMP_DIR`
 - `NEGATIVE_CACHE_ENABLED`
@@ -209,7 +208,7 @@ Comportement attendu :
 
 ## 9. Ce qu'il faut éviter de supposer
 
-- n'invente pas de namespace `/v1` ;
+- appelle exactement les routes exposées par l'OpenAPI, sans préfixe supplémentaire ;
 - n'invente pas de routes admin ;
 - ne pars pas du principe que `LOG_FORMAT=json` produit déjà des logs JSON structurés ;
 - ne suppose pas que tous les champs métier seront toujours remplis.

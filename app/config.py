@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     default_limit: int = Field(default=10, alias='DEFAULT_LIMIT')
     max_limit: int = Field(default=50, alias='MAX_LIMIT')
     enable_docs: bool = Field(default=True, alias='ENABLE_DOCS')
-    enable_legacy_routes: bool = Field(default=False, alias='ENABLE_LEGACY_ROUTES')
     debug_capture_html_on_error: bool = Field(default=False, alias='DEBUG_CAPTURE_HTML_ON_ERROR')
     debug_html_dump_dir: Path = Field(default=Path('/tmp/manga-news-debug-html'), alias='DEBUG_HTML_DUMP_DIR')
     negative_cache_enabled: bool = Field(default=True, alias='NEGATIVE_CACHE_ENABLED')
@@ -42,7 +41,7 @@ class Settings(BaseSettings):
     rate_limit_scope: str = Field(default='ip_or_token', alias='RATE_LIMIT_SCOPE')
     rate_limit_include_admin: bool = Field(default=False, alias='RATE_LIMIT_INCLUDE_ADMIN')
     rate_limit_exempt_paths: str = Field(
-        default='/openapi.json,/docs,/redoc,/v1/health,/health',
+        default='/openapi.json,/docs,/redoc,/health',
         alias='RATE_LIMIT_EXEMPT_PATHS',
     )
 

@@ -76,8 +76,8 @@ def validate_openapi_schema(schema: dict[str, Any]) -> list[str]:
     missing_paths = sorted(EXPECTED_PATHS - paths)
     if missing_paths:
         errors.append(f'Missing OpenAPI paths: {", ".join(missing_paths)}')
-    if any(path.startswith('/v1/') for path in paths):
-        errors.append('Unexpected /v1 routes present in OpenAPI schema.')
+    if any(re.match(r'^/v\d+/', path) for path in paths):
+        errors.append('Unexpected version-prefixed routes present in OpenAPI schema.')
     tags = {tag['name'] for tag in schema.get('tags', []) if 'name' in tag}
     missing_tags = sorted(EXPECTED_TAGS - tags)
     if missing_tags:

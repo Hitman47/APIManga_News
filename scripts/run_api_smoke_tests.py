@@ -262,7 +262,7 @@ def resolve_output_dir(raw_value: str | None) -> Path | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Exécute une batterie de smoke tests One Piece contre l'API Manga News.")
-    parser.add_argument("--base-url", default=os.getenv("BASE_URL", "http://localhost:8017/v1"), help="Base URL de l'API, par défaut http://localhost:8017/v1")
+    parser.add_argument("--base-url", default=os.getenv("BASE_URL", "http://localhost:8017"), help="Base URL de l'API, par défaut http://localhost:8017")
     parser.add_argument("--token", default=os.getenv("API_TOKEN") or os.getenv("TOKEN"), help="Bearer token facultatif pour les endpoints publics")
     parser.add_argument("--admin-token", default=os.getenv("ADMIN_TOKEN") or os.getenv("TOKEN"), help="Bearer token facultatif pour les endpoints admin")
     parser.add_argument("--timeout", type=float, default=30.0, help="Timeout HTTP en secondes")

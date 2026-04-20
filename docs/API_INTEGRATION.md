@@ -28,7 +28,6 @@ Contrat public actuel :
 - `GET /planning`
 
 Important :
-- il n'existe **pas** de namespace `/v1` aujourd'hui ;
 - il n'existe **pas** de routes admin publiques aujourd'hui ;
 - la source de vérité machine-readable reste `GET /openapi.json`.
 
