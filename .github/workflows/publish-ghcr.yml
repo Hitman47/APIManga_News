@@ -1,11 +1,11 @@
 name: publish-ghcr
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
+  workflow_run:
+    workflows:
+      - ci
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
@@ -17,18 +17,20 @@ env:
 
 jobs:
   docker:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Prepare image coordinates
         id: vars
         shell: bash
         run: |
           owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          # GHCR image names must be lowercase. Requested name: APIManga_News -> apimanga_news
           repo="apimanga_news"
           image="${{ env.REGISTRY }}/${owner}/${repo}"
           echo "owner=${owner}" >> "$GITHUB_OUTPUT"
@@ -54,11 +56,7 @@ jobs:
         with:
           images: ${{ steps.vars.outputs.image }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=branch
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
             type=sha,prefix=sha-
           labels: |
             org.opencontainers.image.title=Manga News Private API
@@ -89,6 +87,6 @@ jobs:
             echo '- Digest: `${{ steps.build.outputs.digest }}`';
             echo '- Tags:';
             while IFS= read -r tag; do
-              [ -n "$tag" ] && echo "  - \\`$tag\\`";
+              [ -n "$tag" ] && echo "  - \`$tag\`";
             done <<< "${{ steps.meta.outputs.tags }}";
           } >> "$GITHUB_STEP_SUMMARY"

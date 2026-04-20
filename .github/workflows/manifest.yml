@@ -3,7 +3,7 @@ name: manifest
 on:
   workflow_run:
     workflows:
-      - publish
+      - publish-ghcr
     types:
       - completed
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
             image="${{ inputs.image }}"
           else
             owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-            repo="$(echo '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')"
+            repo="apimanga_news"
             image="${{ env.REGISTRY }}/${owner}/${repo}"
           fi
           tag="${{ inputs.tag || 'latest' }}"
