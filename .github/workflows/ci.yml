@@ -32,3 +32,6 @@ jobs:
 
       - name: Run tests
         run: pytest
+
+      - name: Validate OpenAPI, examples and local docs links
+        run: python scripts/validate_contract_and_docs.py
