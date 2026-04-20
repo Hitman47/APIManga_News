@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
-class HealthResponse(BaseModel):
-    ok: bool = True
-
-
-class EnvelopeBase(BaseModel):
+class BaseEnvelope(BaseModel):
+    schema_version: str = '1.0'
     ok: bool = True
     found: bool = True
     source: Literal['manga_news'] = 'manga_news'
@@ -19,8 +16,15 @@ class EnvelopeBase(BaseModel):
     cache_expires_at: str | None = None
     partial: bool = False
     warnings: list[str] = Field(default_factory=list)
-    schema_version: str = '1.0'
     fingerprint: str | None = None
+
+
+class Envelope(BaseEnvelope):
+    data: Any = None
+
+
+class HealthResponse(BaseModel):
+    ok: bool = True
 
 
 class SearchResult(BaseModel):
@@ -33,31 +37,30 @@ class SearchResult(BaseModel):
     volume_slug: str | None = None
 
 
-class SearchResponse(EnvelopeBase):
-    data: list[SearchResult] = Field(
-        default_factory=list,
-        examples=[[{
-            'title': 'One Piece',
-            'url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
-            'kind': 'series',
-            'score': 97,
-            'slug': 'One-piece-Edition-originale',
-            'series_slug': 'One-piece-Edition-originale',
-            'volume_slug': None,
-        }]],
-    )
+class SearchResponse(BaseEnvelope):
+    data: list[SearchResult] = Field(default_factory=list)
 
 
 class ResolveResult(BaseModel):
+    title: str
+    url: str
+    kind: Literal['series', 'volume']
+    score: int
+    slug: str | None = None
+    series_slug: str | None = None
+    volume_slug: str | None = None
+
+
+class ResolveData(BaseModel):
     query: str
-    kind: Literal['series', 'volume', 'all']
+    kind_requested: Literal['series', 'volume', 'all']
     confidence: Literal['high', 'medium', 'low', 'none']
-    result: SearchResult | None = None
-    candidates: list[SearchResult] = Field(default_factory=list)
+    best: ResolveResult | None = None
+    candidates: list[ResolveResult] = Field(default_factory=list)
 
 
-class ResolveResponse(EnvelopeBase):
-    data: ResolveResult
+class ResolveResponse(BaseEnvelope):
+    data: ResolveData | None = None
 
 
 class NewsItem(BaseModel):
@@ -69,7 +72,7 @@ class NewsItem(BaseModel):
     category: str | None = None
 
 
-class NewsResponse(EnvelopeBase):
+class NewsResponse(BaseEnvelope):
     data: list[NewsItem] = Field(default_factory=list)
 
 
@@ -87,8 +90,31 @@ class EditionStatus(BaseModel):
     status: str | None = None
 
 
-class SeriesData(BaseModel):
+class IllustrationDetails(BaseModel):
+    raw: str | None = None
+    pages: int | None = None
+    has_color_pages: bool | None = None
+
+
+class LinkItem(BaseModel):
     title: str
+    url: str
+    kind: str | None = None
+
+
+class RelatedLinks(BaseModel):
+    series: list[LinkItem] = Field(default_factory=list)
+    volumes: list[LinkItem] = Field(default_factory=list)
+    anime: list[LinkItem] = Field(default_factory=list)
+    drama: list[LinkItem] = Field(default_factory=list)
+    dossiers: list[LinkItem] = Field(default_factory=list)
+    univers: list[LinkItem] = Field(default_factory=list)
+    external: list[LinkItem] = Field(default_factory=list)
+    misc: list[LinkItem] = Field(default_factory=list)
+
+
+class SeriesData(BaseModel):
+    title: str | None = None
     title_vo: str | None = None
     translated_title: str | None = None
     summary: str | None = None
@@ -103,6 +129,7 @@ class SeriesData(BaseModel):
     prepublication: str | None = None
     origin: str | None = None
     illustration: str | None = None
+    illustration_details: IllustrationDetails | None = None
     advisory_age: str | None = None
     cover_image: str | None = None
     vf: EditionStatus | None = None
@@ -112,15 +139,13 @@ class SeriesData(BaseModel):
     stats: SeriesStats | None = None
     themes: list[str] = Field(default_factory=list)
     strengths: str | None = None
-    source_url: str
-
-
-class SeriesResponse(EnvelopeBase):
-    data: SeriesData
+    related: RelatedLinks | None = None
+    raw_sections: dict[str, list[str]] | None = None
+    source_url: str | None = None
 
 
 class VolumeData(BaseModel):
-    title: str
+    title: str | None = None
     series_title: str | None = None
     title_vo: str | None = None
     translated_title: str | None = None
@@ -136,6 +161,7 @@ class VolumeData(BaseModel):
     prepublication: str | None = None
     origin: str | None = None
     illustration: str | None = None
+    illustration_details: IllustrationDetails | None = None
     advisory_age: str | None = None
     publication_date: str | None = None
     isbn_ean: str | None = None
@@ -143,11 +169,17 @@ class VolumeData(BaseModel):
     cover_image: str | None = None
     editorial_score: float | None = None
     reader_score: float | None = None
-    source_url: str
+    related: RelatedLinks | None = None
+    raw_sections: dict[str, list[str]] | None = None
+    source_url: str | None = None
 
 
-class VolumeResponse(EnvelopeBase):
-    data: VolumeData
+class SeriesResponse(BaseEnvelope):
+    data: SeriesData | dict[str, Any] | None = None
+
+
+class VolumeResponse(BaseEnvelope):
+    data: VolumeData | dict[str, Any] | None = None
 
 
 class PlanningItem(BaseModel):
@@ -162,23 +194,55 @@ class PlanningItem(BaseModel):
     volume_slug: str | None = None
 
 
-class PlanningData(BaseModel):
-    section: Literal['manga-vf', 'manga-vo']
-    year: int | None = None
-    month: int | None = None
-    page: int = 1
-    filters: dict[str, str | None] = Field(default_factory=dict)
-    sort: Literal['date_asc', 'date_desc', 'title_asc', 'title_desc'] = 'date_asc'
-    total_items: int = 0
-    items: list[PlanningItem] = Field(default_factory=list)
-
-
 class PlanningPage(BaseModel):
-    section: Literal['manga-vf', 'manga-vo']
+    section: str
     year: int | None = None
     month: int | None = None
+    page: int | None = None
+    filters: dict[str, Any] | None = None
+    sort: str | None = None
+    total_items: int | None = None
     items: list[PlanningItem] = Field(default_factory=list)
 
 
-class PlanningResponse(EnvelopeBase):
-    data: PlanningData
+class PlanningResponse(BaseEnvelope):
+    data: PlanningPage | dict[str, Any] | None = None
+
+
+class SeriesEditionItem(BaseModel):
+    title: str
+    url: str
+    series_slug: str | None = None
+    volume_slug: str | None = None
+    number: str | None = None
+    publication_date: str | None = None
+    cover_image: str | None = None
+
+
+class SeriesEditionsBlock(BaseModel):
+    edition: Literal['vf', 'vo']
+    source_url: str | None = None
+    total: int = 0
+    items: list[SeriesEditionItem] = Field(default_factory=list)
+
+
+class SeriesEditionsData(BaseModel):
+    title: str | None = None
+    series_slug: str | None = None
+    vf: SeriesEditionsBlock | None = None
+    vo: SeriesEditionsBlock | None = None
+    source_url: str | None = None
+
+
+class SeriesEditionsResponse(BaseEnvelope):
+    data: SeriesEditionsData | None = None
+
+
+class SeriesRelatedData(BaseModel):
+    title: str | None = None
+    related: RelatedLinks = Field(default_factory=RelatedLinks)
+    source_url: str | None = None
+
+
+class SeriesRelatedResponse(BaseEnvelope):
+    data: SeriesRelatedData | None = None
