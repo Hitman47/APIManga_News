@@ -66,6 +66,8 @@ def test_planning_endpoint_with_stubbed_service():
     assert payload['data']['items'][0]['publisher'] == 'Glénat'
     assert response.headers['X-Data-Fingerprint'] == 'fp-plan'
     assert response.headers['ETag'] == '"fp-plan"'
+    assert response.headers['X-Cache-Status'] == 'MISS'
+    assert response.headers['Vary'] == 'Authorization, If-None-Match'
 
 
 
@@ -144,8 +146,22 @@ def test_search_resolve_and_etag_304():
         assert response.status_code == 200
         assert response.json()['data']['best']['slug'] == 'One-piece-Edition-originale'
         assert response.headers['ETag'] == '"fp-resolve"'
-        not_modified = client.get('/search/resolve?q=one%20piece&kind=series', headers={'If-None-Match': '"fp-resolve"'})
+        not_modified = client.get('/search/resolve?q=one%20piece&kind=series', headers={'If-None-Match': 'W/"fp-resolve", "something-else"'})
     assert not_modified.status_code == 304
+    assert not_modified.headers['X-Cache-Status'] == 'MISS'
+
+
+def test_bad_request_returns_400():
+    class DummyService:
+        async def get_series(self, **kwargs):
+            from app.exceptions import BadRequestError
+            raise BadRequestError('Unknown series block: bogus')
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/series/One-piece-Edition-originale?blocks=bogus')
+    assert response.status_code == 400
+    assert response.json()['detail'] == 'Unknown series block: bogus'
 
 
 

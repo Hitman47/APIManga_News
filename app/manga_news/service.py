@@ -10,7 +10,7 @@ import feedparser
 
 from app.cache import SQLiteCache
 from app.config import Settings
-from app.exceptions import ParseError, ResourceNotFound
+from app.exceptions import BadRequestError, ParseError, ResourceNotFound
 from app.http import AsyncFetcher
 from app.models import (
     Envelope,
@@ -124,7 +124,7 @@ def project_resource_payload(
     for block in blocks:
         normalized = slugify_block_name(block)
         if normalized not in mapping:
-            raise ParseError(f'Unknown {resource} block: {block}')
+            raise BadRequestError(f'Unknown {resource} block: {block}')
         selected_paths.extend(mapping[normalized])
     selected_paths.extend(fields)
     if include_raw_sections and 'raw_sections' not in selected_paths:
@@ -137,7 +137,7 @@ def project_resource_payload(
     source_data = payload if include_raw_sections else full_data
     for path in selected_paths:
         if not _has_path(source_data, path):
-            raise ParseError(f'Unknown {resource} field path: {path}')
+            raise BadRequestError(f'Unknown {resource} field path: {path}')
         _set_path(projected, path, _get_path(source_data, path))
     return projected
 
@@ -230,7 +230,7 @@ class MangaNewsService:
     async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> Envelope:
         query = clean_ws(query)
         if not query:
-            raise ParseError('The search query cannot be empty.')
+            raise BadRequestError('The search query cannot be empty.')
         search_urls: list[str] = []
         if kind in {'series', 'all'}:
             search_urls.extend([
@@ -434,10 +434,10 @@ class MangaNewsService:
     async def get_volume_news(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None, limit: int) -> Envelope:
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
         if '/index.php/manga/' not in target_url:
-            raise ParseError('The provided volume URL is not a Manga News volume page.')
+            raise BadRequestError('The provided volume URL is not a Manga News volume page.')
         parts = target_url.split('/index.php/manga/', 1)[1].strip('/').split('/')
         if len(parts) < 2:
-            raise ParseError('Unable to infer the volume route from the provided URL.')
+            raise BadRequestError('Unable to infer the volume route from the provided URL.')
         news_url = f'{self.base_url}/index.php/manga/news/{parts[0]}/{parts[1]}'
         return await self._get_news_page(target_url=news_url, cache_namespace='news-volume', ttl=self.settings.cache_ttl_news_series_seconds, limit=limit)
 
@@ -565,11 +565,11 @@ class MangaNewsService:
             return None
         parsed = parse_french_date(value)
         if not parsed:
-            raise ParseError(f'{field_name} must be a valid date.')
+            raise BadRequestError(f'{field_name} must be a valid date.')
         try:
             return date.fromisoformat(parsed)
         except ValueError as exc:
-            raise ParseError(f'{field_name} must be a valid date.') from exc
+            raise BadRequestError(f'{field_name} must be a valid date.') from exc
 
     async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> Envelope:
         cache_key = make_cache_key(cache_namespace, target_url, str(limit))
@@ -589,23 +589,23 @@ class MangaNewsService:
     def _resolve_series_url(self, *, slug: str | None, url: str | None) -> str:
         if url:
             if not is_manga_news_url(url, self.base_url):
-                raise ParseError('The provided URL does not belong to Manga News.')
+                raise BadRequestError('The provided URL does not belong to Manga News.')
             return url
         if not slug:
-            raise ParseError('A series slug or URL is required.')
+            raise BadRequestError('A series slug or URL is required.')
         return f'{self.base_url}/index.php/serie/{slug}'
 
     def _resolve_volume_url(self, *, series_slug: str | None, volume_slug: str | None, url: str | None) -> str:
         if url:
             if not is_manga_news_url(url, self.base_url):
-                raise ParseError('The provided URL does not belong to Manga News.')
+                raise BadRequestError('The provided URL does not belong to Manga News.')
             return url
         if not series_slug or not volume_slug:
-            raise ParseError('series_slug and volume_slug are required when no direct URL is provided.')
+            raise BadRequestError('series_slug and volume_slug are required when no direct URL is provided.')
         return f'{self.base_url}/index.php/manga/{series_slug}/{volume_slug}'
 
     def _extract_series_slug(self, series_url: str) -> str:
         path_parts = [part for part in urlparse(series_url).path.split('/') if part]
         if not path_parts:
-            raise ParseError('Unable to infer the series slug from the provided URL.')
+            raise BadRequestError('Unable to infer the series slug from the provided URL.')
         return path_parts[-1]

@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from app.auth import require_api_token
 from app.cache import SQLiteCache
 from app.config import Settings, get_settings
-from app.exceptions import ParseError, ResourceNotFound, UpstreamError
+from app.exceptions import BadRequestError, ParseError, ResourceNotFound, UpstreamError
 from app.http import AsyncFetcher
 from app.manga_news.service import MangaNewsService
 from app.models import (
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title='Manga News Private API',
-    version='0.2.0',
+    version='0.2.1',
     docs_url=get_settings().docs_url,
     redoc_url=get_settings().redoc_url,
     lifespan=lifespan,
@@ -66,15 +66,42 @@ def get_settings_dep() -> Settings:
     return app.state.settings
 
 
+
+
+def _etag_matches(if_none_match: str | None, etag: str | None) -> bool:
+    if not if_none_match or not etag:
+        return False
+    candidates = [item.strip() for item in if_none_match.split(',') if item.strip()]
+    for candidate in candidates:
+        if candidate == '*':
+            return True
+        if candidate == etag:
+            return True
+        if candidate.startswith('W/') and candidate[2:].strip() == etag:
+            return True
+    return False
+
+
+def _cache_status_header(payload: dict) -> str:
+    if payload.get('partial') and payload.get('cached'):
+        return 'STALE'
+    if payload.get('cached'):
+        return 'HIT'
+    return 'MISS'
+
+
 def _build_envelope_response(payload, request: Request):
     if_none_match = request.headers.get('if-none-match')
     fingerprint = payload.get('fingerprint')
     etag = f'"{fingerprint}"' if fingerprint else None
-    headers = {}
+    headers = {
+        'Vary': 'Authorization, If-None-Match',
+        'X-Cache-Status': _cache_status_header(payload),
+    }
     if fingerprint:
         headers['X-Data-Fingerprint'] = fingerprint
         headers['ETag'] = etag
-    if etag and if_none_match and if_none_match.strip() == etag:
+    if _etag_matches(if_none_match, etag):
         return Response(status_code=304, headers=headers)
     return JSONResponse(content=jsonable_encoder(payload), headers=headers)
 
@@ -89,6 +116,11 @@ async def auth_dependency(
 @app.exception_handler(ResourceNotFound)
 async def not_found_handler(_, exc: ResourceNotFound):
     return JSONResponse(status_code=404, content={'detail': str(exc)})
+
+
+@app.exception_handler(BadRequestError)
+async def bad_request_handler(_, exc: BadRequestError):
+    return JSONResponse(status_code=400, content={'detail': str(exc)})
 
 
 @app.exception_handler(ParseError)

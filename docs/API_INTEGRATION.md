@@ -1,16 +1,17 @@
 # API Integration Guide
 
-This document is written for an external project or another AI agent that needs to integrate with this API without reading the whole codebase.
+This guide is for another project, service, or AI agent that needs to consume the API without reading the whole codebase.
 
 ## Goal
 
-This API wraps public pages from Manga News and exposes normalized JSON for:
+This API wraps public Manga News pages and exposes normalized JSON for:
 - search
+- title resolution
 - series details
 - volume details
 - related links
 - editions lists
-- global/series/volume news
+- global / series / volume news
 - release planning
 
 ## Base URL
@@ -30,7 +31,7 @@ Authorization: Bearer <token>
 
 If `API_TOKEN` is empty, the API is open on the configured network.
 
-## Response envelope
+## Common response envelope
 
 Most endpoints return the same envelope:
 
@@ -51,11 +52,15 @@ Most endpoints return the same envelope:
 }
 ```
 
-## Caching contract for clients
+## Response headers useful for clients
 
-Responses include:
+Responses may include:
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
+- `X-Cache-Status: MISS|HIT|STALE`
+- `Vary: Authorization, If-None-Match`
+
+### Conditional GET
 
 Clients should reuse the ETag:
 
@@ -64,6 +69,8 @@ If-None-Match: "<fingerprint>"
 ```
 
 If nothing changed, the API returns `304 Not Modified` with no body.
+
+Weak validators are also accepted by the API implementation.
 
 ## Best endpoint for automated title resolution
 
@@ -107,7 +114,8 @@ Response shape:
 1. `GET /search/resolve?q=<title>&kind=series`
 2. read `data.best.slug`
 3. `GET /series/{slug}`
-4. reuse the ETag on future calls
+4. store the returned `ETag`
+5. reuse it on future calls with `If-None-Match`
 
 ### Find and load a volume
 1. `GET /search/resolve?q=<title>&kind=volume`
@@ -129,7 +137,9 @@ Response shape:
 - `GET /series/{slug}`
 - `GET /series/by-url?url=...`
 - `GET /series/{slug}/related`
+- `GET /series/by-url/related?url=...`
 - `GET /series/{slug}/editions?edition=all|vf|vo`
+- `GET /series/by-url/editions?url=...&edition=all|vf|vo`
 
 Projection parameters on series endpoints:
 - `blocks=editions,stats`
@@ -156,12 +166,13 @@ Projection parameters on volume endpoints:
 
 ## Error handling
 
+- `400`: invalid client parameters (unknown projection block, invalid date, invalid Manga News URL, missing slug parts, etc.)
 - `404`: resource not found on Manga News
-- `502`: upstream fetch or parse error
+- `502`: upstream fetch failure or upstream content could not be parsed reliably
 - `304`: unchanged resource when using `If-None-Match`
 
-Clients should treat `partial=true` and `warnings` as non-fatal soft issues.
+Clients should treat `partial=true` and `warnings` as soft issues. A common case is stale cache fallback when the upstream temporarily fails.
 
 ## Minimal integration prompt for another AI
 
-Use this API as the primary manga metadata source. First call `/search/resolve` with the user title. If a best result is returned, use its slug to call `/series/{slug}` or `/volume/{series_slug}/{volume_slug}`. Reuse the `ETag` header with `If-None-Match` to avoid refetching unchanged data. Read the common response envelope fields: `ok`, `found`, `partial`, `warnings`, `fingerprint`, and `data`.
+Use this API as the primary manga metadata source. First call `/search/resolve` with the user title. If a best result is returned, use its slug to call `/series/{slug}` or `/volume/{series_slug}/{volume_slug}`. Reuse the `ETag` header with `If-None-Match` to avoid reprocessing unchanged data. Read the common envelope fields: `ok`, `found`, `partial`, `warnings`, `fingerprint`, and `data`. Prefer projection parameters only when the caller truly needs a reduced payload.

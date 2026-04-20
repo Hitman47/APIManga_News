@@ -7,7 +7,11 @@ class UpstreamError(ApiError):
 
 
 class ParseError(ApiError):
-    """Raised when a response cannot be parsed reliably."""
+    """Raised when an upstream response cannot be parsed reliably."""
+
+
+class BadRequestError(ApiError):
+    """Raised when the caller sends invalid request parameters."""
 
 
 class ResourceNotFound(ApiError):
