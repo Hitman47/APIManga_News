@@ -5,138 +5,217 @@ import json
 import re
 import unicodedata
 from datetime import UTC, datetime
-from difflib import SequenceMatcher
-from urllib.parse import urljoin, urlparse
+from typing import Iterable
+from urllib.parse import quote, urljoin, urlparse
 
-MONTHS_FR = {
-    'janvier': 1,
-    'fevrier': 2,
-    'février': 2,
-    'mars': 3,
-    'avril': 4,
-    'mai': 5,
-    'juin': 6,
-    'juillet': 7,
-    'aout': 8,
-    'août': 8,
-    'septembre': 9,
-    'octobre': 10,
-    'novembre': 11,
-    'decembre': 12,
-    'décembre': 12,
+from dateutil import parser as date_parser
+from rapidfuzz import fuzz
+
+
+FRENCH_MONTHS = {
+    'janvier': 'January',
+    'février': 'February',
+    'fevrier': 'February',
+    'mars': 'March',
+    'avril': 'April',
+    'mai': 'May',
+    'juin': 'June',
+    'juillet': 'July',
+    'août': 'August',
+    'aout': 'August',
+    'septembre': 'September',
+    'octobre': 'October',
+    'novembre': 'November',
+    'décembre': 'December',
+    'decembre': 'December',
 }
+FRENCH_WEEKDAYS = {
+    'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'
+}
+IGNORE_TEXTS = {
+    '', 'fiche', 'news', 'critique', 'éditions', 'editions', 'images', 'personnages', 'infos+',
+    'aucun commentaire... soyez le 1er !!', 'tous les volumes', 'ma note', 'rédaction', 'redaction',
+    'lecteurs', 'pas lu', 'pas vu', 'volume', 'volumes', 'actus précédentes', 'actus precedentes',
+}
+EDITION_NOISE_PATTERN = re.compile(
+    r"\b((?:tome|v(?:ol)?\.?|volume)\s*\d+|edition originale|ed\. originale|edition|collector|collectors?|"
+    r"deluxe|perfect|ultimate|kanzenban|double|triple|grand format|roman|light novel|novel|tome|vol(?:ume)?)\b",
+    flags=re.IGNORECASE,
+)
+LEADING_ARTICLES_PATTERN = re.compile(r'^(le|la|les|un|une|des|the)\s+', flags=re.IGNORECASE)
 
 
 def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
-
-def strip_accents(value: str) -> str:
-    normalized = unicodedata.normalize('NFKD', value)
-    return ''.join(ch for ch in normalized if not unicodedata.combining(ch))
-
-
-
 def clean_ws(value: str | None) -> str:
     if value is None:
         return ''
-    return ' '.join(value.replace('\xa0', ' ').split()).strip()
-
+    value = value.replace('\xa0', ' ')
+    value = re.sub(r'\s+', ' ', value)
+    return value.strip()
 
 
 def normalize_text(value: str | None) -> str:
     cleaned = clean_ws(value).lower()
-    cleaned = strip_accents(cleaned)
-    cleaned = re.sub(r'\b(edition originale|édition originale|vol(?:ume)?\.?\s*\d+)\b', ' ', cleaned)
-    cleaned = re.sub(r'[^a-z0-9]+', ' ', cleaned)
-    return clean_ws(cleaned)
+    normalized = unicodedata.normalize('NFKD', cleaned)
+    normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = EDITION_NOISE_PATTERN.sub(' ', normalized)
+    normalized = LEADING_ARTICLES_PATTERN.sub('', normalized)
+    normalized = normalized.replace('&', ' and ')
+    normalized = re.sub(r'\bpartie\b', 'part', normalized)
+    normalized = re.sub(r'[^a-z0-9]+', ' ', normalized)
+    return re.sub(r'\s+', ' ', normalized).strip()
 
 
-
-def parse_french_date(value: str | None) -> str | None:
-    raw = clean_ws(value)
-    if not raw:
-        return None
-    text = strip_accents(raw).lower()
-
-    match_numeric = re.search(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', text)
-    if match_numeric:
-        day = int(match_numeric.group(1))
-        month = int(match_numeric.group(2))
-        year = int(match_numeric.group(3))
-        return f'{year:04d}-{month:02d}-{day:02d}'
-
-    match_textual = re.search(r'(\d{1,2})\s+([a-zéûôîàèùç]+)\s+(\d{4})', text)
-    if match_textual:
-        day = int(match_textual.group(1))
-        month_name = match_textual.group(2)
-        month = MONTHS_FR.get(month_name)
-        year = int(match_textual.group(3))
-        if month:
-            return f'{year:04d}-{month:02d}-{day:02d}'
-    return None
+def slugify(value: str) -> str:
+    normalized = normalize_text(value)
+    return normalized.replace(' ', '-')
 
 
-
-def score_match(query: str, candidate: str, *, extra: str | None = None) -> int:
+def score_match(query: str, candidate: str, extra: str | None = None) -> int:
     normalized_query = normalize_text(query)
     normalized_candidate = normalize_text(candidate)
-    pool = normalized_candidate
+    base = max(
+        fuzz.WRatio(normalized_query, normalized_candidate),
+        fuzz.token_set_ratio(normalized_query, normalized_candidate),
+        fuzz.partial_ratio(normalized_query, normalized_candidate),
+    )
     if extra:
-        pool = f'{pool} {normalize_text(extra)}'
-    if not normalized_query or not pool:
-        return 0
-    if normalized_query == normalized_candidate:
-        return 100
-    if normalized_query in pool:
-        return 90
-    ratio = SequenceMatcher(a=normalized_query, b=normalized_candidate).ratio()
-    return int(round(ratio * 100))
+        normalized_extra = normalize_text(extra)
+        base = max(base, fuzz.WRatio(normalized_query, normalized_extra), fuzz.partial_ratio(normalized_query, normalized_extra))
+    return int(base)
 
 
-
-def ensure_absolute_url(base_url: str, maybe_url: str | None) -> str | None:
-    if not maybe_url:
-        return None
-    return urljoin(base_url.rstrip('/') + '/', maybe_url)
-
-
-
-def is_manga_news_url(url: str, base_url: str) -> bool:
-    parsed_base = urlparse(base_url)
-    parsed_url = urlparse(url)
-    return parsed_url.netloc == parsed_base.netloc
-
-
-
-def make_cache_key(*parts: str) -> str:
-    joined = '||'.join(clean_ws(part) for part in parts if part is not None)
-    return hashlib.sha256(joined.encode('utf-8')).hexdigest()
-
-
-
-def unique_list(items: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+def unique_list(values: Iterable[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
-    for raw_item in items:
-        item = clean_ws(raw_item)
-        if not item:
-            continue
-        lowered = item.casefold()
-        if lowered in seen:
-            continue
-        seen.add(lowered)
-        result.append(item)
+    for value in values:
+        cleaned = clean_ws(value)
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            result.append(cleaned)
     return result
 
 
+def parse_french_date(value: str | None) -> str | None:
+    if not value:
+        return None
+    raw = clean_ws(value)
+    lowered = normalize_text(raw)
+    if re.fullmatch(r'\d{2}/\d{2}/\d{4}', raw):
+        return datetime.strptime(raw, '%d/%m/%Y').date().isoformat()
 
-def slugify(value: str | None) -> str:
-    normalized = normalize_text(value)
-    return normalized.replace(" ", "-")
+    raw = re.sub(r'^(?:' + '|'.join(FRENCH_WEEKDAYS) + r'),?\s+', '', raw, flags=re.IGNORECASE)
+    text_date_match = re.search(r'(\d{1,2})\s+([A-Za-zéûîôàèùçÉÛÎÔÀÈÙÇ]+)\s+(\d{4})', raw)
+    if text_date_match:
+        day = int(text_date_match.group(1))
+        month_name = normalize_text(text_date_match.group(2))
+        year = int(text_date_match.group(3))
+        month_order = [
+            'janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin',
+            'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre',
+        ]
+        if month_name in month_order:
+            month = month_order.index(month_name) + 1
+            return datetime(year, month, day).date().isoformat()
+
+    translated = raw
+    for fr, en in FRENCH_MONTHS.items():
+        translated = re.sub(fr, en, translated, flags=re.IGNORECASE)
+    translated = translated.replace('à', 'at')
+    translated = translated.replace('h', ':')
+    try:
+        dt = date_parser.parse(translated, fuzzy=True, dayfirst=True)
+        return dt.date().isoformat()
+    except (ValueError, TypeError, OverflowError):
+        match = re.search(r'(\d{2}/\d{2}/\d{4})', raw)
+        if match:
+            return datetime.strptime(match.group(1), '%d/%m/%Y').date().isoformat()
+        if lowered in {'a venir', 'à venir'}:
+            return None
+        return None
 
 
-def fingerprint_data(data) -> str:
-    serialized = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
-    return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+def make_cache_key(*parts: str) -> str:
+    raw = '|'.join(clean_ws(part) for part in parts)
+    digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()
+    return digest
+
+
+def ensure_absolute_url(base_url: str, href: str | None) -> str | None:
+    if not href:
+        return None
+    href = href.strip()
+    if not href:
+        return None
+    return urljoin(base_url, href)
+
+
+def is_manga_news_url(url: str, base_url: str) -> bool:
+    base_host = urlparse(base_url).netloc
+    host = urlparse(url).netloc
+    return host == base_host
+
+
+def encode_query(query: str) -> str:
+    return quote(query, safe='')
+
+
+def parse_fields_param(fields: str | None) -> list[str]:
+    if not fields:
+        return []
+    return unique_list(part.strip() for part in fields.split(','))
+
+
+def project_dict_fields(data: dict, fields: list[str]) -> dict:
+    if not fields:
+        return data
+
+    projected: dict = {}
+    for field in fields:
+        parts = [part for part in field.split('.') if part]
+        if not parts:
+            continue
+        current_source = data
+        current_target = projected
+        valid = True
+        for index, part in enumerate(parts):
+            if not isinstance(current_source, dict) or part not in current_source:
+                valid = False
+                break
+            value = current_source[part]
+            is_last = index == len(parts) - 1
+            if is_last:
+                current_target[part] = value
+            else:
+                if part not in current_target or not isinstance(current_target[part], dict):
+                    current_target[part] = {}
+                current_target = current_target[part]
+                current_source = value
+        if not valid:
+            continue
+    return projected
+
+
+def flatten_for_compare(data: dict, prefix: str = '') -> dict[str, object]:
+    flattened: dict[str, object] = {}
+    for key, value in data.items():
+        path = f'{prefix}.{key}' if prefix else key
+        if isinstance(value, dict):
+            flattened.update(flatten_for_compare(value, path))
+        else:
+            flattened[path] = value
+    return flattened
+
+
+def format_output_data(data: dict, output_format: str = 'nested') -> dict:
+    if output_format == 'flat':
+        return flatten_for_compare(data)
+    return data
+
+
+def fingerprint_data(data: object) -> str:
+    raw = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':'), default=str)
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
