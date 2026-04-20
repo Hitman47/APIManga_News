@@ -4,7 +4,10 @@ API non officielle, légère et auto-hébergeable pour exposer en JSON des donn�
 - cache SQLite persistant ;
 - authentification Bearer optionnelle ;
 - réponses normalisées pour l'automatisation ;
-- support ETag / `If-None-Match`.
+- support ETag / `If-None-Match` ;
+- aliases versionnées sous `/v1` ;
+- endpoints d'administration du cache ;
+- observabilité minimale (request id, logs structurés, retries upstream).
 
 ## Périmètre actuel
 
@@ -23,7 +26,7 @@ API non officielle, légère et auto-hébergeable pour exposer en JSON des donn�
 - provider anime séparé ;
 - agrégation multi-sources ;
 - pagination automatique multi-pages côté upstream ;
-- endpoints d'administration de cache exposés publiquement.
+- métriques métier avancées (Prometheus, traces distribuées, etc.).
 
 ## Variables d'environnement principales
 
@@ -33,6 +36,7 @@ Les plus importantes :
 - `API_TOKEN` : si vide, pas d'auth ; si défini, il faut envoyer `Authorization: Bearer <token>` ;
 - `DB_PATH` : chemin du cache SQLite ;
 - `CACHE_TTL_*` : TTL par type de ressource ;
+- `REQUEST_MAX_RETRIES` / `REQUEST_BACKOFF_SECONDS` : retries exponentiels côté upstream ;
 - `CACHE_STALE_GRACE_SECONDS` : durée de réutilisation du cache périmé en secours ;
 - `SEARCH_SCORE_THRESHOLD` : seuil minimal de matching ;
 - `ENABLE_DOCS` : active `/docs` et `/redoc`.
@@ -53,6 +57,16 @@ docker compose up -d --build
 ```
 
 API disponible sur `http://localhost:8017`.
+
+## Versionnement
+
+Les endpoints historiques sans préfixe restent disponibles pour compatibilité.
+
+Pour toute nouvelle intégration, utilise la version explicite :
+- `/v1/search`
+- `/v1/series/{slug}`
+- `/v1/volume/{series_slug}/{volume_slug}`
+- etc.
 
 ## Endpoints principaux
 
@@ -149,6 +163,27 @@ curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
 
 > `include_raw_sections=true` ajoute les sections textuelles brutes extraites de la page upstream.
 
+## Administration du cache
+
+### Stats
+
+```bash
+curl "http://localhost:8017/v1/admin/cache/stats"
+```
+
+### Invalidation ciblée
+
+```bash
+curl -X POST "http://localhost:8017/v1/admin/cache/invalidate" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "namespace": "planning",
+    "expired_only": true
+  }'
+```
+
+Tu peux aussi invalider par `cache_key`, `resource_url`, ou tout vider avec `{"all_entries": true}`.
+
 ## Cache, ETag et headers utiles
 
 Les réponses normalisées exposent :
@@ -156,6 +191,7 @@ Les réponses normalisées exposent :
 - `X-Data-Fingerprint: <fingerprint>`
 - `X-Cache-Status: MISS|HIT|STALE`
 - `Vary: Authorization, If-None-Match`
+- `X-Request-ID: <id>`
 
 Exemple de requête conditionnelle :
 
@@ -174,6 +210,12 @@ Si la ressource n'a pas changé, l'API retourne `304 Not Modified` sans body.
 - `400` : paramètres invalides côté client (bloc inconnu, date invalide, URL invalide, etc.) ;
 - `404` : ressource absente sur Manga News ;
 - `502` : problème upstream ou parsing non fiable.
+
+## Observabilité et robustesse upstream
+
+- `LOG_FORMAT=json` active des logs structurés JSON réellement exploitables ;
+- chaque requête HTTP reçoit un `X-Request-ID` renvoyé au client et injecté dans les logs ;
+- l'upstream Manga News est appelé avec retries exponentiels sur erreurs réseau et statuts `429/500/502/503/504`.
 
 ## Notes de conception
 

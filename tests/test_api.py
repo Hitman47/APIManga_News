@@ -8,6 +8,7 @@ def test_health_endpoint():
         response = client.get('/health')
     assert response.status_code == 200
     assert response.json() == {'ok': True}
+    assert response.headers['X-Request-ID']
 
 
 
@@ -177,3 +178,58 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
     assert 'SeriesData' in schemas
     assert 'SeriesEditionsData' in schemas
     assert 'ResolveResponse' in schemas
+
+
+
+def test_admin_cache_stats_and_invalidate_routes():
+    class DummyCache:
+        def stats(self):
+            return {
+                'db_path': '/tmp/cache.sqlite3',
+                'totals': {'entries': 2, 'fresh': 1, 'stale_usable': 1, 'expired': 0},
+                'by_namespace': {
+                    'series': {'entries': 1, 'fresh': 1, 'stale_usable': 0, 'expired': 0},
+                    'planning': {'entries': 1, 'fresh': 0, 'stale_usable': 1, 'expired': 0},
+                },
+                'watch_snapshots': {'entries': 0, 'oldest_updated_at': None, 'newest_updated_at': None},
+                'oldest_fetched_at': '2026-04-20T10:00:00+00:00',
+                'newest_fetched_at': '2026-04-20T12:00:00+00:00',
+            }
+
+        def invalidate(self, **kwargs):
+            assert kwargs['namespace'] == 'planning'
+            assert kwargs['expired_only'] is True
+            return 1
+
+    with TestClient(app) as client:
+        app.state.service = type('ServiceLike', (), {'cache': DummyCache()})()
+        stats = client.get('/admin/cache/stats')
+        assert stats.status_code == 200
+        assert stats.json()['data']['totals']['entries'] == 2
+        invalidate = client.post('/admin/cache/invalidate', json={'namespace': 'planning', 'expired_only': True})
+    assert invalidate.status_code == 200
+    payload = invalidate.json()
+    assert payload['deleted'] == 1
+    assert payload['stats']['by_namespace']['planning']['stale_usable'] == 1
+
+
+
+def test_v1_aliases_are_available():
+    with TestClient(app) as client:
+        response = client.get('/v1/health')
+    assert response.status_code == 200
+    assert response.json() == {'ok': True}
+
+
+
+def test_openapi_exposes_v1_and_admin_routes():
+    with TestClient(app) as client:
+        response = client.get('/openapi.json')
+    assert response.status_code == 200
+    payload = response.json()
+    assert '/v1/search/resolve' in payload['paths']
+    assert '/admin/cache/stats' in payload['paths']
+    assert '/v1/admin/cache/invalidate' in payload['paths']
+    schemas = payload['components']['schemas']
+    assert 'CacheStatsResponse' in schemas
+    assert 'CacheInvalidateRequest' in schemas

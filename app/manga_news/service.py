@@ -12,6 +12,7 @@ from app.cache import SQLiteCache
 from app.config import Settings
 from app.exceptions import BadRequestError, ParseError, ResourceNotFound
 from app.http import AsyncFetcher
+from app.logging_utils import log_event
 from app.models import (
     Envelope,
     NewsItem,
@@ -153,10 +154,19 @@ class MangaNewsService:
         self.fetcher = fetcher
         self.cache = cache
         self.base_url = settings.manga_news_base_url.rstrip('/')
+        self._log_json = settings.log_format.lower() == 'json'
 
-    async def _cached_payload(self, *, cache_key: str, ttl_seconds: int, loader):
+    async def _cached_payload(self, *, cache_key: str, namespace: str, ttl_seconds: int, loader, resource_url: str | None = None):
         entry = self.cache.get(cache_key)
         if entry and entry.is_fresh:
+            log_event(
+                logger,
+                logging.INFO,
+                'cache_hit',
+                json_mode=self._log_json,
+                namespace=namespace,
+                resource_url=entry.resource_url or resource_url,
+            )
             return entry.payload, entry, True, False, []
         try:
             payload, source_url = await loader()
@@ -165,12 +175,31 @@ class MangaNewsService:
                 payload={'data': payload, 'source_url': source_url},
                 ttl_seconds=ttl_seconds,
                 stale_grace_seconds=self.settings.cache_stale_grace_seconds,
+                namespace=namespace,
+                resource_url=source_url or resource_url,
+            )
+            log_event(
+                logger,
+                logging.INFO,
+                'cache_store',
+                json_mode=self._log_json,
+                namespace=namespace,
+                resource_url=source_url or resource_url,
+                ttl_seconds=ttl_seconds,
             )
             return cached_entry.payload, cached_entry, False, False, []
         except Exception as exc:
             if entry and entry.is_stale_usable:
                 warning = f'Using stale cached data because the upstream fetch failed: {exc}'
-                logger.warning(warning)
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    'cache_stale_fallback',
+                    json_mode=self._log_json,
+                    namespace=namespace,
+                    resource_url=entry.resource_url or resource_url,
+                    reason=str(exc),
+                )
                 return entry.payload, entry, True, True, [warning]
             raise
 
@@ -272,8 +301,10 @@ class MangaNewsService:
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
+            namespace='search',
             ttl_seconds=self.settings.cache_ttl_search_seconds,
             loader=loader,
+            resource_url=search_urls[0] if search_urls else self.base_url,
         )
         found = bool(payload.get('data'))
         return Envelope(
@@ -302,8 +333,10 @@ class MangaNewsService:
 
         return await self._cached_payload(
             cache_key=cache_key,
+            namespace='series',
             ttl_seconds=self.settings.cache_ttl_series_seconds,
             loader=loader,
+            resource_url=target_url,
         )
 
     async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
@@ -317,8 +350,10 @@ class MangaNewsService:
 
         return await self._cached_payload(
             cache_key=cache_key,
+            namespace='volume',
             ttl_seconds=self.settings.cache_ttl_volume_seconds,
             loader=loader,
+            resource_url=target_url,
         )
 
     async def get_series(
@@ -395,8 +430,10 @@ class MangaNewsService:
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
+            namespace='series-editions',
             ttl_seconds=self.settings.cache_ttl_series_seconds,
             loader=loader,
+            resource_url=target_url,
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
@@ -422,8 +459,10 @@ class MangaNewsService:
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
+            namespace='news-global',
             ttl_seconds=self.settings.cache_ttl_news_global_seconds,
             loader=loader,
+            resource_url=rss_url,
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
@@ -477,8 +516,10 @@ class MangaNewsService:
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
+            namespace='planning',
             ttl_seconds=self.settings.cache_ttl_planning_seconds,
             loader=loader,
+            resource_url=target_url,
         )
 
         planning = payload.get('data', {}) or {}
@@ -581,8 +622,10 @@ class MangaNewsService:
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
+            namespace=cache_namespace,
             ttl_seconds=ttl,
             loader=loader,
+            resource_url=target_url,
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 

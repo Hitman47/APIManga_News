@@ -23,6 +23,48 @@ class Envelope(BaseEnvelope):
     data: Any = None
 
 
+class CacheNamespaceStats(BaseModel):
+    entries: int
+    fresh: int
+    stale_usable: int
+    expired: int
+
+
+class WatchSnapshotStats(BaseModel):
+    entries: int
+    oldest_updated_at: str | None = None
+    newest_updated_at: str | None = None
+
+
+class CacheStatsData(BaseModel):
+    db_path: str
+    totals: CacheNamespaceStats
+    by_namespace: dict[str, CacheNamespaceStats] = Field(default_factory=dict)
+    watch_snapshots: WatchSnapshotStats
+    oldest_fetched_at: str | None = None
+    newest_fetched_at: str | None = None
+
+
+class CacheStatsResponse(BaseModel):
+    ok: bool = True
+    data: CacheStatsData
+
+
+class CacheInvalidateRequest(BaseModel):
+    cache_key: str | None = None
+    namespace: str | None = None
+    resource_url: str | None = None
+    expired_only: bool = False
+    all_entries: bool = False
+
+
+class CacheInvalidateResponse(BaseModel):
+    ok: bool = True
+    deleted: int
+    filters: dict[str, Any] = Field(default_factory=dict)
+    stats: CacheStatsData
+
+
 class HealthResponse(BaseModel):
     ok: bool = True
 

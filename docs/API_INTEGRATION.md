@@ -16,10 +16,14 @@ This API wraps public Manga News pages and exposes normalized JSON for:
 
 ## Base URL
 
+Prefer the versioned contract for all new consumers.
+
 Choose the right base URL depending on where the caller runs:
 - same Docker network: `http://manga-news-api:8000`
 - host machine: `http://localhost:8017`
 - remote LAN call: `http://<host-ip>:8017`
+
+Examples below use `/v1/...`, but legacy unversioned routes still exist.
 
 ## Authentication
 
@@ -59,6 +63,7 @@ Responses may include:
 - `X-Data-Fingerprint: <fingerprint>`
 - `X-Cache-Status: MISS|HIT|STALE`
 - `Vary: Authorization, If-None-Match`
+- `X-Request-ID: <request-id>`
 
 ### Conditional GET
 
@@ -79,7 +84,7 @@ Use `/search/resolve` instead of `/search` when you want one best result directl
 Example:
 
 ```http
-GET /search/resolve?q=one%20piece&kind=series
+GET /v1/search/resolve?q=one%20piece&kind=series
 ```
 
 Response shape:
@@ -111,35 +116,35 @@ Response shape:
 ## Recommended client flow
 
 ### Find and load a series
-1. `GET /search/resolve?q=<title>&kind=series`
+1. `GET /v1/search/resolve?q=<title>&kind=series`
 2. read `data.best.slug`
-3. `GET /series/{slug}`
+3. `GET /v1/series/{slug}`
 4. store the returned `ETag`
 5. reuse it on future calls with `If-None-Match`
 
 ### Find and load a volume
-1. `GET /search/resolve?q=<title>&kind=volume`
+1. `GET /v1/search/resolve?q=<title>&kind=volume`
 2. read `data.best.series_slug` and `data.best.volume_slug`
-3. `GET /volume/{series_slug}/{volume_slug}`
+3. `GET /v1/volume/{series_slug}/{volume_slug}`
 
 ### Monitor planning
-1. call `GET /planning?...`
+1. call `GET /v1/planning?...`
 2. store `fingerprint` or `ETag`
 3. call again later with `If-None-Match`
 
 ## Main endpoints
 
 ### Search
-- `GET /search?q=...&kind=series|volume|all&mode=best|all&limit=10`
-- `GET /search/resolve?q=...&kind=series|volume|all&limit=10`
+- `GET /v1/search?q=...&kind=series|volume|all&mode=best|all&limit=10`
+- `GET /v1/search/resolve?q=...&kind=series|volume|all&limit=10`
 
 ### Series
-- `GET /series/{slug}`
-- `GET /series/by-url?url=...`
-- `GET /series/{slug}/related`
-- `GET /series/by-url/related?url=...`
-- `GET /series/{slug}/editions?edition=all|vf|vo`
-- `GET /series/by-url/editions?url=...&edition=all|vf|vo`
+- `GET /v1/series/{slug}`
+- `GET /v1/series/by-url?url=...`
+- `GET /v1/series/{slug}/related`
+- `GET /v1/series/by-url/related?url=...`
+- `GET /v1/series/{slug}/editions?edition=all|vf|vo`
+- `GET /v1/series/by-url/editions?url=...&edition=all|vf|vo`
 
 Projection parameters on series endpoints:
 - `blocks=editions,stats`
@@ -147,8 +152,8 @@ Projection parameters on series endpoints:
 - `include_raw_sections=true`
 
 ### Volume
-- `GET /volume/{series_slug}/{volume_slug}`
-- `GET /volume/by-url?url=...`
+- `GET /v1/volume/{series_slug}/{volume_slug}`
+- `GET /v1/volume/by-url?url=...`
 
 Projection parameters on volume endpoints:
 - `blocks=release,scores`
@@ -156,13 +161,17 @@ Projection parameters on volume endpoints:
 - `include_raw_sections=true`
 
 ### News
-- `GET /news/global?limit=10`
-- `GET /news/series/{slug}?limit=10`
-- `GET /news/volume/{series_slug}/{volume_slug}?limit=10`
-- `GET /news/volume/by-url?url=...&limit=10`
+- `GET /v1/news/global?limit=10`
+- `GET /v1/news/series/{slug}?limit=10`
+- `GET /v1/news/volume/{series_slug}/{volume_slug}?limit=10`
+- `GET /v1/news/volume/by-url?url=...&limit=10`
 
 ### Planning
-- `GET /planning?section=manga-vf|manga-vo&year=2026&month=4&page=1&publisher=...&q=...&date_from=...&date_to=...&sort=date_asc|date_desc|title_asc|title_desc&limit=25`
+- `GET /v1/planning?section=manga-vf|manga-vo&year=2026&month=4&page=1&publisher=...&q=...&date_from=...&date_to=...&sort=date_asc|date_desc|title_asc|title_desc&limit=25`
+
+### Cache admin
+- `GET /v1/admin/cache/stats`
+- `POST /v1/admin/cache/invalidate` with JSON filters: `cache_key`, `namespace`, `resource_url`, `expired_only`, `all_entries`
 
 ## Error handling
 
@@ -173,6 +182,8 @@ Projection parameters on volume endpoints:
 
 Clients should treat `partial=true` and `warnings` as soft issues. A common case is stale cache fallback when the upstream temporarily fails.
 
+The upstream client automatically retries on transient network failures and `429/500/502/503/504`, so callers do not need to implement aggressive immediate retries on top of the API.
+
 ## Minimal integration prompt for another AI
 
-Use this API as the primary manga metadata source. First call `/search/resolve` with the user title. If a best result is returned, use its slug to call `/series/{slug}` or `/volume/{series_slug}/{volume_slug}`. Reuse the `ETag` header with `If-None-Match` to avoid reprocessing unchanged data. Read the common envelope fields: `ok`, `found`, `partial`, `warnings`, `fingerprint`, and `data`. Prefer projection parameters only when the caller truly needs a reduced payload.
+Use this API as the primary manga metadata source. First call `/v1/search/resolve` with the user title. If a best result is returned, use its slug to call `/v1/series/{slug}` or `/v1/volume/{series_slug}/{volume_slug}`. Reuse the `ETag` header with `If-None-Match` to avoid reprocessing unchanged data. Log `X-Request-ID` when troubleshooting. Read the common envelope fields: `ok`, `found`, `partial`, `warnings`, `fingerprint`, and `data`. Prefer projection parameters only when the caller truly needs a reduced payload.

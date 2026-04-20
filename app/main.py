@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Literal
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Body, Depends, FastAPI, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 
@@ -13,8 +15,12 @@ from app.cache import SQLiteCache
 from app.config import Settings, get_settings
 from app.exceptions import BadRequestError, ParseError, ResourceNotFound, UpstreamError
 from app.http import AsyncFetcher
+from app.logging_utils import log_event, reset_request_id, set_request_id
 from app.manga_news.service import MangaNewsService
 from app.models import (
+    CacheInvalidateRequest,
+    CacheInvalidateResponse,
+    CacheStatsResponse,
     HealthResponse,
     NewsResponse,
     PlanningResponse,
@@ -26,11 +32,15 @@ from app.models import (
     VolumeResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def configure_logging(settings: Settings) -> None:
+    json_logs = settings.log_format.lower() == 'json'
     logging.basicConfig(
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format='%(asctime)s %(levelname)s %(name)s: %(message)s',
+        format='%(message)s' if json_logs else '%(asctime)s %(levelname)s %(name)s: %(message)s',
+        force=True,
     )
 
 
@@ -39,7 +49,13 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings)
     cache = SQLiteCache(settings.db_path)
-    fetcher = AsyncFetcher(settings.user_agent, settings.request_timeout_seconds)
+    fetcher = AsyncFetcher(
+        settings.user_agent,
+        settings.request_timeout_seconds,
+        max_retries=settings.request_max_retries,
+        backoff_seconds=settings.request_backoff_seconds,
+        log_json=settings.log_format.lower() == 'json',
+    )
     service = MangaNewsService(settings=settings, fetcher=fetcher, cache=cache)
     app.state.settings = settings
     app.state.service = service
@@ -51,11 +67,62 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title='Manga News Private API',
-    version='0.2.1',
+    version='0.3.0',
     docs_url=get_settings().docs_url,
     redoc_url=get_settings().redoc_url,
     lifespan=lifespan,
 )
+
+
+@app.middleware('http')
+async def request_context_middleware(request: Request, call_next):
+    settings = get_settings()
+    json_logs = settings.log_format.lower() == 'json'
+    request_id = request.headers.get('x-request-id') or uuid4().hex
+    token = set_request_id(request_id)
+    started = time.perf_counter()
+    log_event(
+        logger,
+        logging.INFO,
+        'request_started',
+        json_mode=json_logs,
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        query=str(request.url.query) or None,
+    )
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        log_event(
+            logger,
+            logging.ERROR,
+            'request_failed',
+            json_mode=json_logs,
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            duration_ms=duration_ms,
+        )
+        reset_request_id(token)
+        raise
+    duration_ms = round((time.perf_counter() - started) * 1000, 2)
+    response.headers['X-Request-ID'] = request_id
+    log_event(
+        logger,
+        logging.INFO,
+        'request_completed',
+        json_mode=json_logs,
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+        cache_status=response.headers.get('X-Cache-Status'),
+    )
+    reset_request_id(token)
+    return response
 
 
 def get_service() -> MangaNewsService:
@@ -64,8 +131,6 @@ def get_service() -> MangaNewsService:
 
 def get_settings_dep() -> Settings:
     return app.state.settings
-
-
 
 
 def _etag_matches(if_none_match: str | None, etag: str | None) -> bool:
@@ -322,3 +387,60 @@ async def get_planning(
         limit=limit,
     )
     return _build_envelope_response(payload.model_dump(), request)
+
+
+@app.get('/admin/cache/stats', dependencies=[Depends(auth_dependency)], response_model=CacheStatsResponse)
+async def get_cache_stats(service: MangaNewsService = Depends(get_service)):
+    return {'ok': True, 'data': service.cache.stats()}
+
+
+@app.post('/admin/cache/invalidate', dependencies=[Depends(auth_dependency)], response_model=CacheInvalidateResponse)
+async def invalidate_cache(
+    payload: CacheInvalidateRequest | None = Body(default=None),
+    service: MangaNewsService = Depends(get_service),
+):
+    payload = payload or CacheInvalidateRequest()
+    deleted = service.cache.invalidate(
+        cache_key=payload.cache_key,
+        namespace=payload.namespace,
+        resource_url=payload.resource_url,
+        expired_only=payload.expired_only,
+        all_entries=payload.all_entries,
+    )
+    return {
+        'ok': True,
+        'deleted': deleted,
+        'filters': payload.model_dump(),
+        'stats': service.cache.stats(),
+    }
+
+
+_VERSIONED_ALIASES = [
+    ('/v1/health', health, ['GET'], HealthResponse),
+    ('/v1/search', search, ['GET'], SearchResponse),
+    ('/v1/search/resolve', search_resolve, ['GET'], ResolveResponse),
+    ('/v1/series/{slug}', get_series, ['GET'], SeriesResponse),
+    ('/v1/series/by-url', get_series_by_url, ['GET'], SeriesResponse),
+    ('/v1/series/{slug}/related', get_series_related, ['GET'], SeriesRelatedResponse),
+    ('/v1/series/by-url/related', get_series_related_by_url, ['GET'], SeriesRelatedResponse),
+    ('/v1/series/{slug}/editions', get_series_editions, ['GET'], SeriesEditionsResponse),
+    ('/v1/series/by-url/editions', get_series_editions_by_url, ['GET'], SeriesEditionsResponse),
+    ('/v1/volume/{series_slug}/{volume_slug}', get_volume, ['GET'], VolumeResponse),
+    ('/v1/volume/by-url', get_volume_by_url, ['GET'], VolumeResponse),
+    ('/v1/news/global', get_global_news, ['GET'], NewsResponse),
+    ('/v1/news/series/{slug}', get_series_news, ['GET'], NewsResponse),
+    ('/v1/news/volume/{series_slug}/{volume_slug}', get_volume_news, ['GET'], NewsResponse),
+    ('/v1/news/volume/by-url', get_volume_news_by_url, ['GET'], NewsResponse),
+    ('/v1/planning', get_planning, ['GET'], PlanningResponse),
+    ('/v1/admin/cache/stats', get_cache_stats, ['GET'], CacheStatsResponse),
+    ('/v1/admin/cache/invalidate', invalidate_cache, ['POST'], CacheInvalidateResponse),
+]
+
+for path, endpoint, methods, response_model in _VERSIONED_ALIASES:
+    app.add_api_route(
+        path,
+        endpoint,
+        methods=methods,
+        response_model=response_model,
+        dependencies=[Depends(auth_dependency)],
+    )

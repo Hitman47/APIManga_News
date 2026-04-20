@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     api_token: str | None = Field(default=None, alias='API_TOKEN')
     db_path: Path = Field(default=Path('/data/cache.sqlite3'), alias='DB_PATH')
     request_timeout_seconds: float = Field(default=20.0, alias='REQUEST_TIMEOUT_SECONDS')
+    request_max_retries: int = Field(default=2, alias='REQUEST_MAX_RETRIES')
+    request_backoff_seconds: float = Field(default=0.5, alias='REQUEST_BACKOFF_SECONDS')
     cache_stale_grace_seconds: int = Field(default=7 * 24 * 3600, alias='CACHE_STALE_GRACE_SECONDS')
     cache_ttl_search_seconds: int = Field(default=24 * 3600, alias='CACHE_TTL_SEARCH_SECONDS')
     cache_ttl_series_seconds: int = Field(default=24 * 3600, alias='CACHE_TTL_SERIES_SECONDS')
