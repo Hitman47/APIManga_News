@@ -3,20 +3,13 @@
   "ok": true,
   "found": true,
   "source": "manga_news",
-  "source_url": "https://www.manga-news.com/index.php/recherche/?cat=manga-serie-vf&q=one%20piece",
+  "source_url": "https://www.manga-news.com/index.php/recherche/?cat=manga-serie-vf&q=one piece",
   "cached": false,
   "fetched_at": "2026-04-20T12:00:00+00:00",
   "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-resolve-series-one-piece",
-  "pagination": {
-    "page": 1,
-    "limit": 5,
-    "returned": 1,
-    "total": 2,
-    "has_more": false
-  },
+  "fingerprint": "fp-search-resolve-series-one-piece",
   "data": {
     "query": "one piece",
     "kind_requested": "series",
@@ -27,14 +20,23 @@
       "kind": "series",
       "score": 98,
       "slug": "One-piece-Edition-originale",
-      "series_slug": null,
+      "series_slug": "One-piece-Edition-originale",
       "volume_slug": null,
-      "number": null,
-      "number_int": null,
-      "edition_label": null,
-      "is_special": null,
-      "is_one_shot": null
+      "title_vo": "ワンピース",
+      "translated_title": "One Piece"
     },
-    "candidates": []
+    "candidates": [
+      {
+        "title": "One Piece",
+        "url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
+        "kind": "series",
+        "score": 98,
+        "slug": "One-piece-Edition-originale",
+        "series_slug": "One-piece-Edition-originale",
+        "volume_slug": null,
+        "title_vo": "ワンピース",
+        "translated_title": "One Piece"
+      }
+    ]
   }
 }

@@ -1,115 +1,208 @@
-Manga News Private API - scénario de test manuel One Piece
-==========================================================
+Manga News Private API - scénario manuel One Piece
+==================================================
 
-Base URL par défaut (host) :
+Base URL hôte par défaut :
 http://localhost:8017
 
-Si API_TOKEN est défini, ajouter :
+Si API_TOKEN est défini, ajouter à chaque requête :
 Authorization: Bearer <token>
 
-Astuce :
-- les payloads JSON figés correspondant aux principaux cas sont dans `docs/examples/`
-- la validation automatique doc+contrat est dans `python scripts/validate_contract_and_docs.py`
+Ordre conseillé :
+1) vérifier /health
+2) résoudre la série
+3) charger la fiche série
+4) résoudre un volume
+5) charger la fiche volume
+6) tester les news
+7) tester le planning
+8) tester l'ETag / 304
+9) valider docs + contrat
 
 1) Health
 ---------
 curl http://localhost:8017/health
 
-Exemple figé : docs/examples/health_ok.json
+Attendu :
+- HTTP 200
+- {"ok": true}
 
-2) Résoudre la série One Piece
+Exemples :
+- docs/examples/health.json
+- docs/examples/health_ok.json
+
+2) Recherche libre de la série
 ------------------------------
-curl --get "http://localhost:8017/search/resolve"   --data-urlencode "q=one piece"   --data-urlencode "kind=series"
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=all" \
+  --data-urlencode "limit=5"
+
+Attendu :
+- au moins un résultat
+- un résultat avec slug proche de One-piece-Edition-originale
+- title_vo / translated_title possibles
+
+Exemple :
+- docs/examples/search_response_one_piece.json
+
+3) Résolution de la série
+-------------------------
+curl --get "http://localhost:8017/search/resolve" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "limit=5"
 
 Attendu :
 - data.best.kind == "series"
-- data.best.slug proche de "One-piece-Edition-originale"
+- data.best.slug proche de One-piece-Edition-originale
+- data.confidence renseigné
 
-Exemple figé : docs/examples/search_resolve_series_one_piece.json
+Exemples :
+- docs/examples/resolve_response_one_piece.json
+- docs/examples/search_resolve_series_one_piece.json
 
-3) Charger la fiche série
--------------------------
+4) Fiche série complète
+-----------------------
 curl "http://localhost:8017/series/One-piece-Edition-originale"
 
 Attendu :
 - data.title == "One Piece"
-- publisher_fr rempli
-- vf / vo présents ou partiellement présents
+- data.title_vo présent si la page le contient
+- publisher_fr renseigné
 - headers ETag et X-Data-Fingerprint présents
 
-Exemple figé : docs/examples/series_one_piece.json
+Exemple :
+- docs/examples/series_one_piece.json
 
-4) Charger une projection légère de la série
---------------------------------------------
-curl --get "http://localhost:8017/series/One-piece-Edition-originale"   --data-urlencode "fields=title,vf.volumes,next_release_date"
+5) Fiche série légère
+---------------------
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,title_vo,translated_title,vf.volumes,next_release_date"
 
 Attendu :
-- data.title présent
-- data.vf.volumes présent si disponible
-- pas de bruit inutile
+- payload réduit
+- title présent
+- vf.volumes présent si disponible
 
-5) Charger les éditions VF / VO
--------------------------------
+6) Liens liés à la série
+------------------------
+curl "http://localhost:8017/series/One-piece-Edition-originale/related"
+
+Attendu :
+- data.related présent
+- catégories de liens présentes même si certaines listes sont vides
+
+Exemple :
+- docs/examples/series_related_one_piece.json
+
+7) Éditions de la série
+-----------------------
 curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
 
 Attendu :
-- data.vf ou data.vo présents
-- items listés si la page Manga News correspondante existe
+- data.vf et/ou data.vo présents
+- items éventuels avec number / publication_date / cover_image
 
-Exemple figé : docs/examples/series_editions_one_piece_all.json
+Exemples :
+- docs/examples/series_editions_one_piece.json
+- docs/examples/series_editions_one_piece_all.json
 
-6) Résoudre un volume
----------------------
-curl --get "http://localhost:8017/search/resolve"   --data-urlencode "q=one piece tome 110"   --data-urlencode "kind=volume"
+8) Résolution d'un volume
+-------------------------
+curl --get "http://localhost:8017/search/resolve" \
+  --data-urlencode "q=one piece tome 110" \
+  --data-urlencode "kind=volume" \
+  --data-urlencode "limit=10"
 
 Attendu :
 - data.best.kind == "volume"
-- series_slug + volume_slug présents
+- series_slug et volume_slug présents
 
-7) Charger le volume
---------------------
+9) Fiche volume complète
+------------------------
 curl "http://localhost:8017/volume/One-Piece/vol-110"
 
 Attendu :
-- title rempli
-- publication_date et isbn_ean présents si disponibles
+- title renseigné
+- number / number_int cohérents
+- publication_date / isbn_ean présents si disponibles
+- title_vo / translated_title présents si disponibles
 - headers ETag et X-Data-Fingerprint présents
 
-Exemple figé : docs/examples/volume_one_piece_110.json
+Exemples :
+- docs/examples/volume_one_piece_91.json
+- docs/examples/volume_one_piece_110.json
 
-8) Tester un 304 sur la série
------------------------------
-- récupérer l'ETag sur /series/One-piece-Edition-originale
+10) News globales
+-----------------
+curl "http://localhost:8017/news/global?limit=5"
+
+Attendu :
+- liste de news
+- title / url / published_at exploitables
+
+Exemple :
+- docs/examples/news_global_one_piece_sample.json
+
+11) News de série
+-----------------
+curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
+
+Attendu :
+- liste de news liées à la série si Manga News en propose
+
+12) News de volume
+------------------
+curl "http://localhost:8017/news/volume/One-Piece/vol-110?limit=10"
+
+Alternative by-url :
+curl --get "http://localhost:8017/news/volume/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-110" \
+  --data-urlencode "limit=10"
+
+13) Planning VF filtré
+----------------------
+curl --get "http://localhost:8017/planning" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "year=2026" \
+  --data-urlencode "month=4" \
+  --data-urlencode "publisher=Glénat" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "date_from=2026-04-01" \
+  --data-urlencode "date_to=2026-04-30" \
+  --data-urlencode "sort=date_asc" \
+  --data-urlencode "limit=25"
+
+Attendu :
+- data.section == "manga-vf"
+- items filtrés localement
+- total_items = total après filtrage local sur la page chargée
+
+Exemples :
+- docs/examples/planning_example.json
+- docs/examples/planning_manga_vf_april_2026.json
+
+14) Test ETag / 304
+-------------------
+- faire une requête sur /series/One-piece-Edition-originale
+- récupérer l'ETag
 - rejouer la même requête avec If-None-Match
 
 Attendu :
 - HTTP 304
 - corps vide
 
-9) Tester les news globales
----------------------------
-curl "http://localhost:8017/news/global?limit=5"
-
-Exemple figé : docs/examples/news_global_one_piece_sample.json
-
-10) Tester le planning
-----------------------
-curl --get "http://localhost:8017/planning"   --data-urlencode "section=manga-vf"   --data-urlencode "year=2026"   --data-urlencode "month=4"   --data-urlencode "publisher=Glénat"   --data-urlencode "sort=date_asc"   --data-urlencode "limit=25"
-
-Exemple figé : docs/examples/planning_manga_vf_april_2026.json
-
-11) Ouvrir l'OpenAPI
---------------------
-- http://localhost:8017/docs
-- http://localhost:8017/redoc
-- http://localhost:8017/openapi.json
-
-12) Lancer la validation doc + contrat
---------------------------------------
+15) Validation doc + contrat
+----------------------------
 python scripts/validate_contract_and_docs.py
 
-But du test :
-- vérifier que les routes existent ;
-- vérifier que les payloads sont cohérents ;
-- vérifier que l'OpenAPI est suffisante pour guider un utilisateur ou une IA ;
-- vérifier que la documentation et les exemples JSON ne divergent pas du code.
+16) Validation test suite
+-------------------------
+pytest
+
+But du scénario :
+- vérifier les routes réelles ;
+- vérifier les exemples JSON ;
+- vérifier que la doc suffit à démarrer ;
+- vérifier qu'aucune hypothèse de `/v1` ou d'endpoint admin ne traîne encore.

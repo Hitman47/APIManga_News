@@ -10,13 +10,6 @@
   "partial": false,
   "warnings": [],
   "fingerprint": "fp-news-global-sample",
-  "pagination": {
-    "page": 1,
-    "limit": 2,
-    "returned": 2,
-    "total": 2,
-    "has_more": false
-  },
   "data": [
     {
       "title": "La saison 2 de la série live One Piece disponible sur Netflix !",

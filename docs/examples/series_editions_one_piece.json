@@ -9,14 +9,14 @@
   "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-editions",
+  "fingerprint": "fp-series-editions",
   "data": {
     "title": "One Piece",
     "series_slug": "One-piece-Edition-originale",
     "vf": {
       "edition": "vf",
       "source_url": "https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale",
-      "total": 2,
+      "total": 1,
       "items": [
         {
           "title": "One Piece Vol.91",
@@ -24,6 +24,10 @@
           "series_slug": "One-Piece",
           "volume_slug": "vol-91",
           "number": "91",
+          "number_int": 91,
+          "edition_label": null,
+          "is_special": false,
+          "is_one_shot": false,
           "publication_date": "2019-07-03",
           "cover_image": "https://www.manga-news.com/public/images/series/one-piece-91.jpg"
         }

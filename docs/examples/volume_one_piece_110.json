@@ -10,7 +10,6 @@
   "partial": false,
   "warnings": [],
   "fingerprint": "fp-volume-one-piece-110",
-  "pagination": null,
   "data": {
     "title": "One Piece Vol.110",
     "series_title": "One Piece",
@@ -43,11 +42,15 @@
     "prepublication": "Shônen Jump",
     "origin": "Japon - 1997",
     "illustration": "208 pages n&b + couleurs",
-    "illustration_details": null,
-    "advisory_age": "8+",
+    "illustration_details": {
+      "raw": "208 pages n&b + couleurs",
+      "pages": 208,
+      "has_color_pages": true
+    },
+    "advisory_age": null,
     "publication_date": "2025-09-27",
-    "isbn_ean": "9782344064092",
-    "price_code": "7.20",
+    "isbn_ean": "9782344068762",
+    "price_code": "7.20 EUR",
     "cover_image": "https://www.manga-news.com/public/images/series/one-piece-110.jpg",
     "editorial_score": 16.0,
     "reader_score": 15.5,

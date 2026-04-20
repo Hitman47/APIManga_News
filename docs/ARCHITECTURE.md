@@ -1,148 +1,134 @@
-# Architecture de l'API
+# Architecture
 
-Ce document explique comment l'API est structurée, où se trouvent les responsabilités, et comment une requête traverse le système.
+Ce document explique comment les composants s'enchaînent réellement.
 
-## 1. Schéma global
+## Vue d'ensemble
+
+```mermaid
+flowchart LR
+    C[Client / Outil / IA] --> A[FastAPI routes]
+    A --> B[MangaNewsService]
+    B --> D[SQLiteCache]
+    B --> E[AsyncFetcher]
+    E --> F[Manga News HTML / RSS]
+    B --> G[Parsers HTML / RSS]
+    G --> H[Modèles Pydantic]
+    H --> A
+```
+
+## Chaîne de traitement d'une requête
+
+1. **Route FastAPI**
+   - valide les paramètres ;
+   - vérifie le Bearer token si `API_TOKEN` est actif ;
+   - délègue au `MangaNewsService`.
+
+2. **Service métier**
+   - calcule une clé de cache stable ;
+   - consulte le cache positif ;
+   - consulte le negative cache si activé ;
+   - fetch l'upstream si nécessaire ;
+   - parse la réponse ;
+   - construit l'enveloppe finale.
+
+3. **Cache SQLite**
+   - stocke les réponses positives ;
+   - stocke aussi les erreurs négatives courtes (`negative_cache_entries`) ;
+   - garde une fenêtre stale pour servir une ancienne réponse si l'upstream échoue.
+
+4. **Fetcher HTTP**
+   - envoie les requêtes vers Manga News ;
+   - suit les redirections ;
+   - traduit les erreurs HTTP / réseau en erreurs applicatives.
+
+5. **Parsers**
+   - analysent le HTML / RSS ;
+   - extraient les champs normalisés ;
+   - lèvent `ParseError` quand la page n'est pas exploitable.
+
+## Flux de cache
 
 ```mermaid
 flowchart TD
-    Client[Client / Script / IA] --> FastAPI[FastAPI app/main.py]
-    FastAPI --> Auth[auth.py]
-    FastAPI --> Service[MangaNewsService]
-    Service --> Cache[(SQLiteCache)]
-    Service --> Fetcher[AsyncFetcher / httpx]
-    Fetcher --> Upstream[(manga-news.com)]
-    Upstream --> Fetcher
-    Fetcher --> Parsers[parsers.py]
-    Parsers --> Service
-    Service --> Models[models.py]
-    Models --> FastAPI
-    FastAPI --> Client
+    A[Requête] --> B{Entrée positive fraîche ?}
+    B -- Oui --> C[Retour cache]
+    B -- Non --> D{Entrée négative fraîche ?}
+    D -- Oui --> E[Relance ResourceNotFound / ParseError]
+    D -- Non --> F[Fetch upstream]
+    F --> G{Parsing OK ?}
+    G -- Oui --> H[Écrit cache positif]
+    H --> I[Réponse]
+    G -- Non --> J[Écrit negative cache]
+    J --> K{Ancien cache stale utilisable ?}
+    K -- Oui --> L[Retour stale + warning]
+    K -- Non --> M[Erreur]
 ```
 
-## 2. Rôle des modules
+## Search vs search/resolve
 
-### `app/main.py`
+### `/search`
+- interroge plusieurs pages de recherche Manga News selon `kind` ;
+- déduplique les URLs ;
+- trie par score ;
+- enrichit ensuite chaque résultat retenu avec `title_vo` et `translated_title` si possible.
 
-Responsabilités :
-- déclare les routes FastAPI ;
-- initialise l'application ;
-- branche l'auth, le service, le cache et le fetcher ;
-- transforme les objets de réponse en JSON ;
-- gère `ETag` / `If-None-Match` ;
-- expose Swagger / ReDoc / OpenAPI.
+### `/search/resolve`
+- s'appuie sur `/search` ;
+- choisit un `best` ;
+- calcule une confiance (`high`, `medium`, `low`, `none`).
 
-### `app/config.py`
+## Projections série / volume
 
-Responsabilités :
-- charge les variables d'environnement ;
-- fournit les réglages à l'application ;
-- résout un chemin SQLite inscriptible.
+Le service supporte deux mécanismes :
+- `blocks=` : blocs métier prédéfinis ;
+- `fields=` : chemins précis ;
+- `include_raw_sections=true` : sections brutes du HTML déjà nettoyées.
 
-### `app/auth.py`
+C'est utile pour :
+- les UI légères ;
+- les prompts d'IA ;
+- limiter la taille des payloads ;
+- éviter des post-traitements inutiles côté client.
 
-Responsabilités :
-- vérifie `Authorization: Bearer <token>` si `API_TOKEN` est défini.
+## Particularités utiles
 
-### `app/http.py`
+### Titres alternatifs
+- `title_vo`
+- `translated_title`
 
-Responsabilités :
-- exécute les appels HTTP vers Manga News ;
-- applique le `User-Agent` et le timeout ;
-- normalise les erreurs amont.
+Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit.
 
-### `app/cache.py`
+### Normalisation volume
+Les parseurs produisent des champs standardisés pour les volumes :
+- `number`
+- `number_int`
+- `edition_label`
+- `is_special`
+- `is_one_shot`
 
-Responsabilités :
-- stocke les réponses dans SQLite ;
-- gère les dates d'expiration et la fenêtre de stale cache.
+Ces champs se retrouvent sur :
+- les fiches volume ;
+- les items d'éditions série ;
+- les items du planning.
 
-### `app/manga_news/service.py`
+## Debug HTML
 
-Responsabilités :
-- orchestre fetch + cache + parse ;
-- expose des méthodes métier (`search`, `get_series`, `get_volume`, etc.) ;
-- gère la projection `blocks` / `fields` ;
-- construit l'enveloppe de réponse.
+Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, un `ParseError` sur une route cacheable peut sauver :
+- un dump `.html` de la page upstream ;
+- un fichier `.json` de métadonnées.
 
-### `app/manga_news/parsers.py`
+Le chemin est injecté dans le message d'erreur :
 
-Responsabilités :
-- convertit le HTML public Manga News en structures normalisées ;
-- isole la logique la plus fragile du projet.
-
-### `app/models.py`
-
-Responsabilités :
-- déclare les modèles Pydantic ;
-- pilote le schéma OpenAPI ;
-- stabilise la forme JSON côté client.
-
-## 3. Cycle d'une requête
-
-### Cas simple : `GET /series/{slug}`
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant A as FastAPI
-    participant S as MangaNewsService
-    participant K as SQLiteCache
-    participant H as AsyncFetcher
-    participant M as Manga News
-    participant P as Parser
-
-    C->>A: GET /series/{slug}
-    A->>S: get_series(...)
-    S->>K: cache.get(key)
-    alt cache frais
-        K-->>S: payload en cache
-    else cache absent ou expiré
-        S->>H: get_text(url)
-        H->>M: HTTP GET
-        M-->>H: HTML
-        H-->>S: texte + URL finale
-        S->>P: parse_series_page(html)
-        P-->>S: données normalisées
-        S->>K: cache.set(...)
-    end
-    S-->>A: Envelope
-    A-->>C: JSON + ETag
+```text
+Debug HTML saved to /tmp/manga-news-debug-html/...
 ```
 
-## 4. Points de fragilité réels
+## Ce qui existe dans le code mais n'est pas encore une vraie feature publique
 
-Les zones réellement fragiles sont :
-- les sélecteurs / repères HTML utilisés par les parsers ;
-- la qualité et la cohérence des pages Manga News ;
-- les résultats de recherche publics ;
-- le flux RSS et sa structure.
+Présent dans la config ou dans des modules, mais non exposé comme contrat public aujourd'hui :
+- admin API publique ;
+- rate limiting branché aux routes ;
+- format de logs JSON activé depuis la config runtime ;
+- retries/backoff pilotés par les variables `REQUEST_MAX_RETRIES` / `REQUEST_BACKOFF_SECONDS`.
 
-Les zones plutôt stables sont :
-- l'enveloppe JSON de sortie ;
-- les routes FastAPI ;
-- l'usage du cache et des ETags.
-
-## 5. Pourquoi cette séparation est saine
-
-Cette architecture sépare clairement :
-- le contrat HTTP (`main.py`) ;
-- l'accès réseau (`http.py`) ;
-- le stockage local (`cache.py`) ;
-- la logique métier (`service.py`) ;
-- la fragilité HTML (`parsers.py`).
-
-Résultat :
-- tu peux corriger un parseur sans casser tout le reste ;
-- tu peux auditer facilement ce qui relève du contrat public ;
-- tu peux brancher une autre source plus tard en gardant la même enveloppe JSON.
-
-## 6. Ce qu'un nouveau développeur doit lire en premier
-
-Ordre conseillé :
-1. `README.md`
-2. `docs/API_INTEGRATION.md`
-3. `app/main.py`
-4. `app/manga_news/service.py`
-5. `app/manga_news/parsers.py`
-6. les tests dans `tests/`
+Le documente comme tel est plus honnête que de faire semblant que tout est déjà actif.

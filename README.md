@@ -1,39 +1,67 @@
 # Manga News Private API
 
-API privée, légère et auto-hébergeable pour interroger Manga News, normaliser les données utiles, et les servir en JSON avec cache SQLite, ETag et authentification Bearer optionnelle.
+API privée et auto-hébergeable pour interroger **Manga News**, normaliser les réponses utiles, puis les exposer en JSON avec cache SQLite et ETag.
 
-## Fonctionnalités réellement disponibles
+Le projet est pensé pour deux usages :
+- **un outil personnel** qui a besoin d'une source JSON stable au-dessus du HTML de Manga News ;
+- **une autre IA ou un autre développeur** qui doit pouvoir démarrer rapidement sans relire tout le code.
 
-- recherche de séries et de volumes via `/search` ;
-- résolution directe du meilleur résultat via `/search/resolve` ;
-- fiches série via slug ou URL ;
-- fiches volume via slug ou URL ;
-- liens liés d'une série ;
-- liste des éditions VF / VO d'une série ;
-- news globales, news de série, news de volume ;
-- planning manga VF / VO avec filtres locaux (éditeur, texte, dates, tri) ;
-- cache SQLite persistant avec fallback sur cache périmé ;
+## Ce que l'API fait réellement
+
+Routes publiques actuellement disponibles :
+- `GET /health`
+- `GET /search`
+- `GET /search/resolve`
+- `GET /series/{slug}`
+- `GET /series/by-url`
+- `GET /series/{slug}/related`
+- `GET /series/by-url/related`
+- `GET /series/{slug}/editions`
+- `GET /series/by-url/editions`
+- `GET /volume/{series_slug}/{volume_slug}`
+- `GET /volume/by-url`
+- `GET /news/global`
+- `GET /news/series/{slug}`
+- `GET /news/volume/{series_slug}/{volume_slug}`
+- `GET /news/volume/by-url`
+- `GET /planning`
+
+Fonctions utiles déjà en place :
+- recherche série / volume ;
+- résolution du meilleur match ;
+- fiches détaillées série et volume ;
+- titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées **et** dans les résultats de recherche quand l'enrichissement réussit ;
+- normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning et les éditions de série ;
+- projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
+- cache SQLite persistant avec stale cache et negative cache ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
-- documentation OpenAPI native (`/docs`, `/redoc`) ;
-- exemples JSON figés et validés dans `docs/examples/`.
+- documentation OpenAPI native via `/docs`, `/redoc`, `/openapi.json` ;
+- exemples JSON versionnés dans `docs/examples/`.
 
-## Ce que cette API ne fait pas
+## Ce que l'API ne fait pas
 
-- pagination multi-pages automatique côté upstream ;
-- watch métier exposé comme endpoint public ;
-- provider multi-sources au-delà de Manga News.
+Important pour éviter les mauvaises hypothèses :
+- **pas** de préfixe `/v1` ;
+- **pas** d'endpoint public de watch / monitoring métier ;
+- **pas** de multi-provider : la source métier est Manga News ;
+- **pas** de pagination métier normalisée dans les réponses ;
+- **pas** d'admin API publique aujourd'hui ;
+- **pas** de recherche dédiée du type `title_vo=...` ou `translated_title=...` : les titres alternatifs sont exposés, pas recherchés séparément.
 
-## Variables d'environnement principales
+## Lecture recommandée de la doc
 
-Voir `.env.example`. Les plus importantes :
+Pour un humain ou une IA, l'ordre utile est :
+1. ce `README.md` ;
+2. [`docs/API_INTEGRATION.md`](docs/API_INTEGRATION.md) ;
+3. [`docs/OPENAPI_AND_AI_USAGE.md`](docs/OPENAPI_AND_AI_USAGE.md) ;
+4. [`docs/examples/README.md`](docs/examples/README.md) et quelques JSON réels ;
+5. [`docs/USE_CASES_AND_RECIPES.md`](docs/USE_CASES_AND_RECIPES.md) ;
+6. [`docs/DEPLOYMENT_AND_OPERATIONS.md`](docs/DEPLOYMENT_AND_OPERATIONS.md) si tu déploies ;
+7. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) si tu veux comprendre les choix internes.
 
-- `API_TOKEN` : si vide, l'API est ouverte ; sinon chaque requête doit envoyer `Authorization: Bearer <token>` ;
-- `DB_PATH` : chemin du cache SQLite ;
-- `CACHE_TTL_*` : TTL par type de ressource ;
-- `SEARCH_SCORE_THRESHOLD` : seuil de matching ;
-- `ENABLE_DOCS` : active ou non `/docs` et `/redoc`.
+## Démarrage rapide
 
-## Démarrage local
+### Local
 
 ```bash
 python -m venv .venv
@@ -42,13 +70,38 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-API disponible ensuite sur `http://localhost:8000` en local direct, ou `http://localhost:8017` via Docker Compose.
+Par défaut, Uvicorn servira l'API sur `http://localhost:8000`.
 
-## Docker Compose
+### Docker Compose
 
 ```bash
 docker compose up -d --build
 ```
+
+Le `docker-compose.yml` expose le conteneur sur `http://localhost:8017`.
+
+## Authentification
+
+Si `API_TOKEN` est vide, l'API est ouverte.
+
+Si `API_TOKEN` est défini, toutes les routes publiques attendent :
+
+```http
+Authorization: Bearer <token>
+```
+
+En cas d'échec, la réponse actuelle est :
+
+```json
+{
+  "detail": {
+    "code": "AUTH_REQUIRED",
+    "detail": "Missing or invalid bearer token."
+  }
+}
+```
+
+Oui, ce format 401 n'est pas identique aux 404/502. La doc le documente tel qu'il est aujourd'hui, sans prétendre qu'il est plus propre qu'il ne l'est.
 
 ## Premiers appels utiles
 
@@ -58,16 +111,23 @@ docker compose up -d --build
 curl http://localhost:8017/health
 ```
 
-### Recherche série
+### Recherche de série
 
 ```bash
-curl "http://localhost:8017/search?q=one%20piece&kind=series&mode=all&limit=5"
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=all" \
+  --data-urlencode "limit=5"
 ```
 
-### Résolution directe
+### Résolution directe du meilleur résultat
 
 ```bash
-curl "http://localhost:8017/search/resolve?q=one%20piece%20tome%2091&kind=volume&limit=10"
+curl --get "http://localhost:8017/search/resolve" \
+  --data-urlencode "q=one piece tome 91" \
+  --data-urlencode "kind=volume" \
+  --data-urlencode "limit=10"
 ```
 
 ### Fiche série
@@ -82,25 +142,28 @@ curl "http://localhost:8017/series/One-piece-Edition-originale"
 curl "http://localhost:8017/volume/One-Piece/vol-91"
 ```
 
-### Planning manga VF
+### Planning VF filtré
 
 ```bash
 curl --get "http://localhost:8017/planning" \
   --data-urlencode "section=manga-vf" \
   --data-urlencode "year=2026" \
   --data-urlencode "month=4" \
-  --data-urlencode "publisher=Glénat"
+  --data-urlencode "publisher=Glénat" \
+  --data-urlencode "sort=date_asc" \
+  --data-urlencode "limit=25"
 ```
 
-### Avec Bearer token
+### Même appel avec token
 
 ```bash
-curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/search?q=one%20piece"
+curl -H "Authorization: Bearer MON_TOKEN" \
+  "http://localhost:8017/search?q=one%20piece"
 ```
 
-## Contrat HTTP
+## Contrat HTTP commun
 
-La plupart des endpoints renvoient une enveloppe commune :
+La plupart des routes renvoient une enveloppe comme celle-ci :
 
 ```json
 {
@@ -119,42 +182,78 @@ La plupart des endpoints renvoient une enveloppe commune :
 }
 ```
 
-Les réponses détaillées série / volume contiennent `title_vo` et `translated_title`.
-Les fiches volume exposent aussi `number`, `number_int`, `edition_label`, `is_special` et `is_one_shot`.
-Les résultats de recherche et de résolution exposent aussi `title_vo` et `translated_title` quand ils sont disponibles.
+Les champs importants :
+- `cached`: la réponse vient du cache local ;
+- `partial`: l'API a servi une entrée stale car l'upstream a échoué ;
+- `warnings`: détails utiles quand `partial=true` ;
+- `fingerprint`: hash métier utilisé pour l'ETag ;
+- `source_url`: page Manga News réellement utilisée.
 
-## Caching côté client
+### Headers utiles
 
-Les réponses incluent :
-
+Sur les routes enveloppées, l'API peut renvoyer :
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
 
-Tu peux renvoyer :
+Tu peux ensuite rejouer la requête avec :
 
 ```http
 If-None-Match: "<fingerprint>"
 ```
 
-Si rien n'a changé, l'API répond `304 Not Modified`.
+Si rien n'a changé, la réponse sera `304 Not Modified`.
 
-## Documentation fournie
+## Projections série / volume
 
-- `docs/API_INTEGRATION.md` : guide d'intégration pour développeur ou IA ;
-- `docs/API_CHANGELOG.md` : changelog du contrat ;
-- `docs/examples/` : exemples JSON validés ;
-- `scripts/validate_contract_and_docs.py` : vérification locale doc + contrat ;
-- `/openapi.json` : schéma généré automatiquement.
+Les routes détail série et volume acceptent :
+- `blocks` : blocs métier prédéfinis ;
+- `fields` : chemins ciblés ;
+- `include_raw_sections=true` : inclut `raw_sections`.
 
-## Vérification locale
+Exemple minimal sur une série :
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,vf.volumes,next_release_date"
+```
+
+Exemple sur un volume :
+
+```bash
+curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
+  --data-urlencode "blocks=identity,release" \
+  --data-urlencode "fields=cover_image"
+```
+
+## Exemples JSON fournis
+
+Voir [`docs/examples/README.md`](docs/examples/README.md).
+
+Les exemples les plus utiles pour démarrer sont :
+- [`docs/examples/search_response_one_piece.json`](docs/examples/search_response_one_piece.json)
+- [`docs/examples/resolve_response_one_piece.json`](docs/examples/resolve_response_one_piece.json)
+- [`docs/examples/series_one_piece.json`](docs/examples/series_one_piece.json)
+- [`docs/examples/volume_one_piece_110.json`](docs/examples/volume_one_piece_110.json)
+- [`docs/examples/planning_example.json`](docs/examples/planning_example.json)
+- [`docs/examples/error_upstream_parse.json`](docs/examples/error_upstream_parse.json)
+
+## Validation locale
+
+Avant de livrer ou consommer l'API :
 
 ```bash
 python scripts/validate_contract_and_docs.py
 pytest
 ```
 
-## Notes de conception
+## Notes honnêtes sur l'état actuel
 
-- L'API repose sur le HTML public et le flux RSS de Manga News. Usage privé recommandé.
-- Le cache réduit les appels réseau et protège les automatisations contre les pannes temporaires.
-- Les parsers sont volontairement basés en priorité sur les libellés textuels visibles, pour rester plus robustes que des sélecteurs CSS très fragiles.
+Quelques variables existent dans la config mais **ne pilotent pas encore les routes publiques actuelles** :
+- `ADMIN_TOKEN`
+- `REQUEST_MAX_RETRIES`
+- `REQUEST_BACKOFF_SECONDS`
+- `DEFAULT_LIMIT`
+- `LOG_FORMAT`
+- `RATE_LIMIT_*`
+
+Elles sont présentes parce que le projet a déjà préparé ces concepts, mais la doc n'en fait pas des features actives tant qu'elles ne sont pas réellement branchées au runtime.

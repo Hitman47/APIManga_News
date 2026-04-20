@@ -9,10 +9,15 @@
   "cache_expires_at": "2026-04-27T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-volume",
+  "fingerprint": "fp-volume-one-piece-91",
   "data": {
     "title": "One Piece Vol.91",
     "series_title": "One Piece",
+    "number": "91",
+    "number_int": 91,
+    "edition_label": null,
+    "is_special": false,
+    "is_one_shot": false,
     "title_vo": "ワンピース",
     "translated_title": "One Piece",
     "summary": "Résumé du volume.",
@@ -41,28 +46,15 @@
       "pages": 208,
       "has_color_pages": true
     },
-    "advisory_age": "8+",
+    "advisory_age": null,
     "publication_date": "2019-07-03",
     "isbn_ean": "9782344037102",
-    "price_code": "6.90",
+    "price_code": "6.90 EUR",
     "cover_image": "https://www.manga-news.com/public/images/series/one-piece-91.jpg",
-    "editorial_score": 16.0,
-    "reader_score": 15.5,
-    "related": {
-      "series": [],
-      "volumes": [],
-      "anime": [],
-      "drama": [],
-      "dossiers": [],
-      "univers": [],
-      "external": [],
-      "misc": []
-    },
-    "raw_sections": {
-      "resume": [
-        "Résumé du volume."
-      ]
-    },
+    "editorial_score": null,
+    "reader_score": null,
+    "related": null,
+    "raw_sections": null,
     "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-91"
   }
 }

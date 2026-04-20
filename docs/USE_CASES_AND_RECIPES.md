@@ -1,81 +1,151 @@
 # Cas d'usage et recettes
 
-Ce document donne des workflows concrets, sans théorie inutile.
+Des recettes courtes, concrètes, reproductibles.
 
-## 1. Trouver une série à partir d'un titre libre
-
-Objectif : l'utilisateur tape `one piece`, tu veux une fiche série.
+## 1. Recherche simple d'une série
 
 ```bash
-curl --get "http://localhost:8017/search/resolve"   --data-urlencode "q=one piece"   --data-urlencode "kind=series"
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=all" \
+  --data-urlencode "limit=5"
 ```
 
-Puis :
+À lire dans la réponse :
+- `data[].title`
+- `data[].slug`
+- `data[].title_vo`
+- `data[].translated_title`
+
+## 2. Résoudre directement le meilleur candidat
+
+```bash
+curl --get "http://localhost:8017/search/resolve" \
+  --data-urlencode "q=one piece tome 110" \
+  --data-urlencode "kind=volume" \
+  --data-urlencode "limit=10"
+```
+
+À lire :
+- `data.best.series_slug`
+- `data.best.volume_slug`
+- `data.confidence`
+
+## 3. Charger une fiche série complète
 
 ```bash
 curl "http://localhost:8017/series/One-piece-Edition-originale"
 ```
 
-Payloads d'appui :
-- [`examples/search_resolve_series_one_piece.json`](examples/search_resolve_series_one_piece.json)
-- [`examples/series_one_piece.json`](examples/series_one_piece.json)
+Champs utiles :
+- `title`
+- `title_vo`
+- `translated_title`
+- `publisher_fr`
+- `vf`
+- `vo`
+- `stats`
 
-## 2. Trouver un volume précis
-
-Objectif : récupérer les infos du tome 110.
+## 4. Charger une fiche série légère
 
 ```bash
-curl --get "http://localhost:8017/search/resolve"   --data-urlencode "q=one piece tome 110"   --data-urlencode "kind=volume"
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,title_vo,translated_title,cover_image,vf.volumes,next_release_date"
 ```
 
-Puis :
+## 5. Charger une fiche volume complète
 
 ```bash
 curl "http://localhost:8017/volume/One-Piece/vol-110"
 ```
 
-Payload d'appui : [`examples/volume_one_piece_110.json`](examples/volume_one_piece_110.json)
+Champs utiles :
+- `title`
+- `number`
+- `number_int`
+- `edition_label`
+- `is_special`
+- `is_one_shot`
+- `publication_date`
+- `isbn_ean`
+- `title_vo`
+- `translated_title`
 
-## 3. Charger une fiche minimale pour une UI légère
-
-Exemple série :
+## 6. Charger une fiche volume légère
 
 ```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale"   --data-urlencode "fields=title,cover_image,vf.volumes,next_release_date"
+curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
+  --data-urlencode "blocks=identity,release" \
+  --data-urlencode "fields=cover_image"
 ```
 
-Exemple volume :
+## 7. Utiliser une URL Manga News directe
+
+### Série
 
 ```bash
-curl --get "http://localhost:8017/volume/One-Piece/vol-110"   --data-urlencode "fields=title,publication_date,isbn_ean,cover_image"
+curl --get "http://localhost:8017/series/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
 ```
 
-## 4. Afficher les éditions VF / VO d'une série
+### Volume
+
+```bash
+curl --get "http://localhost:8017/volume/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-110"
+```
+
+### News volume by-url
+
+```bash
+curl --get "http://localhost:8017/news/volume/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-110" \
+  --data-urlencode "limit=10"
+```
+
+## 8. Récupérer les liens liés à une série
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/related"
+```
+
+## 9. Lister les éditions VF / VO d'une série
 
 ```bash
 curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
 ```
 
-Payload d'appui : [`examples/series_editions_one_piece_all.json`](examples/series_editions_one_piece_all.json)
-
-## 5. Construire une page “news liées à la série”
+## 10. Lire les news globales
 
 ```bash
-curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=20"
+curl "http://localhost:8017/news/global?limit=5"
 ```
 
-Pour une intégration plus simple, commence souvent par le flux global :
-- [`examples/news_global_one_piece_sample.json`](examples/news_global_one_piece_sample.json)
-
-## 6. Construire une page “sorties du mois”
+## 11. Lire les news d'une série
 
 ```bash
-curl --get "http://localhost:8017/planning"   --data-urlencode "section=manga-vf"   --data-urlencode "year=2026"   --data-urlencode "month=4"   --data-urlencode "sort=date_asc"   --data-urlencode "limit=100"
+curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
 ```
 
-Payload d'appui : [`examples/planning_manga_vf_april_2026.json`](examples/planning_manga_vf_april_2026.json)
+## 12. Lire le planning VF avec filtres
 
-## 7. Éviter de télécharger la même chose en boucle
+```bash
+curl --get "http://localhost:8017/planning" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "year=2026" \
+  --data-urlencode "month=4" \
+  --data-urlencode "publisher=Glénat" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "date_from=2026-04-01" \
+  --data-urlencode "date_to=2026-04-30" \
+  --data-urlencode "sort=date_asc" \
+  --data-urlencode "limit=25"
+```
+
+Rappel important : `total_items` est calculé après filtrage local sur la page chargée.
+
+## 13. Éviter de refetch la même fiche
 
 Premier appel :
 
@@ -83,47 +153,57 @@ Premier appel :
 curl -i "http://localhost:8017/series/One-piece-Edition-originale"
 ```
 
-Deuxième appel :
+Deuxième appel avec ETag :
 
 ```bash
-curl -i "http://localhost:8017/series/One-piece-Edition-originale"   -H 'If-None-Match: "<fingerprint>"'
+curl -i "http://localhost:8017/series/One-piece-Edition-originale" \
+  -H 'If-None-Match: "<fingerprint>"'
 ```
 
-Si tu obtiens `304`, tu gardes ta copie locale.
+## 14. Exploiter les titres alternatifs
 
-## 8. Cas d'usage spécial : donner la doc à une autre IA
+Cas pratique : tu affiches à la fois le titre principal et le titre VO.
 
-Ordre recommandé :
-1. README ;
-2. API integration ;
-3. OpenAPI ;
-4. 3 ou 4 JSON de `docs/examples/` ;
-5. seulement ensuite les appels réels.
+```bash
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=black night parade" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=all"
+```
 
-Cette approche limite fortement les hallucinations de routes ou de champs.
+Puis affiche :
+- `title`
+- `title_vo`
+- `translated_title`
 
-## 9. Mauvaises pratiques à éviter
+## 15. Débugger un parse upstream cassé
+
+Active dans l'environnement :
+
+```env
+DEBUG_CAPTURE_HTML_ON_ERROR=true
+DEBUG_HTML_DUMP_DIR=/tmp/manga-news-debug-html
+```
+
+Puis rejoue la requête qui casse. Le détail de l'erreur peut inclure :
+
+```text
+Debug HTML saved to /tmp/manga-news-debug-html/...
+```
+
+## 16. Mauvaises pratiques à éviter
 
 ### Mauvaise pratique 1
-
-Utiliser `/search` avec `mode=all` pour tous les appels automatisés, alors que tu veux juste un meilleur résultat.
-
-Mieux : `/search/resolve`.
+Supposer que `title_vo` ou `translated_title` seront toujours présents.
 
 ### Mauvaise pratique 2
-
-Tirer tout le payload série alors que ton écran n'utilise que `title` et `cover_image`.
-
-Mieux : `fields=title,cover_image`.
+Supposer que `search/resolve` renvoie toujours un `best`.
 
 ### Mauvaise pratique 3
-
-Supposer qu'un champ sera toujours rempli.
-
-Mieux : traiter tous les champs comme potentiellement absents ou `null`.
+Supposer que `planning.total_items` représente tout Manga News.
 
 ### Mauvaise pratique 4
+Coder `/v1/...` alors que le contrat réel est sans version.
 
-Documenter ou coder des routes absentes de `/openapi.json`.
-
-Mieux : toujours repartir de l'OpenAPI réelle.
+### Mauvaise pratique 5
+Traiter `partial=true` comme une donnée fraîche.

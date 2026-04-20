@@ -1,107 +1,93 @@
-# OpenAPI, Swagger et usage par une IA
+# OpenAPI et usage par une IA
 
-Ce document explique comment exploiter la doc embarquée sans lire tout le code.
+Cette API est utilisable par un humain, mais elle est aussi pensée pour être consommée proprement par une autre IA. Ce document explique comment éviter les erreurs classiques.
 
-## 1. Endpoints utiles
+## 1. Sources de vérité à lire dans le bon ordre
 
-- `GET /docs` : interface Swagger
-- `GET /redoc` : interface ReDoc
-- `GET /openapi.json` : contrat OpenAPI brut
+Ordre recommandé :
+1. `README.md`
+2. `docs/API_INTEGRATION.md`
+3. `/openapi.json`
+4. `docs/examples/`
+5. appels réels
 
-Si `ENABLE_DOCS=false`, `/docs` et `/redoc` disparaissent, mais `/openapi.json` reste le meilleur point d'entrée pour une intégration automatique.
+Règle simple :
+- si la doc narrative et l'OpenAPI semblent diverger, **crois l'OpenAPI et le code**, pas un souvenir de doc.
 
-## 2. Pourquoi `/openapi.json` est important
+## 2. Ce qu'une IA ne doit pas inventer
 
-C'est la **source de vérité machine-readable** du projet.
+Une IA consommatrice ne doit pas inventer :
+- de préfixe `/v1` ;
+- des routes admin ;
+- une pagination normalisée absente ;
+- des champs non décrits dans les modèles ;
+- une recherche dédiée par `title_vo=` ou `translated_title=` ;
+- une séparation publique `API_TOKEN` / `ADMIN_TOKEN` qui n'existe pas côté routes.
 
-Elle contient :
-- la liste réelle des routes ;
-- les paramètres acceptés ;
-- les modèles de réponse ;
-- les tags ;
-- les résumés et descriptions ;
-- des exemples de réponses pour les routes principales.
+## 3. Ce qu'une IA peut supposer sans trop de risque
 
-En clair :
-- un humain peut démarrer avec `/docs` ;
-- un agent ou une IA doit commencer par `/openapi.json`.
+Elle peut supposer que :
+- les routes publiques décrites dans `/openapi.json` existent ;
+- la plupart des réponses métier utilisent une enveloppe stable ;
+- `title_vo` et `translated_title` peuvent apparaître dans les recherches **et** les fiches détaillées ;
+- les champs peuvent être absents ou `null` ;
+- `ETag` et `X-Data-Fingerprint` sont présents sur les réponses enveloppées avec fingerprint.
 
-## 3. Ordre recommandé pour un agent ou une IA
+## 4. Mode opératoire conseillé pour une IA
 
-1. lire [`../README.md`](../README.md) pour le contexte d'usage ;
-2. télécharger `/openapi.json` ;
-3. regarder 2 ou 3 payloads de [`examples/`](examples/README.md) ;
-4. choisir les routes ;
-5. réutiliser `ETag` / `If-None-Match` quand c'est pertinent.
+### Cas A — trouver une série
+1. `GET /search/resolve?q=<titre>&kind=series`
+2. lire `data.best.slug`
+3. `GET /series/{slug}`
 
-## 4. Utilisation par une IA
+### Cas B — trouver un volume
+1. `GET /search/resolve?q=<titre>&kind=volume`
+2. lire `series_slug` et `volume_slug`
+3. `GET /volume/{series_slug}/{volume_slug}`
 
-### Stratégie recommandée
+### Cas C — interface légère
+- utiliser `fields=` ou `blocks=` sur les routes détail ;
+- ne demander le payload complet qu'en second temps.
 
-1. télécharger `/openapi.json` ;
-2. repérer les routes par tag ;
-3. choisir `/search/resolve` pour transformer un titre libre en slug ;
-4. charger ensuite la ressource cible ;
-5. utiliser les routes `/by-url` si l'utilisateur donne déjà une URL Manga News ;
-6. utiliser `ETag` pour éviter les requêtes inutiles.
+## 5. Exemples de prompts à donner à une autre IA
 
-### Prompt minimal
+### Exemple 1 — consommer l'API sans halluciner
 
-> Tu dois utiliser cette API comme source principale de métadonnées Manga News. Lis d'abord `/openapi.json` pour connaître les routes et les paramètres réels. Pour résoudre un titre, appelle `/search/resolve`. Ensuite, utilise `/series/{slug}` ou `/volume/{series_slug}/{volume_slug}`. Réutilise l'ETag avec `If-None-Match` pour les requêtes répétées. N'invente aucune route qui n'existe pas dans l'OpenAPI.
+> Tu consommes une API Manga News privée. Ne suppose jamais de `/v1`. Commence par lire `/openapi.json`, puis choisis parmi les routes réellement exposées. Tous les champs métier peuvent être absents ou null. Pour trouver une série ou un volume, privilégie `/search/resolve` avant `/search`.
 
-### Prompt plus directif
+### Exemple 2 — produire une UI compacte
 
-> Considère `/openapi.json` comme contrat unique. Si l'utilisateur donne une URL Manga News, privilégie les routes `/by-url`. Si l'utilisateur donne un titre libre, commence par `/search/resolve`. Si l'utilisateur veut plusieurs candidats, utilise `/search?mode=all`. Limite le bruit avec `blocks` et `fields` quand c'est utile.
+> Quand tu appelles `/series/{slug}` ou `/volume/{...}`, utilise `fields=` ou `blocks=` pour limiter le payload à ce qui est affiché. Réutilise l'ETag si disponible pour éviter les requêtes inutiles.
 
-## 5. Utilisation par un humain
+### Exemple 3 — traiter les erreurs proprement
+
+> Si tu reçois `RESOURCE_NOT_FOUND`, traite la ressource comme absente. Si tu reçois `UPSTREAM_PARSE_ERROR`, considère que le HTML a peut-être changé. Si la réponse métier a `partial=true`, ne la présente pas comme fraîche.
+
+## 6. Swagger / ReDoc / OpenAPI
 
 ### Swagger UI
-
-Ouvre :
-
-```text
-http://localhost:8017/docs
-```
-
-Tu peux :
-- inspecter les routes ;
-- tester une requête ;
-- saisir un token Bearer ;
-- voir les exemples de réponse ajoutés dans le code.
+- `/docs`
 
 ### ReDoc
+- `/redoc`
 
-Ouvre :
+### Schéma brut
+- `/openapi.json`
 
-```text
-http://localhost:8017/redoc
-```
+Utilisation conseillée :
+- Swagger pour tester vite à la main ;
+- OpenAPI brut pour générer un client ou guider un agent ;
+- `docs/examples/` pour montrer des payloads réalistes sans devoir lancer l'API.
 
-ReDoc est plus agréable pour la lecture continue de la doc.
+## 7. Exemples JSON recommandés pour une IA
 
-## 6. Ce qui a été enrichi côté code
-
-L'OpenAPI embarquée expose :
-- des tags métier (`health`, `search`, `series`, `volume`, `news`, `planning`) ;
-- des résumés ;
-- des descriptions ;
-- des exemples de réponse sur les endpoints clés ;
-- des descriptions de paramètres.
-
-Ça ne change pas la logique métier. Ça rend seulement l'API beaucoup plus utilisable depuis :
-- Swagger ;
-- ReDoc ;
-- un générateur client ;
-- un agent LLM.
-
-## 7. Exemples figés à montrer à une IA
-
-Les meilleurs fichiers pour démarrer sont généralement :
-- [`examples/search_resolve_series_one_piece.json`](examples/search_resolve_series_one_piece.json)
+Les plus utiles sont :
+- [`examples/search_response_one_piece.json`](examples/search_response_one_piece.json)
+- [`examples/resolve_response_one_piece.json`](examples/resolve_response_one_piece.json)
 - [`examples/series_one_piece.json`](examples/series_one_piece.json)
 - [`examples/volume_one_piece_110.json`](examples/volume_one_piece_110.json)
-- [`examples/planning_manga_vf_april_2026.json`](examples/planning_manga_vf_april_2026.json)
-- [`examples/error_resource_not_found.json`](examples/error_resource_not_found.json)
+- [`examples/planning_example.json`](examples/planning_example.json)
+- [`examples/error_upstream_parse.json`](examples/error_upstream_parse.json)
 
 ## 8. Validation locale du contrat documentaire
 
@@ -111,16 +97,8 @@ Commande :
 python scripts/validate_contract_and_docs.py
 ```
 
-Ce contrôle vérifie :
-- la génération de l'OpenAPI ;
-- les routes clés ;
-- la validité des exemples JSON ;
-- les liens Markdown locaux.
-
-## 9. Bonnes pratiques
-
-- ne te base pas sur le README seul si tu peux lire l'OpenAPI ;
-- ne documente jamais des routes absentes de `/openapi.json` ;
-- considère les exemples comme illustratifs, pas comme un contrat de contenu exhaustif ;
-- pense à l'authentification avant de conclure qu'une route ne marche pas ;
-- si un point de doc contredit l'OpenAPI, crois l'OpenAPI.
+Cette validation vérifie :
+- que l'OpenAPI se génère ;
+- que les routes clés existent ;
+- que les liens Markdown locaux sont valides ;
+- que les exemples JSON canoniques correspondent aux modèles Pydantic.

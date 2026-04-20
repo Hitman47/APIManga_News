@@ -9,8 +9,7 @@
   "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-series-editions-one-piece",
-  "pagination": null,
+  "fingerprint": "fp-series-editions-all",
   "data": {
     "title": "One Piece",
     "series_slug": "One-piece-Edition-originale",
@@ -42,31 +41,12 @@
           "edition_label": null,
           "is_special": false,
           "is_one_shot": false,
-          "publication_date": "2026-04-08",
-          "cover_image": null
+          "publication_date": "2026-02-04",
+          "cover_image": "https://www.manga-news.com/public/images/series/one-piece-111.jpg"
         }
       ]
     },
-    "vo": {
-      "edition": "vo",
-      "source_url": "https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale",
-      "total": 1,
-      "items": [
-        {
-          "title": "One Piece Vol.114",
-          "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-114",
-          "series_slug": "One-Piece",
-          "volume_slug": "vol-114",
-          "number": "114",
-          "number_int": 114,
-          "edition_label": null,
-          "is_special": false,
-          "is_one_shot": false,
-          "publication_date": null,
-          "cover_image": null
-        }
-      ]
-    },
-    "source_url": "https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale"
+    "vo": null,
+    "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
   }
 }

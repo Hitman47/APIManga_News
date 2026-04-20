@@ -35,7 +35,12 @@
         "summary": "Le retour des Mugiwara dans un nouveau volume.",
         "featured": true,
         "series_slug": "One-Piece",
-        "volume_slug": "vol-110"
+        "volume_slug": "vol-110",
+        "number": "110",
+        "number_int": 110,
+        "edition_label": null,
+        "is_special": false,
+        "is_one_shot": false
       }
     ]
   }

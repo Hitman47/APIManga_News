@@ -1,20 +1,36 @@
-# API changelog
+# Changelog du contrat API
 
-## 2026-04-20
+Ce changelog suit le **contrat consommateur** : routes, formes de réponses, champs exposés, doc d'intégration. Il ne cherche pas à lister chaque refactor interne.
 
-- Added validated `docs/examples/` JSON payloads for developers and AI integrations.
-- Added contract/doc validation tooling: `app/contract_validation.py` and `scripts/validate_contract_and_docs.py`.
-- Search and resolve results now expose `title_vo` and `translated_title` when available.
-- Documentation was aligned with the current unversioned routes.
+## 2026-04-20 — passe de documentation complète
 
-## Compatibility note
+- Reprise complète de la documentation pour la réaligner sur le code réellement présent dans le projet.
+- Clarification explicite qu'il n'existe **pas** de préfixe `/v1`.
+- Clarification des routes réellement publiques et de leurs limites.
+- Clarification des variables réellement actives vs. présentes mais non branchées au runtime public.
+- Documentation détaillée de `title_vo` / `translated_title` sur les fiches détaillées et dans les recherches enrichies.
+- Documentation détaillée de la normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`.
+- Nettoyage des exemples JSON pour supprimer les artefacts de doc qui n'appartenaient pas au contrat réel.
 
-The current contract is intentionally unversioned. Consumers should rely on the changelog plus the generated OpenAPI schema instead of guessing `/v1` style prefixes.
+## 2026-04-20 — enrichissement recherche et volume
 
-## 2026-04-20
+- Les résultats de recherche et de résolution exposent `title_vo` et `translated_title` quand l'enrichissement de fiche détaillée réussit.
+- Le contrat volume détaillé expose `number`, `number_int`, `edition_label`, `is_special` et `is_one_shot`.
+- Le negative cache évite de refetch immédiatement une page cassée ou absente sur les routes cacheables.
+- Les `UPSTREAM_PARSE_ERROR` peuvent inclure le chemin du dump HTML quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`.
 
-- Fixed the detailed volume contract so `number`, `number_int`, `edition_label`, `is_special`, and `is_one_shot` are now actually present in the runtime models and responses.
-- Fixed negative-cache reuse for parse errors on cached endpoints, preventing repeated identical upstream fetches while the negative cache entry is still fresh.
-- Fixed debug HTML dumping on parse errors so the raised `UPSTREAM_PARSE_ERROR` detail includes the saved dump path when `DEBUG_CAPTURE_HTML_ON_ERROR=true`.
-- Aligned planning and series-edition item models with the normalized volume metadata already produced by the parsers.
+## 2026-04-20 — outillage de contrat
 
+- Ajout d'exemples JSON validés dans `docs/examples/`.
+- Ajout de `app/contract_validation.py`.
+- Ajout de `scripts/validate_contract_and_docs.py`.
+- Ajout de tests de cohérence doc/contrat.
+
+## Note de compatibilité
+
+Le contrat public actuel est **non versionné**.
+
+Recommandation pour les consommateurs :
+- ne jamais inventer `/v1` ;
+- repartir de `/openapi.json` pour les routes ;
+- utiliser ce changelog pour repérer les changements documentaires ou contractuels visibles.

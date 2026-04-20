@@ -10,13 +10,6 @@
   "partial": false,
   "warnings": [],
   "fingerprint": "fp-planning-april-2026",
-  "pagination": {
-    "page": 1,
-    "limit": 25,
-    "returned": 2,
-    "total": 2,
-    "has_more": false
-  },
   "data": {
     "section": "manga-vf",
     "year": 2026,
@@ -50,21 +43,21 @@
         "is_one_shot": false
       },
       {
-        "title": "Kagurabachi Vol.2",
-        "url": "https://www.manga-news.com/index.php/manga/Kagurabachi/vol-2",
-        "release_date": "2026-04-03",
+        "title": "One Piece Magazine #18",
+        "url": "https://www.manga-news.com/index.php/manga/One-Piece-Magazine/vol-18",
+        "release_date": "2026-04-29",
         "authors": [
-          "Takeru HOKAZONO"
+          "Eiichirô ODA"
         ],
-        "publisher": "Kana",
-        "summary": "Chihiro poursuit sa traque.",
+        "publisher": "Glénat",
+        "summary": "Magazine complémentaire autour de l'univers One Piece.",
         "featured": false,
-        "series_slug": "Kagurabachi",
-        "volume_slug": "vol-2",
-        "number": "2",
-        "number_int": 2,
-        "edition_label": null,
-        "is_special": false,
+        "series_slug": "One-Piece-Magazine",
+        "volume_slug": "vol-18",
+        "number": "18",
+        "number_int": 18,
+        "edition_label": "Magazine",
+        "is_special": true,
         "is_one_shot": false
       }
     ]
