@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     manga_news_base_url: str = Field(default='https://www.manga-news.com', alias='MANGA_NEWS_BASE_URL')
     user_agent: str = Field(default='MangaNewsPrivateAPI/0.1 (+private-selfhosted)', alias='USER_AGENT')
     api_token: str | None = Field(default=None, alias='API_TOKEN')
+    admin_token: str | None = Field(default=None, alias='ADMIN_TOKEN')
     db_path: Path = Field(default=Path('/data/cache.sqlite3'), alias='DB_PATH')
     request_timeout_seconds: float = Field(default=20.0, alias='REQUEST_TIMEOUT_SECONDS')
     request_max_retries: int = Field(default=2, alias='REQUEST_MAX_RETRIES')
@@ -30,6 +31,13 @@ class Settings(BaseSettings):
     default_limit: int = Field(default=10, alias='DEFAULT_LIMIT')
     max_limit: int = Field(default=50, alias='MAX_LIMIT')
     enable_docs: bool = Field(default=True, alias='ENABLE_DOCS')
+    enable_legacy_routes: bool = Field(default=False, alias='ENABLE_LEGACY_ROUTES')
+    rate_limit_enabled: bool = Field(default=False, alias='RATE_LIMIT_ENABLED')
+    rate_limit_max_requests: int = Field(default=60, alias='RATE_LIMIT_MAX_REQUESTS')
+    rate_limit_window_seconds: int = Field(default=60, alias='RATE_LIMIT_WINDOW_SECONDS')
+    rate_limit_scope: str = Field(default='ip_or_token', alias='RATE_LIMIT_SCOPE')
+    rate_limit_include_admin: bool = Field(default=False, alias='RATE_LIMIT_INCLUDE_ADMIN')
+    trust_x_forwarded_for: bool = Field(default=False, alias='TRUST_X_FORWARDED_FOR')
 
     @property
     def docs_url(self) -> str | None:
@@ -38,6 +46,7 @@ class Settings(BaseSettings):
     @property
     def redoc_url(self) -> str | None:
         return '/redoc' if self.enable_docs else None
+
 
 
 def _resolve_writable_db_path(db_path: Path) -> Path:

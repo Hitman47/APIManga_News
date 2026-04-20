@@ -1,44 +1,39 @@
-# API Integration Guide
+# Guide d’intégration API Manga News
 
-This guide is for another project, service, or AI agent that needs to consume the API without reading the whole codebase.
+Ce guide décrit le contrat utile pour un client externe, sans avoir à relire tout le code.
 
-## Goal
+## Contrat à utiliser
 
-This API wraps public Manga News pages and exposes normalized JSON for:
-- search
-- title resolution
-- direct volume lookup by series + number
-- series details
-- volume details
-- related links
-- editions lists
-- global / series / volume news
-- release planning
+Utilise **uniquement** les routes `/v1/...`.
 
-## Base URL
+Les anciennes routes sans préfixe existent seulement en **mode compatibilité** et sont **désactivées par défaut**.
+Elles ne doivent plus être utilisées pour une nouvelle intégration.
 
-Prefer the versioned contract for all new consumers.
+Base URL typiques :
+- même réseau Docker : `http://manga-news-api:8000/v1`
+- machine hôte : `http://localhost:8017/v1`
+- LAN : `http://<ip-hote>:8017/v1`
 
-Choose the right base URL depending on where the caller runs:
-- same Docker network: `http://manga-news-api:8000`
-- host machine: `http://localhost:8017`
-- remote LAN call: `http://<host-ip>:8017`
+## Authentification
 
-Examples below use `/v1/...`, but legacy unversioned routes still exist.
-
-## Authentication
-
-If `API_TOKEN` is configured, every request must include:
+### Lecture
+Si `API_TOKEN` est défini :
 
 ```http
-Authorization: Bearer <token>
+Authorization: Bearer <api_token>
 ```
 
-If `API_TOKEN` is empty, the API is open on the configured network.
+### Administration
+Les endpoints admin utilisent `ADMIN_TOKEN`.
+Si `ADMIN_TOKEN` est vide, l’API retombe sur `API_TOKEN`.
 
-## Common response envelope
+```http
+Authorization: Bearer <admin_token>
+```
 
-Most endpoints return the same envelope:
+## Enveloppe de réponse standard
+
+La plupart des endpoints renvoient :
 
 ```json
 {
@@ -49,162 +44,220 @@ Most endpoints return the same envelope:
   "source_url": "https://www.manga-news.com/...",
   "cached": false,
   "fetched_at": "2026-04-20T12:00:00+00:00",
-  "cache_expires_at": "2026-04-21T12:00:00+00:00",
+  "cache_expires_at": "2026-04-20T18:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "sha256-like-hash",
+  "fingerprint": "...",
+  "pagination": null,
   "data": {}
 }
 ```
 
-## Response headers useful for clients
+## Headers utiles
 
-Responses may include:
+Les réponses peuvent inclure :
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
 - `X-Cache-Status: MISS|HIT|STALE`
-- `Vary: Authorization, If-None-Match`
 - `X-Request-ID: <request-id>`
+- `Vary: Authorization, If-None-Match`
 
-### Conditional GET
+### Revalidation conditionnelle
 
-Clients should reuse the ETag:
+Réutilise l’ETag :
 
 ```http
 If-None-Match: "<fingerprint>"
 ```
 
-If nothing changed, the API returns `304 Not Modified` with no body.
+Si rien n’a changé, l’API renvoie `304 Not Modified`.
+Les weak ETag sont aussi acceptés.
 
-Weak validators are also accepted by the API implementation.
+## Pagination structurée
 
-## Best endpoint for automated title resolution
-
-Use `/search/resolve` instead of `/search` when you want one best result directly. Volume search results also expose a normalized `number` field when a volume number can be inferred.
-
-Example:
-
-```http
-GET /v1/search/resolve?q=one%20piece&kind=series
-```
-
-Response shape:
+Les endpoints liste renvoient un bloc `pagination` :
 
 ```json
 {
-  "data": {
-    "query": "one piece",
-    "kind_requested": "series",
-    "confidence": "high",
-    "best": {
-      "title": "One Piece",
-      "url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
-      "kind": "series",
-      "score": 98,
-      "slug": "One-piece-Edition-originale"
-    },
-    "candidates": []
+  "pagination": {
+    "page": 2,
+    "limit": 10,
+    "returned": 10,
+    "total": 17,
+    "has_more": false,
+    "next_page": null,
+    "prev_page": 1
   }
 }
 ```
 
-### Confidence meaning
-- `high`: strong match, generally safe to use directly
-- `medium`: probably correct, but the caller may want to log it
-- `low`: weak match, caller should confirm
-- `none`: no result
+Endpoints concernés :
+- `GET /search`
+- `GET /news/global`
+- `GET /news/series/{slug}`
+- `GET /news/volume/{series_slug}/{volume_slug}`
+- `GET /news/volume/by-url`
+- `GET /planning`
 
-## Recommended client flow
+## Erreurs structurées
 
-### Find and load a series
-1. `GET /v1/search/resolve?q=<title>&kind=series`
-2. read `data.best.slug`
-3. `GET /v1/series/{slug}`
-4. store the returned `ETag`
-5. reuse it on future calls with `If-None-Match`
+Exemple :
 
-### Find and load a volume
-1. `GET /v1/search/resolve?q=<title>&kind=volume`
-2. read `data.best.series_slug` and `data.best.volume_slug`
-3. `GET /v1/volume/{series_slug}/{volume_slug}`
+```json
+{
+  "ok": false,
+  "code": "INVALID_REQUEST",
+  "detail": "Unknown volume field path: bogus",
+  "request_id": "..."
+}
+```
 
-### Find and load a volume from a title + number
-1. `GET /v1/lookup/volume?series=One%20Piece&number=91`
-2. read `data.resolved.series_slug` and `data.resolved.volume_slug`
-3. consume `data.volume`
+Codes stables actuellement exposés :
+- `INVALID_REQUEST`
+- `UNAUTHORIZED`
+- `RESOURCE_NOT_FOUND`
+- `UPSTREAM_FETCH_ERROR`
+- `UPSTREAM_PARSE_ERROR`
+- `RATE_LIMITED`
 
-This is the simplest route when the caller already knows the series title and wants a precise numbered volume.
+Mapping HTTP principal :
+- `400` : paramètres invalides
+- `401` : token manquant ou invalide
+- `404` : ressource absente
+- `429` : limite de débit atteinte
+- `502` : échec réseau upstream ou parsing upstream non fiable
+- `304` : ressource inchangée avec `If-None-Match`
 
-### Monitor planning
-1. call `GET /v1/planning?...`
-2. store `fingerprint` or `ETag`
-3. call again later with `If-None-Match`
-
-## Main endpoints
+## Endpoints principaux
 
 ### Search
-- `GET /v1/search?q=...&kind=series|volume|all&mode=best|all&limit=10`
-- `GET /v1/search/resolve?q=...&kind=series|volume|all&limit=10`
+- `GET /search?q=...&kind=series|volume|all&mode=best|all&limit=10&page=1`
+- `GET /search/resolve?q=...&kind=series|volume|all&limit=10`
+
+### Lookup volume direct
+- `GET /lookup/volume?series=One%20Piece&number=91&limit=10`
+
+Ce endpoint est le plus simple quand le client connaît déjà un titre de série et un numéro de tome.
 
 ### Series
-- `GET /v1/series/{slug}`
-- `GET /v1/series/by-url?url=...`
-- `GET /v1/series/{slug}/related`
-- `GET /v1/series/by-url/related?url=...`
-- `GET /v1/series/{slug}/editions?edition=all|vf|vo`
-- `GET /v1/series/by-url/editions?url=...&edition=all|vf|vo`
+- `GET /series/{slug}`
+- `GET /series/by-url?url=...`
+- `GET /series/{slug}/related`
+- `GET /series/by-url/related?url=...`
+- `GET /series/{slug}/editions?edition=all|vf|vo`
+- `GET /series/by-url/editions?url=...&edition=all|vf|vo`
 
-Projection parameters on series endpoints:
+Projection sur les fiches série :
 - `blocks=editions,stats`
 - `fields=title,vf.volumes`
 - `include_raw_sections=true`
 
 ### Volume
-- `GET /v1/lookup/volume?series=...&number=...&limit=10`
-- `GET /v1/volume/{series_slug}/{volume_slug}`
-- `GET /v1/volume/by-url?url=...`
+- `GET /volume/{series_slug}/{volume_slug}`
+- `GET /volume/by-url?url=...`
 
-Projection parameters on volume endpoints:
+Projection sur les fiches volume :
 - `blocks=release,scores`
-- `fields=number,publication_date,isbn_ean`
+- `fields=number,number_int,publication_date,isbn_ean`
 - `include_raw_sections=true`
 
 ### News
-- `GET /v1/news/global?limit=10`
-- `GET /v1/news/series/{slug}?limit=10`
-- `GET /v1/news/volume/{series_slug}/{volume_slug}?limit=10`
-- `GET /v1/news/volume/by-url?url=...&limit=10`
+- `GET /news/global?limit=10&page=1`
+- `GET /news/series/{slug}?limit=10&page=1`
+- `GET /news/volume/{series_slug}/{volume_slug}?limit=10&page=1`
+- `GET /news/volume/by-url?url=...&limit=10&page=1`
 
 ### Planning
-- `GET /v1/planning?section=manga-vf|manga-vo&year=2026&month=4&page=1&publisher=...&q=...&date_from=...&date_to=...&sort=date_asc|date_desc|title_asc|title_desc&limit=25`
+- `GET /planning?section=manga-vf|manga-vo&year=2026&month=4&page=1&publisher=...&q=...&date_from=...&date_to=...&sort=date_asc|date_desc|title_asc|title_desc&limit=25`
 
-### Cache admin
-- `GET /v1/admin/cache/stats`
-- `POST /v1/admin/cache/invalidate` with JSON filters: `cache_key`, `namespace`, `resource_url`, `expired_only`, `all_entries`
+### Admin cache
+- `GET /admin/cache/stats`
+- `POST /admin/cache/invalidate`
 
-## Error handling
+Payload d’invalidation :
 
-- `400`: invalid client parameters (unknown projection block, invalid date, invalid Manga News URL, missing slug parts, etc.)
-- `404`: resource not found on Manga News
-- `502`: upstream fetch failure or upstream content could not be parsed reliably
-- `304`: unchanged resource when using `If-None-Match`
+```json
+{
+  "cache_key": null,
+  "namespace": "planning",
+  "resource_url": null,
+  "expired_only": true,
+  "all_entries": false
+}
+```
 
-Clients should treat `partial=true` and `warnings` as soft issues. A common case is stale cache fallback when the upstream temporarily fails.
+## Normalisation volume utile côté client
 
-The upstream client automatically retries on transient network failures and `429/500/502/503/504`, so callers do not need to implement aggressive immediate retries on top of the API.
+Les volumes exposent désormais plusieurs champs normalisés :
+- `number` : représentation texte simple du numéro, ex. `"91"`
+- `number_int` : entier normalisé, ex. `91`
+- `edition_label` : libellé d’édition détecté, ex. `"Collector"`
+- `is_special` : booléen pour artbook, guidebook, databook, coffret, etc.
+- `is_one_shot` : booléen pour one-shot détecté
 
-## Minimal integration prompt for another AI
+Ça évite au client de reparser le titre lui-même.
 
-Use this API as the primary manga metadata source. First call `/v1/search/resolve` with the user title. If a best result is returned, use its slug to call `/v1/series/{slug}` or `/v1/volume/{series_slug}/{volume_slug}`. Reuse the `ETag` header with `If-None-Match` to avoid reprocessing unchanged data. Log `X-Request-ID` when troubleshooting. Read the common envelope fields: `ok`, `found`, `partial`, `warnings`, `fingerprint`, and `data`. Prefer projection parameters only when the caller truly needs a reduced payload.
+## Rate limiting
 
+Le rate limit se configure par variables d’environnement, pas seulement via Compose :
+- `RATE_LIMIT_ENABLED=true|false`
+- `RATE_LIMIT_MAX_REQUESTS=60`
+- `RATE_LIMIT_WINDOW_SECONDS=60`
+- `RATE_LIMIT_SCOPE=ip|token|ip_or_token`
+- `RATE_LIMIT_INCLUDE_ADMIN=true|false`
+- `TRUST_X_FORWARDED_FOR=true|false`
 
-## Ready-to-run One Piece examples
+Quand il s’active, l’API renvoie aussi :
+- `Retry-After`
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining`
+- `X-RateLimit-Window`
 
-- plain text command list: `docs/ONE_PIECE_API_TESTS.txt`
-- batch smoke test script: `scripts/run_api_smoke_tests.py`
+## Routes legacy
 
-The smoke test script calls every current endpoint family against One Piece / volume 91, saves the raw JSON responses, and checks a few business assertions such as:
-- `lookup/volume` resolves to `One-Piece` + `vol-91`
-- the volume payload exposes `number=91`
-- the volume payload exposes `publisher_fr=Glénat`, `publication_date=2019-07-03`, and `isbn_ean=9782344037102`
-- the series payload exposes `title=One Piece`
+Par défaut, les routes non versionnées sont coupées.
+
+Pour les réactiver temporairement :
+
+```env
+ENABLE_LEGACY_ROUTES=true
+```
+
+Utilité réelle : **uniquement** ne pas casser un vieux client.
+Fonctionnellement, elles sont identiques aux routes `/v1`.
+
+## Flux recommandé
+
+### Trouver une série
+1. `GET /search/resolve?q=<titre>&kind=series`
+2. lire `data.best.slug`
+3. `GET /series/{slug}`
+4. stocker l’`ETag`
+
+### Trouver un tome
+1. `GET /lookup/volume?series=<titre>&number=<n>`
+2. lire `data.resolved.series_slug` et `data.resolved.volume_slug`
+3. consommer `data.volume`
+
+### Suivre des nouveautés / planning
+1. appeler un endpoint liste
+2. stocker `ETag` ou `fingerprint`
+3. refaire la requête avec `If-None-Match`
+
+## Tests manuels et batch
+
+Exemples manuels : `docs/ONE_PIECE_API_TESTS.txt`
+
+Batch :
+
+```bash
+python scripts/run_api_smoke_tests.py --base-url http://localhost:8017/v1 --token <api_token> --admin-token <admin_token>
+```
+
+Le script écrit une réponse JSON par requête dans `api_test_outputs/` par défaut.
+
+Tests projet :
+
+```bash
+pytest
+```

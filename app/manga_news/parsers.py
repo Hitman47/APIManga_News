@@ -23,7 +23,19 @@ from app.models import (
     SeriesStats,
     VolumeData,
 )
-from app.utils import clean_ws, ensure_absolute_url, extract_volume_number, normalize_text, parse_french_date, score_match, slugify, unique_list
+from app.utils import (
+    clean_ws,
+    ensure_absolute_url,
+    extract_volume_number,
+    infer_volume_edition_label,
+    infer_volume_flags,
+    normalize_text,
+    parse_french_date,
+    parse_volume_number_int,
+    score_match,
+    slugify,
+    unique_list,
+)
 
 DATE_LINE_RE = re.compile(
     r'^(Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi|Dimanche),?\s+(\d{1,2}\s+[A-Za-zéûîôàèùçÉÛÎÔÀÈÙÇ]+\s+\d{4})(?:\s+(.*))?$'
@@ -209,6 +221,27 @@ def _find_cover_image(soup: BeautifulSoup) -> str | None:
     return _meta(soup, 'og:image', 'twitter:image')
 
 
+def _extract_page_title(soup: BeautifulSoup, lines: list[str], *, kind: str) -> str:
+    raw_title = clean_ws(_meta(soup, 'og:title') or '')
+    if raw_title:
+        cleaned = clean_ws(re.sub(r'\s*-\s*Manga.*$', '', raw_title, flags=re.IGNORECASE))
+        if cleaned:
+            return cleaned
+
+    heading = soup.find('h1')
+    if heading:
+        cleaned = clean_ws(heading.get_text(' ', strip=True))
+        if cleaned:
+            return cleaned
+
+    fallback = clean_ws(lines[0] if lines else '')
+    normalized_fallback = normalize_text(fallback)
+    if fallback and normalized_fallback not in RAW_SECTION_HEADINGS and normalized_fallback not in SECTION_STOP_WORDS:
+        return fallback
+
+    raise ParseError(f'Unable to extract the {kind} title.')
+
+
 def _parse_illustration_details(raw: str | None) -> IllustrationDetails | None:
     if not raw:
         return None
@@ -305,11 +338,7 @@ def _extract_related_links(soup: BeautifulSoup, base_url: str, page_url: str) ->
 def parse_series_page(html: str, page_url: str) -> SeriesData:
     soup = _soup(html)
     lines = _lines(soup)
-    title = clean_ws(_meta(soup, 'og:title') or (lines[0] if lines else ''))
-    if not title:
-        raise ParseError('Unable to extract the series title.')
-
-    title_clean = re.sub(r'\s*-\s*Manga.*$', '', title, flags=re.IGNORECASE)
+    title_clean = _extract_page_title(soup, lines, kind='series')
     summary = _extract_section(lines, 'Résumé') or _meta(soup, 'description')
     strengths = _extract_section(lines, 'Les points forts de la série')
     illustration = _extract_line_value(lines, VALUE_LABELS['illustration'])
@@ -371,11 +400,7 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
 def parse_volume_page(html: str, page_url: str) -> VolumeData:
     soup = _soup(html)
     lines = _lines(soup)
-    title = clean_ws(_meta(soup, 'og:title') or (lines[0] if lines else ''))
-    if not title:
-        raise ParseError('Unable to extract the volume title.')
-
-    title_clean = re.sub(r'\s*-\s*Manga.*$', '', title, flags=re.IGNORECASE)
+    title_clean = _extract_page_title(soup, lines, kind='volume')
     series_title = None
     parsed_path = [part for part in urlparse(page_url).path.split('/') if part]
     if 'manga' in parsed_path and len(parsed_path) >= 4:
@@ -383,10 +408,20 @@ def parse_volume_page(html: str, page_url: str) -> VolumeData:
         series_title = clean_ws(possible_series.title())
     illustration = _extract_line_value(lines, VALUE_LABELS['illustration'])
 
+    number = extract_volume_number(title_clean, parsed_path[-1] if parsed_path else None)
+    volume_type = _extract_line_value(lines, VALUE_LABELS['type'])
+    collection = _extract_line_value(lines, VALUE_LABELS['collection'])
+    edition_label = infer_volume_edition_label(title_clean, collection, volume_type)
+    is_special, is_one_shot = infer_volume_flags(title_clean, collection, volume_type)
+
     return VolumeData(
         title=title_clean,
         series_title=series_title,
-        number=extract_volume_number(title_clean, parsed_path[-1] if parsed_path else None),
+        number=number,
+        number_int=parse_volume_number_int(number),
+        edition_label=edition_label,
+        is_special=is_special,
+        is_one_shot=is_one_shot,
         title_vo=_extract_line_value(lines, VALUE_LABELS['title_vo']),
         translated_title=_extract_line_value(lines, VALUE_LABELS['translated_title']),
         summary=_extract_section(lines, 'Résumé') or _meta(soup, 'description'),
@@ -395,8 +430,8 @@ def parse_volume_page(html: str, page_url: str) -> VolumeData:
         translators=unique_list((_extract_line_value(lines, VALUE_LABELS['translator']) or '').split(',')),
         publisher_fr=_extract_line_value(lines, VALUE_LABELS['publisher_fr']),
         publisher_vo=_extract_line_value(lines, VALUE_LABELS['publisher_vo']),
-        collection=_extract_line_value(lines, VALUE_LABELS['collection']),
-        type=_extract_line_value(lines, VALUE_LABELS['type']),
+        collection=collection,
+        type=volume_type,
         genres=unique_list((_extract_line_value(lines, VALUE_LABELS['genre']) or '').split(',')),
         prepublication=_extract_line_value(lines, VALUE_LABELS['prepublication']),
         origin=_extract_line_value(lines, VALUE_LABELS['origin']),
@@ -517,6 +552,9 @@ def parse_search_page(html: str, page_url: str, base_url: str, query: str, kind:
         if score < score_threshold:
             continue
         seen.add(absolute_url)
+        number = extract_volume_number(text, volume_slug)
+        edition_label = infer_volume_edition_label(text)
+        is_special, is_one_shot = infer_volume_flags(text)
         results.append(
             SearchResult(
                 title=text,
@@ -526,7 +564,11 @@ def parse_search_page(html: str, page_url: str, base_url: str, query: str, kind:
                 slug=slug,
                 series_slug=series_slug,
                 volume_slug=volume_slug,
-                number=extract_volume_number(text, volume_slug),
+                number=number,
+                number_int=parse_volume_number_int(number),
+                edition_label=edition_label,
+                is_special=is_special,
+                is_one_shot=is_one_shot,
             )
         )
     results.sort(key=lambda item: item.score, reverse=True)
@@ -623,6 +665,9 @@ def parse_planning_page(html: str, page_url: str, base_url: str) -> PlanningPage
                 series_slug = parsed_path[-2]
                 volume_slug = parsed_path[-1]
 
+        number = extract_volume_number(title, volume_slug)
+        edition_label = infer_volume_edition_label(title)
+        is_special, is_one_shot = infer_volume_flags(title)
         items.append(
             PlanningItem(
                 title=title,
@@ -634,6 +679,11 @@ def parse_planning_page(html: str, page_url: str, base_url: str) -> PlanningPage
                 featured=featured,
                 series_slug=series_slug,
                 volume_slug=volume_slug,
+                number=number,
+                number_int=parse_volume_number_int(number),
+                edition_label=edition_label,
+                is_special=is_special,
+                is_one_shot=is_one_shot,
             )
         )
 
@@ -701,13 +751,20 @@ def parse_series_editions_page(html: str, page_url: str, base_url: str, edition:
             if image and image.get('src'):
                 cover_image = ensure_absolute_url(base_url, image['src'])
         seen.add(url)
+        number = _guess_volume_number(title, volume_slug)
+        edition_label = infer_volume_edition_label(title)
+        is_special, is_one_shot = infer_volume_flags(title)
         items.append(
             SeriesEditionItem(
                 title=title,
                 url=url,
                 series_slug=series_slug,
                 volume_slug=volume_slug,
-                number=_guess_volume_number(title, volume_slug),
+                number=number,
+                number_int=parse_volume_number_int(number),
+                edition_label=edition_label,
+                is_special=is_special,
+                is_one_shot=is_one_shot,
                 publication_date=publication_date,
                 cover_image=cover_image,
             )
