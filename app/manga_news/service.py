@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from datetime import date
 from typing import Any, Literal
 from urllib.parse import urlencode, urlparse
@@ -9,98 +10,139 @@ import feedparser
 
 from app.cache import SQLiteCache
 from app.config import Settings
-from app.exceptions import ParseError
+from app.exceptions import ParseError, ResourceNotFound
 from app.http import AsyncFetcher
 from app.models import (
-    ComparisonData,
-    ComparisonDiff,
     Envelope,
-    FieldValueData,
-    MachineSeriesSummaryData,
-    MachineVolumeSummaryData,
     NewsItem,
-    SeriesNewsSummaryData,
-    SeriesReleaseSummaryData,
-    SeriesTimelineData,
-    TimelineEvent,
-    WatchData,
+    RelatedLinks,
+    SeriesEditionsBlock,
+    SeriesEditionsData,
+    SeriesRelatedData,
 )
-from app.manga_news.parsers import parse_news_page, parse_planning_page, parse_search_page, parse_series_page, parse_volume_page
-from app.utils import (
-    clean_ws,
-    fingerprint_data,
-    flatten_for_compare,
-    format_output_data,
-    is_manga_news_url,
-    make_cache_key,
-    normalize_text,
-    now_utc,
-    parse_fields_param,
-    parse_french_date,
-    project_dict_fields,
-    score_match,
-    unique_list,
+from app.manga_news.parsers import (
+    parse_news_page,
+    parse_planning_page,
+    parse_search_page,
+    parse_series_editions_page,
+    parse_series_page,
+    parse_volume_page,
 )
+from app.utils import clean_ws, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
 
 logger = logging.getLogger(__name__)
 
-SERIES_COMPARISON_FIELDS = [
-    'title',
-    'title_vo',
-    'translated_title',
-    'publisher_fr',
-    'publisher_vo',
-    'collection',
-    'type',
-    'genres',
-    'prepublication',
-    'origin',
-    'illustration',
-    'advisory_age',
-    'vf.volumes',
-    'vf.status',
-    'vo.volumes',
-    'vo.status',
-    'last_release_date',
-    'next_release_date',
-    'themes',
-]
-VOLUME_COMPARISON_FIELDS = [
-    'title',
-    'series_title',
-    'title_vo',
-    'translated_title',
-    'publisher_fr',
-    'publisher_vo',
-    'collection',
-    'type',
-    'genres',
-    'publication_date',
-    'isbn_ean',
-    'price_code',
-    'editorial_score',
-    'reader_score',
-    'illustration',
-    'origin',
-]
-
 SERIES_BLOCKS = {
-    'identity': ['title', 'title_vo', 'translated_title', 'publisher_fr', 'publisher_vo', 'collection', 'type', 'origin', 'cover_image', 'source_url'],
-    'contributors': ['authors_story', 'authors_art', 'translators'],
-    'content': ['summary', 'genres', 'themes', 'strengths', 'illustration', 'advisory_age'],
-    'release': ['vf', 'vo', 'last_release_date', 'next_release_date'],
-    'publication': ['prepublication'],
+    'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
+    'staff': ['authors_story', 'authors_art', 'translators'],
+    'publishing': ['publisher_fr', 'publisher_vo', 'collection', 'type', 'genres', 'prepublication', 'origin', 'advisory_age'],
+    'presentation': ['summary', 'illustration', 'illustration_details', 'cover_image', 'themes', 'strengths'],
+    'editions': ['vf', 'vo', 'last_release_date', 'next_release_date'],
     'stats': ['stats'],
+    'related': ['related'],
+    'raw': ['raw_sections'],
+    'raw_sections': ['raw_sections'],
 }
 VOLUME_BLOCKS = {
-    'identity': ['title', 'series_title', 'title_vo', 'translated_title', 'publisher_fr', 'publisher_vo', 'collection', 'type', 'origin', 'cover_image', 'source_url'],
-    'contributors': ['authors_story', 'authors_art', 'translators'],
-    'content': ['summary', 'genres', 'illustration', 'advisory_age'],
-    'publication': ['publication_date', 'isbn_ean', 'price_code', 'prepublication'],
+    'identity': ['title', 'series_title', 'title_vo', 'translated_title', 'source_url'],
+    'staff': ['authors_story', 'authors_art', 'translators'],
+    'publishing': ['publisher_fr', 'publisher_vo', 'collection', 'type', 'genres', 'prepublication', 'origin', 'advisory_age'],
+    'presentation': ['summary', 'illustration', 'illustration_details', 'cover_image'],
+    'release': ['publication_date', 'isbn_ean', 'price_code'],
     'scores': ['editorial_score', 'reader_score'],
+    'related': ['related'],
+    'raw': ['raw_sections'],
+    'raw_sections': ['raw_sections'],
 }
-SERIES_WATCH_FIELDS = ['title', 'publisher_fr', 'vf.volumes', 'vf.status', 'vo.volumes', 'vo.status', 'last_release_date', 'next_release_date']
-VOLUME_WATCH_FIELDS = ['title', 'series_title', 'publication_date', 'isbn_ean', 'publisher_fr', 'editorial_score', 'reader_score']
+
+
+def _split_csv_param(value: str | None) -> list[str]:
+    if not value:
+        return []
+    parts: list[str] = []
+    for raw in value.split(','):
+        cleaned = clean_ws(raw)
+        if cleaned:
+            parts.append(cleaned)
+    return parts
+
+
+
+def _has_path(data: dict[str, Any], path: str) -> bool:
+    current: Any = data
+    for part in path.split('.'):
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    return True
+
+
+
+def _get_path(data: dict[str, Any], path: str) -> Any:
+    current: Any = data
+    for part in path.split('.'):
+        if not isinstance(current, dict) or part not in current:
+            raise KeyError(path)
+        current = current[part]
+    return current
+
+
+
+def _set_path(target: dict[str, Any], path: str, value: Any) -> None:
+    current = target
+    parts = path.split('.')
+    for part in parts[:-1]:
+        current = current.setdefault(part, {})
+    current[parts[-1]] = deepcopy(value)
+
+
+
+def project_resource_payload(
+    payload: dict[str, Any],
+    *,
+    resource: Literal['series', 'volume'],
+    blocks: list[str] | None = None,
+    fields: list[str] | None = None,
+    include_raw_sections: bool = False,
+) -> dict[str, Any]:
+    full_data = deepcopy(payload)
+    if not include_raw_sections:
+        full_data.pop('raw_sections', None)
+
+    blocks = blocks or []
+    fields = fields or []
+    if not blocks and not fields and not include_raw_sections:
+        return full_data
+
+    if 'all' in [normalize_text(block) for block in blocks]:
+        return payload if include_raw_sections else full_data
+
+    mapping = SERIES_BLOCKS if resource == 'series' else VOLUME_BLOCKS
+    selected_paths: list[str] = []
+    for block in blocks:
+        normalized = slugify_block_name(block)
+        if normalized not in mapping:
+            raise ParseError(f'Unknown {resource} block: {block}')
+        selected_paths.extend(mapping[normalized])
+    selected_paths.extend(fields)
+    if include_raw_sections and 'raw_sections' not in selected_paths:
+        selected_paths.append('raw_sections')
+
+    if not selected_paths:
+        return payload if include_raw_sections else full_data
+
+    projected: dict[str, Any] = {}
+    source_data = payload if include_raw_sections else full_data
+    for path in selected_paths:
+        if not _has_path(source_data, path):
+            raise ParseError(f'Unknown {resource} field path: {path}')
+        _set_path(projected, path, _get_path(source_data, path))
+    return projected
+
+
+
+def slugify_block_name(block: str) -> str:
+    return normalize_text(block).replace(' ', '_').replace('-', '_')
 
 
 class MangaNewsService:
@@ -130,10 +172,10 @@ class MangaNewsService:
                 return entry.payload, entry, True, True, [warning]
             raise
 
-    def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool = True) -> Envelope:
+    def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str]) -> Envelope:
         return Envelope(
             ok=True,
-            found=found,
+            found=True,
             source='manga_news',
             source_url=payload.get('source_url'),
             cached=cached,
@@ -176,7 +218,7 @@ class MangaNewsService:
                         limit=max(limit, self.settings.max_limit),
                     )
                 )
-            deduped: dict[str, Any] = {}
+            deduped: dict[str, object] = {}
             for item in aggregated:
                 existing = deduped.get(item.url)
                 if existing is None or item.score > existing.score:
@@ -193,9 +235,20 @@ class MangaNewsService:
             loader=loader,
         )
         found = bool(payload.get('data'))
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, found=found)
+        return Envelope(
+            ok=True,
+            found=found,
+            source='manga_news',
+            source_url=payload.get('source_url'),
+            cached=cached,
+            fetched_at=entry.fetched_at.isoformat(),
+            cache_expires_at=entry.expires_at.isoformat(),
+            partial=partial,
+            warnings=warnings,
+            data=payload.get('data', []),
+        )
 
-    async def get_series(self, *, slug: str | None = None, url: str | None = None) -> Envelope:
+    async def _get_series_payload(self, *, slug: str | None = None, url: str | None = None):
         target_url = self._resolve_series_url(slug=slug, url=url)
         cache_key = make_cache_key('series', target_url)
 
@@ -204,119 +257,13 @@ class MangaNewsService:
             parsed = parse_series_page(result.text, result.url)
             return parsed.model_dump(), result.url
 
-        payload, entry, cached, partial, warnings = await self._cached_payload(
+        return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_series_seconds,
             loader=loader,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
-    async def select_series_fields(
-        self,
-        *,
-        slug: str | None = None,
-        url: str | None = None,
-        fields: str | None = None,
-        output_format: Literal['nested', 'flat'] = 'nested',
-    ) -> Envelope:
-        target_url = self._resolve_series_url(slug=slug, url=url)
-        selected_fields = parse_fields_param(fields)
-        if not selected_fields:
-            raise ParseError('fields is required for the series projection endpoint.')
-        cache_key = make_cache_key('series-select', target_url, output_format, *selected_fields)
-
-        async def loader():
-            envelope = await self.get_series(url=target_url)
-            data = envelope.data or {}
-            return format_output_data(project_dict_fields(data, selected_fields), output_format), target_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_series_seconds,
-            loader=loader,
-        )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(payload.get('data')))
-
-    async def get_series_summary(self, *, slug: str | None = None, url: str | None = None) -> Envelope:
-        target_url = self._resolve_series_url(slug=slug, url=url)
-        cache_key = make_cache_key('series-summary', target_url)
-
-        async def loader():
-            envelope = await self.get_series(url=target_url)
-            data = envelope.data or {}
-            summary = MachineSeriesSummaryData(
-                slug=self._series_slug_from_url(target_url),
-                title=data.get('title', ''),
-                title_vo=data.get('title_vo'),
-                publisher_fr=data.get('publisher_fr'),
-                vf=data.get('vf'),
-                vo=data.get('vo'),
-                last_release_date=data.get('last_release_date'),
-                next_release_date=data.get('next_release_date'),
-                source_url=data.get('source_url') or target_url,
-            )
-            return summary.model_dump(), target_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_series_seconds,
-            loader=loader,
-        )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
-
-    async def get_series_release_summary(self, *, slug: str | None = None, url: str | None = None) -> Envelope:
-        target_url = self._resolve_series_url(slug=slug, url=url)
-        cache_key = make_cache_key('series-release-summary', target_url)
-
-        async def loader():
-            envelope = await self.get_series(url=target_url)
-            data = envelope.data or {}
-            summary = SeriesReleaseSummaryData(
-                slug=self._series_slug_from_url(target_url),
-                title=data.get('title', ''),
-                vf=data.get('vf'),
-                vo=data.get('vo'),
-                last_release_date=data.get('last_release_date'),
-                next_release_date=data.get('next_release_date'),
-                has_upcoming_release=bool(data.get('next_release_date')),
-                publisher_fr=data.get('publisher_fr'),
-                source_url=data.get('source_url') or target_url,
-            )
-            return summary.model_dump(), target_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_series_seconds,
-            loader=loader,
-        )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
-
-    async def get_series_news_summary(self, *, slug: str | None = None, url: str | None = None, limit: int = 20) -> Envelope:
-        target_url = self._resolve_series_url(slug=slug, url=url)
-        series_slug = self._series_slug_from_url(target_url)
-        cache_key = make_cache_key('series-news-summary', series_slug, str(limit))
-
-        async def loader():
-            envelope = await self.get_series_news(slug=series_slug, limit=limit)
-            items = envelope.data or []
-            latest = items[0] if items else None
-            summary = SeriesNewsSummaryData(
-                slug=series_slug,
-                total_items=len(items),
-                latest=latest,
-                categories=sorted({item.get('category') for item in items if item.get('category')}),
-                source_url=envelope.source_url or f'{self.base_url}/index.php/serie/news/{series_slug}',
-            )
-            return summary.model_dump(), summary.source_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_news_series_seconds,
-            loader=loader,
-        )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
-
-    async def get_volume(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None) -> Envelope:
+    async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
         cache_key = make_cache_key('volume', target_url)
 
@@ -325,93 +272,83 @@ class MangaNewsService:
             parsed = parse_volume_page(result.text, result.url)
             return parsed.model_dump(), result.url
 
-        payload, entry, cached, partial, warnings = await self._cached_payload(
+        return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_volume_seconds,
             loader=loader,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
-    async def select_volume_fields(
+    async def get_series(
+        self,
+        *,
+        slug: str | None = None,
+        url: str | None = None,
+        blocks: str | None = None,
+        fields: str | None = None,
+        include_raw_sections: bool = False,
+    ) -> Envelope:
+        payload, entry, cached, partial, warnings = await self._get_series_payload(slug=slug, url=url)
+        projected = project_resource_payload(
+            payload.get('data', {}) or {},
+            resource='series',
+            blocks=_split_csv_param(blocks),
+            fields=_split_csv_param(fields),
+            include_raw_sections=include_raw_sections,
+        )
+        return self._envelope({'data': projected, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def get_volume(
         self,
         *,
         series_slug: str | None = None,
         volume_slug: str | None = None,
         url: str | None = None,
+        blocks: str | None = None,
         fields: str | None = None,
-        output_format: Literal['nested', 'flat'] = 'nested',
+        include_raw_sections: bool = False,
     ) -> Envelope:
-        target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        selected_fields = parse_fields_param(fields)
-        if not selected_fields:
-            raise ParseError('fields is required for the volume projection endpoint.')
-        cache_key = make_cache_key('volume-select', target_url, output_format, *selected_fields)
-
-        async def loader():
-            envelope = await self.get_volume(url=target_url)
-            data = envelope.data or {}
-            return format_output_data(project_dict_fields(data, selected_fields), output_format), target_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_volume_seconds,
-            loader=loader,
+        payload, entry, cached, partial, warnings = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug, url=url)
+        projected = project_resource_payload(
+            payload.get('data', {}) or {},
+            resource='volume',
+            blocks=_split_csv_param(blocks),
+            fields=_split_csv_param(fields),
+            include_raw_sections=include_raw_sections,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(payload.get('data')))
+        return self._envelope({'data': projected, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
-    async def get_volume_summary(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None) -> Envelope:
-        target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        cache_key = make_cache_key('volume-summary', target_url)
-
-        async def loader():
-            envelope = await self.get_volume(url=target_url)
-            data = envelope.data or {}
-            resolved_series_slug, resolved_volume_slug = self._volume_slugs_from_url(target_url)
-            summary = MachineVolumeSummaryData(
-                series_slug=resolved_series_slug,
-                volume_slug=resolved_volume_slug,
-                title=data.get('title', ''),
-                series_title=data.get('series_title'),
-                publication_date=data.get('publication_date'),
-                isbn_ean=data.get('isbn_ean'),
-                publisher_fr=data.get('publisher_fr'),
-                editorial_score=data.get('editorial_score'),
-                reader_score=data.get('reader_score'),
-                source_url=data.get('source_url') or target_url,
-            )
-            return summary.model_dump(), target_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_volume_seconds,
-            loader=loader,
+    async def get_series_related(self, *, slug: str | None = None, url: str | None = None) -> Envelope:
+        payload, entry, cached, partial, warnings = await self._get_series_payload(slug=slug, url=url)
+        data = payload.get('data', {}) or {}
+        related_data = SeriesRelatedData(
+            title=data.get('title'),
+            related=RelatedLinks.model_validate(data.get('related') or {}),
+            source_url=payload.get('source_url'),
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
+        return self._envelope({'data': related_data.model_dump(), 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
-    async def compare_series(
-        self,
-        *,
-        left_slug: str | None = None,
-        right_slug: str | None = None,
-        left_url: str | None = None,
-        right_url: str | None = None,
-    ) -> Envelope:
-        left_target = self._resolve_series_url(slug=left_slug, url=left_url)
-        right_target = self._resolve_series_url(slug=right_slug, url=right_url)
-        cache_key = make_cache_key('compare-series', left_target, right_target)
+    async def get_series_editions(self, *, slug: str | None = None, url: str | None = None, edition: Literal['all', 'vf', 'vo'] = 'all') -> Envelope:
+        target_url = self._resolve_series_url(slug=slug, url=url)
+        target_slug = self._extract_series_slug(target_url)
+        cache_key = make_cache_key('series-editions', target_url, edition)
 
         async def loader():
-            left = await self.get_series(url=left_target)
-            right = await self.get_series(url=right_target)
-            comparison = self._build_comparison(
-                kind='series',
-                left_data=left.data or {},
-                right_data=right.data or {},
-                left_source_url=left.source_url,
-                right_source_url=right.source_url,
-                fields=SERIES_COMPARISON_FIELDS,
-            )
-            return comparison.model_dump(), left_target
+            series_result = await self.fetcher.get_text(target_url)
+            series_payload = parse_series_page(series_result.text, series_result.url)
+            data = SeriesEditionsData(title=series_payload.title, series_slug=target_slug, source_url=series_result.url)
+            editions_to_fetch = ['vf', 'vo'] if edition == 'all' else [edition]
+            for current in editions_to_fetch:
+                current_url = f'{self.base_url}/index.php/serie/{"editionsVo" if current == "vo" else "editions"}/{target_slug}'
+                try:
+                    result = await self.fetcher.get_text(current_url)
+                    parsed = parse_series_editions_page(result.text, result.url, self.base_url, current)
+                except ResourceNotFound:
+                    parsed = SeriesEditionsBlock(edition=current, source_url=current_url, total=0, items=[])
+                if current == 'vf':
+                    data.vf = parsed
+                else:
+                    data.vo = parsed
+            return data.model_dump(), series_result.url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
@@ -419,295 +356,6 @@ class MangaNewsService:
             loader=loader,
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
-
-    async def compare_volume(
-        self,
-        *,
-        left_series_slug: str | None = None,
-        left_volume_slug: str | None = None,
-        right_series_slug: str | None = None,
-        right_volume_slug: str | None = None,
-        left_url: str | None = None,
-        right_url: str | None = None,
-    ) -> Envelope:
-        left_target = self._resolve_volume_url(series_slug=left_series_slug, volume_slug=left_volume_slug, url=left_url)
-        right_target = self._resolve_volume_url(series_slug=right_series_slug, volume_slug=right_volume_slug, url=right_url)
-        cache_key = make_cache_key('compare-volume', left_target, right_target)
-
-        async def loader():
-            left = await self.get_volume(url=left_target)
-            right = await self.get_volume(url=right_target)
-            comparison = self._build_comparison(
-                kind='volume',
-                left_data=left.data or {},
-                right_data=right.data or {},
-                left_source_url=left.source_url,
-                right_source_url=right.source_url,
-                fields=VOLUME_COMPARISON_FIELDS,
-            )
-            return comparison.model_dump(), left_target
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_volume_seconds,
-            loader=loader,
-        )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
-
-    async def select_series_blocks(
-        self,
-        *,
-        slug: str | None = None,
-        url: str | None = None,
-        blocks: str | None = None,
-        output_format: Literal['nested', 'flat'] = 'nested',
-    ) -> Envelope:
-        target_url = self._resolve_series_url(slug=slug, url=url)
-        selected_blocks = parse_fields_param(blocks)
-        selected_fields = self._expand_blocks(selected_blocks, SERIES_BLOCKS, 'series')
-        cache_key = make_cache_key('series-blocks', target_url, *selected_blocks, output_format)
-
-        async def loader():
-            envelope = await self.get_series(url=target_url)
-            data = envelope.data or {}
-            projection = project_dict_fields(data, selected_fields)
-            return format_output_data(projection, output_format), target_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_series_seconds,
-            loader=loader,
-        )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(payload.get('data')))
-
-    async def select_volume_blocks(
-        self,
-        *,
-        series_slug: str | None = None,
-        volume_slug: str | None = None,
-        url: str | None = None,
-        blocks: str | None = None,
-        output_format: Literal['nested', 'flat'] = 'nested',
-    ) -> Envelope:
-        target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        selected_blocks = parse_fields_param(blocks)
-        selected_fields = self._expand_blocks(selected_blocks, VOLUME_BLOCKS, 'volume')
-        cache_key = make_cache_key('volume-blocks', target_url, *selected_blocks, output_format)
-
-        async def loader():
-            envelope = await self.get_volume(url=target_url)
-            data = envelope.data or {}
-            projection = project_dict_fields(data, selected_fields)
-            return format_output_data(projection, output_format), target_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_volume_seconds,
-            loader=loader,
-        )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(payload.get('data')))
-
-    async def get_series_timeline(
-        self,
-        *,
-        slug: str | None = None,
-        url: str | None = None,
-        news_limit: int = 5,
-    ) -> Envelope:
-        target_url = self._resolve_series_url(slug=slug, url=url)
-        series_slug = self._series_slug_from_url(target_url)
-        cache_key = make_cache_key('series-timeline', target_url, str(news_limit))
-
-        async def loader():
-            release_envelope = await self.get_series_release_summary(url=target_url)
-            news_envelope = await self.get_series_news(slug=series_slug, limit=news_limit)
-            release_data = release_envelope.data or {}
-            news_items = news_envelope.data or []
-            events: list[TimelineEvent] = []
-            if release_data.get('last_release_date'):
-                events.append(TimelineEvent(
-                    date=release_data.get('last_release_date'),
-                    kind='last_release',
-                    title='Dernier tome paru',
-                    url=target_url,
-                ))
-            if release_data.get('next_release_date'):
-                events.append(TimelineEvent(
-                    date=release_data.get('next_release_date'),
-                    kind='next_release',
-                    title='Prochaine sortie',
-                    url=target_url,
-                ))
-            for item in news_items:
-                events.append(TimelineEvent(
-                    date=item.get('published_at'),
-                    kind='news',
-                    title=item.get('title', ''),
-                    url=item.get('url'),
-                    category=item.get('category'),
-                ))
-            events.sort(key=lambda event: (event.date or '', event.kind), reverse=True)
-            timeline = SeriesTimelineData(
-                slug=series_slug,
-                title=release_data.get('title', ''),
-                last_release_date=release_data.get('last_release_date'),
-                next_release_date=release_data.get('next_release_date'),
-                has_upcoming_release=bool(release_data.get('next_release_date')),
-                events=events,
-                source_url=release_data.get('source_url') or target_url,
-            )
-            return timeline.model_dump(), timeline.source_url
-
-        payload, entry, cached, partial, warnings = await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_news_series_seconds,
-            loader=loader,
-        )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
-
-    async def watch_series(
-        self,
-        *,
-        slug: str | None = None,
-        url: str | None = None,
-        fields: str | None = None,
-        previous_fingerprint: str | None = None,
-        output_format: Literal['nested', 'flat'] = 'nested',
-    ) -> Envelope:
-        target_url = self._resolve_series_url(slug=slug, url=url)
-        selected_fields = parse_fields_param(fields) or list(SERIES_WATCH_FIELDS)
-        projection_envelope = await self.select_series_fields(url=target_url, fields=','.join(selected_fields), output_format='nested')
-        nested_projection = projection_envelope.data or {}
-        fingerprint = fingerprint_data(nested_projection)
-        watched = WatchData(
-            kind='series',
-            identifier=self._series_slug_from_url(target_url),
-            fingerprint=fingerprint,
-            previous_fingerprint=previous_fingerprint,
-            changed=(fingerprint != previous_fingerprint) if previous_fingerprint else None,
-            watched_fields=selected_fields,
-            watched_data=format_output_data(nested_projection, output_format),
-            checked_at=now_utc().isoformat(),
-            source_url=projection_envelope.source_url or target_url,
-        )
-        return Envelope(
-            ok=True,
-            found=bool(nested_projection),
-            source='manga_news',
-            source_url=projection_envelope.source_url or target_url,
-            cached=projection_envelope.cached,
-            fetched_at=projection_envelope.fetched_at,
-            cache_expires_at=projection_envelope.cache_expires_at,
-            partial=projection_envelope.partial,
-            warnings=projection_envelope.warnings,
-            data=watched.model_dump(),
-        )
-
-    async def watch_volume(
-        self,
-        *,
-        series_slug: str | None = None,
-        volume_slug: str | None = None,
-        url: str | None = None,
-        fields: str | None = None,
-        previous_fingerprint: str | None = None,
-        output_format: Literal['nested', 'flat'] = 'nested',
-    ) -> Envelope:
-        target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        selected_fields = parse_fields_param(fields) or list(VOLUME_WATCH_FIELDS)
-        projection_envelope = await self.select_volume_fields(url=target_url, fields=','.join(selected_fields), output_format='nested')
-        nested_projection = projection_envelope.data or {}
-        fingerprint = fingerprint_data(nested_projection)
-        resolved_series_slug, resolved_volume_slug = self._volume_slugs_from_url(target_url)
-        identifier = '/'.join(part for part in [resolved_series_slug, resolved_volume_slug] if part) or target_url
-        watched = WatchData(
-            kind='volume',
-            identifier=identifier,
-            fingerprint=fingerprint,
-            previous_fingerprint=previous_fingerprint,
-            changed=(fingerprint != previous_fingerprint) if previous_fingerprint else None,
-            watched_fields=selected_fields,
-            watched_data=format_output_data(nested_projection, output_format),
-            checked_at=now_utc().isoformat(),
-            source_url=projection_envelope.source_url or target_url,
-        )
-        return Envelope(
-            ok=True,
-            found=bool(nested_projection),
-            source='manga_news',
-            source_url=projection_envelope.source_url or target_url,
-            cached=projection_envelope.cached,
-            fetched_at=projection_envelope.fetched_at,
-            cache_expires_at=projection_envelope.cache_expires_at,
-            partial=projection_envelope.partial,
-            warnings=projection_envelope.warnings,
-            data=watched.model_dump(),
-        )
-
-    async def get_series_field_value(self, *, slug: str | None = None, url: str | None = None, field: str) -> Envelope:
-        target_url = self._resolve_series_url(slug=slug, url=url)
-        selected_fields = parse_fields_param(field)
-        if len(selected_fields) != 1:
-            raise ParseError('field must contain exactly one dotted path.')
-        projection_envelope = await self.select_series_fields(url=target_url, fields=selected_fields[0], output_format='flat')
-        projection = projection_envelope.data or {}
-        value = projection.get(selected_fields[0])
-        payload = FieldValueData(
-            kind='series',
-            identifier=self._series_slug_from_url(target_url),
-            field=selected_fields[0],
-            value=value,
-            source_url=projection_envelope.source_url or target_url,
-        )
-        return Envelope(
-            ok=True,
-            found=(selected_fields[0] in projection),
-            source='manga_news',
-            source_url=projection_envelope.source_url or target_url,
-            cached=projection_envelope.cached,
-            fetched_at=projection_envelope.fetched_at,
-            cache_expires_at=projection_envelope.cache_expires_at,
-            partial=projection_envelope.partial,
-            warnings=projection_envelope.warnings,
-            data=payload.model_dump(),
-        )
-
-    async def get_volume_field_value(
-        self,
-        *,
-        series_slug: str | None = None,
-        volume_slug: str | None = None,
-        url: str | None = None,
-        field: str,
-    ) -> Envelope:
-        target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        selected_fields = parse_fields_param(field)
-        if len(selected_fields) != 1:
-            raise ParseError('field must contain exactly one dotted path.')
-        projection_envelope = await self.select_volume_fields(url=target_url, fields=selected_fields[0], output_format='flat')
-        projection = projection_envelope.data or {}
-        resolved_series_slug, resolved_volume_slug = self._volume_slugs_from_url(target_url)
-        identifier = '/'.join(part for part in [resolved_series_slug, resolved_volume_slug] if part) or target_url
-        value = projection.get(selected_fields[0])
-        payload = FieldValueData(
-            kind='volume',
-            identifier=identifier,
-            field=selected_fields[0],
-            value=value,
-            source_url=projection_envelope.source_url or target_url,
-        )
-        return Envelope(
-            ok=True,
-            found=(selected_fields[0] in projection),
-            source='manga_news',
-            source_url=projection_envelope.source_url or target_url,
-            cached=projection_envelope.cached,
-            fetched_at=projection_envelope.fetched_at,
-            cache_expires_at=projection_envelope.cache_expires_at,
-            partial=projection_envelope.partial,
-            warnings=projection_envelope.warnings,
-            data=payload.model_dump(),
-        )
 
     async def get_global_news(self, *, limit: int) -> Envelope:
         rss_url = f'{self.base_url}/index.php/feed/news'
@@ -795,10 +443,7 @@ class MangaNewsService:
 
         if publisher:
             normalized_publisher = normalize_text(publisher)
-            items = [
-                item for item in items
-                if normalized_publisher in normalize_text(item.get('publisher'))
-            ]
+            items = [item for item in items if normalized_publisher in normalize_text(item.get('publisher'))]
 
         if query:
             normalized_query = clean_ws(query)
@@ -894,18 +539,7 @@ class MangaNewsService:
             ttl_seconds=ttl,
             loader=loader,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings, found=bool(payload.get('data')))
-
-    def _expand_blocks(self, requested_blocks: list[str], mapping: dict[str, list[str]], resource_name: str) -> list[str]:
-        if not requested_blocks:
-            raise ParseError(f'blocks is required for the {resource_name} block projection endpoint.')
-        unknown = [block for block in requested_blocks if block not in mapping]
-        if unknown:
-            raise ParseError(f'Unknown {resource_name} blocks: {", ".join(unknown)}')
-        fields: list[str] = []
-        for block in requested_blocks:
-            fields.extend(mapping[block])
-        return unique_list(fields)
+        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
     def _resolve_series_url(self, *, slug: str | None, url: str | None) -> str:
         if url:
@@ -925,50 +559,8 @@ class MangaNewsService:
             raise ParseError('series_slug and volume_slug are required when no direct URL is provided.')
         return f'{self.base_url}/index.php/manga/{series_slug}/{volume_slug}'
 
-    def _series_slug_from_url(self, url: str) -> str:
-        parsed_path = [part for part in urlparse(url).path.split('/') if part]
-        if parsed_path:
-            return parsed_path[-1]
-        raise ParseError('Unable to infer the series slug from the URL.')
-
-    def _volume_slugs_from_url(self, url: str) -> tuple[str | None, str | None]:
-        parsed_path = [part for part in urlparse(url).path.split('/') if part]
-        if len(parsed_path) >= 4 and parsed_path[-3] == 'manga':
-            return parsed_path[-2], parsed_path[-1]
-        return None, None
-
-    def _build_comparison(
-        self,
-        *,
-        kind: Literal['series', 'volume'],
-        left_data: dict,
-        right_data: dict,
-        left_source_url: str | None,
-        right_source_url: str | None,
-        fields: list[str],
-    ) -> ComparisonData:
-        left_projection = project_dict_fields(left_data, fields)
-        right_projection = project_dict_fields(right_data, fields)
-        left_flat = flatten_for_compare(left_projection)
-        right_flat = flatten_for_compare(right_projection)
-        compared_fields = sorted(set(left_flat) | set(right_flat))
-        equal_fields: list[str] = []
-        differing_fields: list[ComparisonDiff] = []
-        for field in compared_fields:
-            left_value = left_flat.get(field)
-            right_value = right_flat.get(field)
-            if left_value == right_value:
-                equal_fields.append(field)
-            else:
-                differing_fields.append(ComparisonDiff(field=field, left=left_value, right=right_value))
-        total = len(compared_fields)
-        similarity_score = int((len(equal_fields) / total) * 100) if total else 100
-        return ComparisonData(
-            kind=kind,
-            left_source_url=left_source_url,
-            right_source_url=right_source_url,
-            compared_fields_count=total,
-            equal_fields=equal_fields,
-            differing_fields=differing_fields,
-            similarity_score=similarity_score,
-        )
+    def _extract_series_slug(self, series_url: str) -> str:
+        path_parts = [part for part in urlparse(series_url).path.split('/') if part]
+        if not path_parts:
+            raise ParseError('Unable to infer the series slug from the provided URL.')
+        return path_parts[-1]
