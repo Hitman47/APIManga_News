@@ -30,8 +30,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Validate docs and contract
+        run: python scripts/validate_contract_and_docs.py
+
       - name: Run tests
         run: pytest
-
-      - name: Validate OpenAPI, examples and local docs links
-        run: python scripts/validate_contract_and_docs.py
