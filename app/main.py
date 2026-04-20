@@ -14,12 +14,16 @@ from app.exceptions import ParseError, ResourceNotFound, UpstreamError
 from app.http import AsyncFetcher
 from app.manga_news.service import MangaNewsService
 from app.models import (
+    ComparisonResponse,
+    Envelope,
     HealthResponse,
-    NewsResponse,
+    MachineSeriesSummaryResponse,
+    MachineVolumeSummaryResponse,
+    NewsListResponse,
     PlanningResponse,
     SearchResponse,
-    SeriesEditionsResponse,
-    SeriesRelatedResponse,
+    SeriesNewsSummaryResponse,
+    SeriesReleaseSummaryResponse,
     SeriesResponse,
     VolumeResponse,
 )
@@ -103,79 +107,142 @@ async def search(
 
 
 @app.get('/series/{slug}', dependencies=[Depends(auth_dependency)], response_model=SeriesResponse)
-async def get_series(
-    slug: str,
-    blocks: str | None = Query(default=None, description='Comma-separated block names. Example: editions,stats'),
-    fields: str | None = Query(default=None, description='Comma-separated dot paths. Example: title,vf.volumes'),
-    include_raw_sections: bool = Query(default=False),
-    service: MangaNewsService = Depends(get_service),
-):
-    return await service.get_series(slug=slug, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
+async def get_series(slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_series(slug=slug)
 
 
 @app.get('/series/by-url', dependencies=[Depends(auth_dependency)], response_model=SeriesResponse)
-async def get_series_by_url(
-    url: str = Query(...),
-    blocks: str | None = Query(default=None),
-    fields: str | None = Query(default=None),
-    include_raw_sections: bool = Query(default=False),
-    service: MangaNewsService = Depends(get_service),
-):
-    return await service.get_series(url=url, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
+async def get_series_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
+    return await service.get_series(url=url)
 
 
-@app.get('/series/{slug}/related', dependencies=[Depends(auth_dependency)], response_model=SeriesRelatedResponse)
-async def get_series_related(slug: str, service: MangaNewsService = Depends(get_service)):
-    return await service.get_series_related(slug=slug)
-
-
-@app.get('/series/by-url/related', dependencies=[Depends(auth_dependency)], response_model=SeriesRelatedResponse)
-async def get_series_related_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
-    return await service.get_series_related(url=url)
-
-
-@app.get('/series/{slug}/editions', dependencies=[Depends(auth_dependency)], response_model=SeriesEditionsResponse)
-async def get_series_editions(
+@app.get('/series/{slug}/select', dependencies=[Depends(auth_dependency)], response_model=Envelope)
+async def select_series_fields(
     slug: str,
-    edition: Literal['all', 'vf', 'vo'] = Query(default='all'),
+    fields: str = Query(..., description='Comma-separated list of dotted fields, e.g. title,vf.volumes'),
     service: MangaNewsService = Depends(get_service),
 ):
-    return await service.get_series_editions(slug=slug, edition=edition)
+    return await service.select_series_fields(slug=slug, fields=fields)
 
 
-@app.get('/series/by-url/editions', dependencies=[Depends(auth_dependency)], response_model=SeriesEditionsResponse)
-async def get_series_editions_by_url(
+@app.get('/series/by-url/select', dependencies=[Depends(auth_dependency)], response_model=Envelope)
+async def select_series_fields_by_url(
     url: str = Query(...),
-    edition: Literal['all', 'vf', 'vo'] = Query(default='all'),
+    fields: str = Query(..., description='Comma-separated list of dotted fields, e.g. title,vf.volumes'),
     service: MangaNewsService = Depends(get_service),
 ):
-    return await service.get_series_editions(url=url, edition=edition)
+    return await service.select_series_fields(url=url, fields=fields)
+
+
+@app.get('/series/{slug}/summary', dependencies=[Depends(auth_dependency)], response_model=MachineSeriesSummaryResponse)
+async def get_series_summary(slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_series_summary(slug=slug)
+
+
+@app.get('/series/by-url/summary', dependencies=[Depends(auth_dependency)], response_model=MachineSeriesSummaryResponse)
+async def get_series_summary_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
+    return await service.get_series_summary(url=url)
+
+
+@app.get('/series/{slug}/release-summary', dependencies=[Depends(auth_dependency)], response_model=SeriesReleaseSummaryResponse)
+async def get_series_release_summary(slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_series_release_summary(slug=slug)
+
+
+@app.get('/series/by-url/release-summary', dependencies=[Depends(auth_dependency)], response_model=SeriesReleaseSummaryResponse)
+async def get_series_release_summary_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
+    return await service.get_series_release_summary(url=url)
+
+
+@app.get('/series/{slug}/news-summary', dependencies=[Depends(auth_dependency)], response_model=SeriesNewsSummaryResponse)
+async def get_series_news_summary(
+    slug: str,
+    limit: int = Query(default=20, ge=1, le=50),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.get_series_news_summary(slug=slug, limit=limit)
+
+
+@app.get('/series/by-url/news-summary', dependencies=[Depends(auth_dependency)], response_model=SeriesNewsSummaryResponse)
+async def get_series_news_summary_by_url(
+    url: str = Query(...),
+    limit: int = Query(default=20, ge=1, le=50),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.get_series_news_summary(url=url, limit=limit)
 
 
 @app.get('/volume/{series_slug}/{volume_slug}', dependencies=[Depends(auth_dependency)], response_model=VolumeResponse)
-async def get_volume(
-    series_slug: str,
-    volume_slug: str,
-    blocks: str | None = Query(default=None, description='Comma-separated block names. Example: release,scores'),
-    fields: str | None = Query(default=None, description='Comma-separated dot paths. Example: publication_date,isbn_ean'),
-    include_raw_sections: bool = Query(default=False),
-    service: MangaNewsService = Depends(get_service),
-):
-    return await service.get_volume(series_slug=series_slug, volume_slug=volume_slug, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
+async def get_volume(series_slug: str, volume_slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_volume(series_slug=series_slug, volume_slug=volume_slug)
 
 
 @app.get('/volume/by-url', dependencies=[Depends(auth_dependency)], response_model=VolumeResponse)
-async def get_volume_by_url(
-    url: str = Query(...),
-    blocks: str | None = Query(default=None),
-    fields: str | None = Query(default=None),
-    include_raw_sections: bool = Query(default=False),
+async def get_volume_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
+    return await service.get_volume(url=url)
+
+
+@app.get('/volume/{series_slug}/{volume_slug}/select', dependencies=[Depends(auth_dependency)], response_model=Envelope)
+async def select_volume_fields(
+    series_slug: str,
+    volume_slug: str,
+    fields: str = Query(..., description='Comma-separated list of dotted fields, e.g. title,publication_date,isbn_ean'),
     service: MangaNewsService = Depends(get_service),
 ):
-    return await service.get_volume(url=url, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
+    return await service.select_volume_fields(series_slug=series_slug, volume_slug=volume_slug, fields=fields)
 
 
-@app.get('/news/global', dependencies=[Depends(auth_dependency)], response_model=NewsResponse)
+@app.get('/volume/by-url/select', dependencies=[Depends(auth_dependency)], response_model=Envelope)
+async def select_volume_fields_by_url(
+    url: str = Query(...),
+    fields: str = Query(..., description='Comma-separated list of dotted fields, e.g. title,publication_date,isbn_ean'),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.select_volume_fields(url=url, fields=fields)
+
+
+@app.get('/volume/{series_slug}/{volume_slug}/summary', dependencies=[Depends(auth_dependency)], response_model=MachineVolumeSummaryResponse)
+async def get_volume_summary(series_slug: str, volume_slug: str, service: MangaNewsService = Depends(get_service)):
+    return await service.get_volume_summary(series_slug=series_slug, volume_slug=volume_slug)
+
+
+@app.get('/volume/by-url/summary', dependencies=[Depends(auth_dependency)], response_model=MachineVolumeSummaryResponse)
+async def get_volume_summary_by_url(url: str = Query(...), service: MangaNewsService = Depends(get_service)):
+    return await service.get_volume_summary(url=url)
+
+
+@app.get('/compare/series', dependencies=[Depends(auth_dependency)], response_model=ComparisonResponse)
+async def compare_series(
+    left_slug: str | None = Query(default=None),
+    right_slug: str | None = Query(default=None),
+    left_url: str | None = Query(default=None),
+    right_url: str | None = Query(default=None),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.compare_series(left_slug=left_slug, right_slug=right_slug, left_url=left_url, right_url=right_url)
+
+
+@app.get('/compare/volume', dependencies=[Depends(auth_dependency)], response_model=ComparisonResponse)
+async def compare_volume(
+    left_series_slug: str | None = Query(default=None),
+    left_volume_slug: str | None = Query(default=None),
+    right_series_slug: str | None = Query(default=None),
+    right_volume_slug: str | None = Query(default=None),
+    left_url: str | None = Query(default=None),
+    right_url: str | None = Query(default=None),
+    service: MangaNewsService = Depends(get_service),
+):
+    return await service.compare_volume(
+        left_series_slug=left_series_slug,
+        left_volume_slug=left_volume_slug,
+        right_series_slug=right_series_slug,
+        right_volume_slug=right_volume_slug,
+        left_url=left_url,
+        right_url=right_url,
+    )
+
+
+@app.get('/news/global', dependencies=[Depends(auth_dependency)], response_model=NewsListResponse)
 async def get_global_news(
     limit: int = Query(default=10, ge=1, le=50),
     service: MangaNewsService = Depends(get_service),
@@ -183,7 +250,7 @@ async def get_global_news(
     return await service.get_global_news(limit=limit)
 
 
-@app.get('/news/series/{slug}', dependencies=[Depends(auth_dependency)], response_model=NewsResponse)
+@app.get('/news/series/{slug}', dependencies=[Depends(auth_dependency)], response_model=NewsListResponse)
 async def get_series_news(
     slug: str,
     limit: int = Query(default=10, ge=1, le=50),
@@ -192,7 +259,7 @@ async def get_series_news(
     return await service.get_series_news(slug=slug, limit=limit)
 
 
-@app.get('/news/volume/{series_slug}/{volume_slug}', dependencies=[Depends(auth_dependency)], response_model=NewsResponse)
+@app.get('/news/volume/{series_slug}/{volume_slug}', dependencies=[Depends(auth_dependency)], response_model=NewsListResponse)
 async def get_volume_news(
     series_slug: str,
     volume_slug: str,
@@ -202,7 +269,7 @@ async def get_volume_news(
     return await service.get_volume_news(series_slug=series_slug, volume_slug=volume_slug, limit=limit)
 
 
-@app.get('/news/volume/by-url', dependencies=[Depends(auth_dependency)], response_model=NewsResponse)
+@app.get('/news/volume/by-url', dependencies=[Depends(auth_dependency)], response_model=NewsListResponse)
 async def get_volume_news_by_url(
     url: str = Query(...),
     limit: int = Query(default=10, ge=1, le=50),

@@ -36,6 +36,12 @@ IGNORE_TEXTS = {
     'aucun commentaire... soyez le 1er !!', 'tous les volumes', 'ma note', 'rédaction', 'redaction',
     'lecteurs', 'pas lu', 'pas vu', 'volume', 'volumes', 'actus précédentes', 'actus precedentes',
 }
+EDITION_NOISE_PATTERN = re.compile(
+    r"\b((?:tome|v(?:ol)?\.?|volume)\s*\d+|edition originale|ed\. originale|edition|collector|collectors?|"
+    r"deluxe|perfect|ultimate|kanzenban|double|triple|grand format|roman|light novel|novel|tome|vol(?:ume)?)\b",
+    flags=re.IGNORECASE,
+)
+LEADING_ARTICLES_PATTERN = re.compile(r'^(le|la|les|un|une|des|the)\s+', flags=re.IGNORECASE)
 
 
 def now_utc() -> datetime:
@@ -54,7 +60,10 @@ def normalize_text(value: str | None) -> str:
     cleaned = clean_ws(value).lower()
     normalized = unicodedata.normalize('NFKD', cleaned)
     normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
-    normalized = re.sub(r"\b(edition originale|ed\. originale|edition|vol(?:ume)?|tome)\b", ' ', normalized)
+    normalized = EDITION_NOISE_PATTERN.sub(' ', normalized)
+    normalized = LEADING_ARTICLES_PATTERN.sub('', normalized)
+    normalized = normalized.replace('&', ' and ')
+    normalized = re.sub(r'\bpartie\b', 'part', normalized)
     normalized = re.sub(r'[^a-z0-9]+', ' ', normalized)
     return re.sub(r'\s+', ' ', normalized).strip()
 
@@ -65,12 +74,16 @@ def slugify(value: str) -> str:
 
 
 def score_match(query: str, candidate: str, extra: str | None = None) -> int:
+    normalized_query = normalize_text(query)
+    normalized_candidate = normalize_text(candidate)
     base = max(
-        fuzz.WRatio(normalize_text(query), normalize_text(candidate)),
-        fuzz.token_set_ratio(normalize_text(query), normalize_text(candidate)),
+        fuzz.WRatio(normalized_query, normalized_candidate),
+        fuzz.token_set_ratio(normalized_query, normalized_candidate),
+        fuzz.partial_ratio(normalized_query, normalized_candidate),
     )
     if extra:
-        base = max(base, fuzz.WRatio(normalize_text(query), normalize_text(extra)))
+        normalized_extra = normalize_text(extra)
+        base = max(base, fuzz.WRatio(normalized_query, normalized_extra), fuzz.partial_ratio(normalized_query, normalized_extra))
     return int(base)
 
 
@@ -147,3 +160,50 @@ def is_manga_news_url(url: str, base_url: str) -> bool:
 
 def encode_query(query: str) -> str:
     return quote(query, safe='')
+
+
+def parse_fields_param(fields: str | None) -> list[str]:
+    if not fields:
+        return []
+    return unique_list(part.strip() for part in fields.split(','))
+
+
+def project_dict_fields(data: dict, fields: list[str]) -> dict:
+    if not fields:
+        return data
+
+    projected: dict = {}
+    for field in fields:
+        parts = [part for part in field.split('.') if part]
+        if not parts:
+            continue
+        current_source = data
+        current_target = projected
+        valid = True
+        for index, part in enumerate(parts):
+            if not isinstance(current_source, dict) or part not in current_source:
+                valid = False
+                break
+            value = current_source[part]
+            is_last = index == len(parts) - 1
+            if is_last:
+                current_target[part] = value
+            else:
+                if part not in current_target or not isinstance(current_target[part], dict):
+                    current_target[part] = {}
+                current_target = current_target[part]
+                current_source = value
+        if not valid:
+            continue
+    return projected
+
+
+def flatten_for_compare(data: dict, prefix: str = '') -> dict[str, object]:
+    flattened: dict[str, object] = {}
+    for key, value in data.items():
+        path = f'{prefix}.{key}' if prefix else key
+        if isinstance(value, dict):
+            flattened.update(flatten_for_compare(value, path))
+        else:
+            flattened[path] = value
+    return flattened

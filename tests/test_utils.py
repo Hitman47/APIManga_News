@@ -1,8 +1,9 @@
-from app.utils import normalize_text, parse_french_date, score_match
+from app.utils import normalize_text, parse_french_date, project_dict_fields, score_match
 
 
 def test_normalize_text_handles_accents_and_noise():
     assert normalize_text('One Piece - Édition originale') == 'one piece'
+    assert normalize_text('Le One Piece Collector Vol. 12') == 'one piece'
 
 
 
@@ -15,3 +16,15 @@ def test_parse_french_date():
 def test_score_match():
     assert score_match('One Piece', 'One Piece') >= 95
     assert score_match('One Piece', 'Naruto') < 50
+    assert score_match('One Piece', 'One Piece Collector Vol. 12') >= 90
+
+
+
+def test_project_dict_fields_with_nested_paths():
+    data = {
+        'title': 'One Piece',
+        'vf': {'volumes': 112, 'status': 'En cours'},
+        'stats': {'likes': 531},
+    }
+    projected = project_dict_fields(data, ['title', 'vf.volumes'])
+    assert projected == {'title': 'One Piece', 'vf': {'volumes': 112}}
