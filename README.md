@@ -7,33 +7,22 @@ API privée, légère, prévue pour un usage personnel ou auto-hébergé, afin d
 - recherche de séries et volumes ;
 - récupération d'une fiche série ;
 - récupération d'une fiche volume ;
+- récupération des éditions VF/VO d'une série ;
+- récupération structurée des liens/relations d'une série ;
+- projection partielle par blocs ou champs (`blocks`, `fields`) sur les fiches série et volume ;
 - récupération des news globales via RSS ;
 - récupération des news d'une série ;
 - récupération des news d'un volume ;
 - récupération du planning manga VF et manga VO ;
 - filtres locaux sur le planning : éditeur, plage de dates, recherche textuelle, tri ;
 - cache SQLite persistant avec fallback sur cache périmé si l'upstream casse temporairement ;
-- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc`, avec schémas de réponse détaillés visibles dans Swagger/ReDoc.
+- docs OpenAPI natives de FastAPI sur `/docs` et `/redoc`.
 
 ## Ce que cette V1 ne fait pas encore
 
 - provider anime séparé ;
 - enrichissement cross-source ;
 - pagination multi-pages automatisée côté upstream.
-
-
-## Champs détaillés désormais exposés
-
-Les fiches série et volume documentent maintenant explicitement dans l'OpenAPI :
-
-- les champs bibliographiques classiques ;
-- les stats (`likes`, collection, wishlist, notes rédaction/lecteurs) ;
-- les détails d'illustration (`page_count`, `has_color_pages`) ;
-- les thèmes ;
-- l'extrait de critique ;
-- les séries liées / recommandations ;
-- les dossiers, l'univers, les liens externes ;
-- les URL utiles (`buy_digital_url`, `games_url`, `goodies_url`).
 
 ## Variables d'environnement principales
 
@@ -147,6 +136,59 @@ curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
 ```bash
 curl -H "Authorization: Bearer MON_TOKEN" "http://localhost:8017/search?q=one%20piece"
 ```
+
+
+### Fiche série partielle
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,vf.volumes"
+```
+
+### Fiche série par blocs
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "blocks=editions,stats"
+```
+
+### Fiche volume partielle
+
+```bash
+curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
+  --data-urlencode "fields=title,publication_date,isbn_ean"
+```
+
+### Fiche avec sections brutes
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "blocks=identity,presentation" \
+  --data-urlencode "include_raw_sections=true"
+```
+
+### Editions d'une série
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/editions" \
+  --data-urlencode "edition=all"
+```
+
+### Liens / relations d'une série
+
+```bash
+curl "http://localhost:8017/series/One-piece-Edition-originale/related"
+```
+
+## Projection partielle : quand c'est utile
+
+Tu peux demander uniquement certains blocs ou certains champs sur les endpoints `series` et `volume`.
+
+- `blocks` sert à récupérer un groupe logique : `identity`, `staff`, `publishing`, `presentation`, `editions`, `stats`, `related`, `raw` pour les séries ; `identity`, `staff`, `publishing`, `presentation`, `release`, `scores`, `related`, `raw` pour les volumes.
+- `fields` sert à cibler précisément un champ ou un sous-champ : `vf.volumes`, `publication_date`, `stats.reader_score`, etc.
+- `include_raw_sections=true` ajoute aussi les sections textuelles brutes extraites de la page.
+
+Important : cette projection réduit surtout la **taille de la réponse** et simplifie l'intégration côté client. Elle ne réduit **pas** le coût du scraping upstream, parce que l'API doit quand même charger et parser la page complète avant de projeter les données utiles.
 
 ## Notes de conception
 

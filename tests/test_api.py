@@ -11,21 +11,6 @@ def test_health_endpoint():
 
 
 
-def test_openapi_exposes_series_and_volume_schemas():
-    with TestClient(app) as client:
-        response = client.get('/openapi.json')
-    assert response.status_code == 200
-    payload = response.json()
-    schemas = payload['components']['schemas']
-    assert 'SeriesResponse' in schemas
-    assert 'SeriesData' in schemas
-    assert 'VolumeResponse' in schemas
-    assert 'VolumeData' in schemas
-    assert 'related_series' in schemas['SeriesData']['properties']
-    assert 'stats' in schemas['VolumeData']['properties']
-
-
-
 def test_planning_endpoint_with_stubbed_service():
     class DummyService:
         async def get_planning(self, **kwargs):
@@ -76,3 +61,51 @@ def test_planning_endpoint_with_stubbed_service():
     assert payload['ok'] is True
     assert payload['data']['section'] == 'manga-vf'
     assert payload['data']['items'][0]['publisher'] == 'Glénat'
+
+
+
+def test_series_route_forwards_projection_params():
+    class DummyService:
+        async def get_series(self, **kwargs):
+            assert kwargs['slug'] == 'One-piece-Edition-originale'
+            assert kwargs['blocks'] == 'editions,stats'
+            assert kwargs['fields'] == 'title,vf.volumes'
+            assert kwargs['include_raw_sections'] is True
+            return {
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-21T12:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'data': {
+                    'title': 'One Piece',
+                    'vf': {'volumes': 112},
+                    'stats': {'likes': 531},
+                    'raw_sections': {'resume': ['Résumé principal de la série.']},
+                },
+            }
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/series/One-piece-Edition-originale?blocks=editions,stats&fields=title,vf.volumes&include_raw_sections=true')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['data']['vf']['volumes'] == 112
+    assert 'raw_sections' in payload['data']
+
+
+
+def test_openapi_exposes_series_and_editions_routes():
+    with TestClient(app) as client:
+        response = client.get('/openapi.json')
+    assert response.status_code == 200
+    payload = response.json()
+    assert '/series/{slug}/editions' in payload['paths']
+    assert '/series/{slug}/related' in payload['paths']
+    schemas = payload['components']['schemas']
+    assert 'SeriesData' in schemas
+    assert 'SeriesEditionsData' in schemas
