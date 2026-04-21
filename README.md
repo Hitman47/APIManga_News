@@ -1,259 +1,423 @@
 # Manga News Private API
 
-API privée et auto-hébergeable pour interroger **Manga News**, normaliser les réponses utiles, puis les exposer en JSON avec cache SQLite et ETag.
+API non officielle, auto-hébergeable, qui expose en JSON des données publiques de Manga-News.
 
-Le projet est pensé pour deux usages :
-- **un outil personnel** qui a besoin d'une source JSON stable au-dessus du HTML de Manga News ;
-- **une autre IA ou un autre développeur** qui doit pouvoir démarrer rapidement sans relire tout le code.
+## Ce que l'API fait maintenant
 
-## Ce que l'API fait réellement
+- contrat canonique sous `/v1/...`
+- routes legacy non versionnées désactivées par défaut
+- cache SQLite persistant
+- cache négatif court pour éviter de retaper en boucle une ressource cassée ou inexistante
+- token public et token admin séparés
+- ETag / `If-None-Match`
+- erreurs machine-readable avec `code` stable
+- pagination structurée sur les endpoints de liste
+- normalisation volume renforcée : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`
+- rate limiting configurable via `.env`, variables d'environnement ou compose
+- endpoint admin de métriques
+- capture optionnelle du HTML brut lors d'un échec de parsing
+- script de smoke tests prêt à lancer
 
-Routes publiques actuellement disponibles :
-- `GET /health`
-- `GET /search`
-- `GET /search/resolve`
-- `GET /series/{slug}`
-- `GET /series/by-url`
-- `GET /series/{slug}/related`
-- `GET /series/by-url/related`
-- `GET /series/{slug}/editions`
-- `GET /series/by-url/editions`
-- `GET /volume/{series_slug}/{volume_slug}`
-- `GET /volume/by-url`
-- `GET /news/global`
-- `GET /news/series/{slug}`
-- `GET /news/volume/{series_slug}/{volume_slug}`
-- `GET /news/volume/by-url`
-- `GET /planning`
+## Contrat d'API
 
-Fonctions utiles déjà en place :
-- recherche série / volume ;
-- résolution du meilleur match ;
-- fiches détaillées série et volume ;
-- titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées **et** dans les résultats de recherche quand l'enrichissement réussit ;
-- normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning et les éditions de série ;
-- projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
-- cache SQLite persistant avec stale cache et negative cache ;
-- ETag / `If-None-Match` / `304 Not Modified` ;
-- documentation OpenAPI native via `/docs`, `/redoc`, `/openapi.json` ;
-- exemples JSON versionnés dans `docs/examples/`.
+Utilise uniquement les routes `/v1/...`.
 
-## Ce que l'API ne fait pas
+Exemples :
+- `/v1/health`
+- `/v1/search`
+- `/v1/search/resolve`
+- `/v1/lookup/volume`
+- `/v1/series/{slug}`
+- `/v1/volume/{series_slug}/{volume_slug}`
+- `/v1/news/global`
+- `/v1/planning`
+- `/v1/admin/cache/stats`
+- `/v1/admin/metrics`
 
-Important pour éviter les mauvaises hypothèses :
-- **pas** de préfixe `/v1` ;
-- **pas** d'endpoint public de watch / monitoring métier ;
-- **pas** de multi-provider : la source métier est Manga News ;
-- **pas** de pagination métier normalisée dans les réponses ;
-- **pas** d'admin API publique aujourd'hui ;
-- **pas** de recherche dédiée du type `title_vo=...` ou `translated_title=...` : les titres alternatifs sont exposés, pas recherchés séparément.
+### Pourquoi il y avait des doublons `/v1/...` et non versionnés
 
-## Lecture recommandée de la doc
+Il n'y avait pas de différence métier. Les routes non versionnées servaient uniquement de compatibilité ancienne. Elles sont maintenant bloquées par défaut.
 
-Pour un humain ou une IA, l'ordre utile est :
-1. ce `README.md` ;
-2. [`docs/API_INTEGRATION.md`](docs/API_INTEGRATION.md) ;
-3. [`docs/OPENAPI_AND_AI_USAGE.md`](docs/OPENAPI_AND_AI_USAGE.md) ;
-4. [`docs/examples/README.md`](docs/examples/README.md) et quelques JSON réels ;
-5. [`docs/USE_CASES_AND_RECIPES.md`](docs/USE_CASES_AND_RECIPES.md) ;
-6. [`docs/DEPLOYMENT_AND_OPERATIONS.md`](docs/DEPLOYMENT_AND_OPERATIONS.md) si tu déploies ;
-7. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) si tu veux comprendre les choix internes.
+Pour les réactiver explicitement :
 
-## Démarrage rapide
+```env
+ENABLE_LEGACY_ROUTES=true
+```
 
-### Local
+En pratique, pour un nouveau client, il n'y a aucune bonne raison d'utiliser autre chose que `/v1`.
+
+## Installation locale
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8017
 ```
 
-Par défaut, Uvicorn servira l'API sur `http://localhost:8000`.
+API disponible sur `http://localhost:8017`.
 
-### Docker Compose
+## Docker Compose
 
 ```bash
 docker compose up -d --build
 ```
 
-Le `docker-compose.yml` expose le conteneur sur `http://localhost:8017`.
+### Changements explicites faits dans le compose
 
-## Authentification
+J'ai ajouté ces variables dans `docker-compose.yml` :
+- `ADMIN_TOKEN`
+- `ENABLE_LEGACY_ROUTES`
+- `DEBUG_CAPTURE_HTML_ON_ERROR`
+- `DEBUG_HTML_DUMP_DIR`
+- `NEGATIVE_CACHE_ENABLED`
+- `NEGATIVE_CACHE_TTL_SECONDS`
+- `RATE_LIMIT_ENABLED`
+- `RATE_LIMIT_REQUESTS`
+- `RATE_LIMIT_WINDOW_SECONDS`
+- `RATE_LIMIT_SCOPE`
+- `RATE_LIMIT_INCLUDE_ADMIN`
+- `RATE_LIMIT_EXEMPT_PATHS`
 
-Si `API_TOKEN` est vide, l'API est ouverte.
+Pourquoi :
+- avant, une partie des comportements utiles était cachée dans le code ;
+- maintenant, tout ce qui compte côté exploitation est réglable par stack ou `.env`.
 
-Si `API_TOKEN` est défini, toutes les routes publiques attendent :
+## Variables d'environnement utiles
 
-```http
-Authorization: Bearer <token>
-```
+Voir `.env.example` pour la liste complète.
 
-En cas d'échec, la réponse actuelle est :
+Les plus importantes :
+- `API_TOKEN` : token Bearer des endpoints publics
+- `ADMIN_TOKEN` : token Bearer des endpoints admin ; si vide, fallback sur `API_TOKEN`
+- `DB_PATH` : chemin du cache SQLite
+- `CACHE_TTL_*` : TTL par famille de données
+- `CACHE_STALE_GRACE_SECONDS` : durée d'utilisation du stale cache en fallback
+- `NEGATIVE_CACHE_ENABLED` : active le cache négatif
+- `NEGATIVE_CACHE_TTL_SECONDS` : durée du cache négatif
+- `DEBUG_CAPTURE_HTML_ON_ERROR` : sauvegarde le HTML brut lors d'un échec de parsing
+- `DEBUG_HTML_DUMP_DIR` : dossier de dump du HTML de debug
+- `REQUEST_MAX_RETRIES` et `REQUEST_BACKOFF_SECONDS` : robustesse réseau vers Manga-News
+- `ENABLE_LEGACY_ROUTES` : réactive les routes non versionnées
+- `RATE_LIMIT_ENABLED` : active le rate limiting
+- `RATE_LIMIT_REQUESTS` et `RATE_LIMIT_WINDOW_SECONDS` : quota et fenêtre
+- `RATE_LIMIT_SCOPE` : `ip`, `token`, `ip_or_token`
+- `RATE_LIMIT_INCLUDE_ADMIN` : inclure ou non les routes admin
+- `RATE_LIMIT_EXEMPT_PATHS` : chemins exemptés
+
+## Headers utiles
+
+Les réponses peuvent exposer :
+- `ETag: "<fingerprint>"`
+- `X-Data-Fingerprint: <fingerprint>`
+- `X-Cache-Status: MISS|HIT|STALE`
+- `X-Request-ID: <id>`
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining`
+- `X-RateLimit-Reset`
+- `Retry-After` si `429`
+
+## Format d'erreur
 
 ```json
 {
-  "detail": {
-    "code": "AUTH_REQUIRED",
-    "detail": "Missing or invalid bearer token."
+  "ok": false,
+  "code": "INVALID_REQUEST",
+  "detail": "Unknown volume field path: bogus"
+}
+```
+
+Codes principaux :
+- `INVALID_REQUEST`
+- `AUTH_REQUIRED`
+- `RESOURCE_NOT_FOUND`
+- `UPSTREAM_FETCH_ERROR`
+- `UPSTREAM_PARSE_ERROR`
+- `RATE_LIMITED`
+- `ENDPOINT_NOT_FOUND`
+
+## Pagination structurée
+
+Les endpoints de liste renvoient un bloc `pagination`.
+
+```json
+{
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "returned": 10,
+    "total": 34,
+    "has_more": true
   }
 }
 ```
 
-Oui, ce format 401 n'est pas identique aux 404/502. La doc le documente tel qu'il est aujourd'hui, sans prétendre qu'il est plus propre qu'il ne l'est.
+Appliqué à :
+- `/v1/search`
+- `/v1/search/resolve`
+- `/v1/news/*`
+- `/v1/planning`
+- `/v1/lookup/volume`
 
-## Premiers appels utiles
+## Tolérance aux variantes de titre
 
-### Health
+La recherche n'est pas un simple `contains` naïf. Avant comparaison, l'API normalise les titres et calcule un score de similarité.
 
-```bash
-curl http://localhost:8017/health
+La normalisation actuelle :
+- retire les accents ;
+- passe en minuscules ;
+- remplace la ponctuation par des espaces ;
+- normalise les espaces ;
+- remplace `&` par `and` ;
+- enlève certains bruits éditoriaux comme `collector`, `édition originale`, `vol.`, `tome`, etc.
+
+Exemple concret :
+- Manga News : `Dogs: Bullets & Carnage`
+- chez toi : `Dogs - Bullets & Carnage`
+
+Les deux chaînes convergent vers une forme proche de :
+
+```text
+dogs bullets and carnage
 ```
 
-### Recherche de série
+Donc ce cas est déjà absorbé par la logique de matching actuelle.
 
-```bash
-curl --get "http://localhost:8017/search" \
-  --data-urlencode "q=one piece" \
-  --data-urlencode "kind=series" \
-  --data-urlencode "mode=all" \
-  --data-urlencode "limit=5"
-```
+### Où c'est implémenté
 
-### Résolution directe du meilleur résultat
+- `app/utils.py`
+  - `normalize_text(...)`
+  - `score_match(...)`
+- `app/manga_news/parsers.py`
+  - `parse_search_page(...)`
 
-```bash
-curl --get "http://localhost:8017/search/resolve" \
-  --data-urlencode "q=one piece tome 91" \
-  --data-urlencode "kind=volume" \
-  --data-urlencode "limit=10"
-```
+### Ce qui est renvoyé au client
 
-### Fiche série
+Le champ `score` dans les résultats de recherche est déjà le taux de similarité exploitable, sur 100.
 
-```bash
-curl "http://localhost:8017/series/One-piece-Edition-originale"
-```
-
-### Fiche volume
-
-```bash
-curl "http://localhost:8017/volume/One-Piece/vol-91"
-```
-
-### Planning VF filtré
-
-```bash
-curl --get "http://localhost:8017/planning" \
-  --data-urlencode "section=manga-vf" \
-  --data-urlencode "year=2026" \
-  --data-urlencode "month=4" \
-  --data-urlencode "publisher=Glénat" \
-  --data-urlencode "sort=date_asc" \
-  --data-urlencode "limit=25"
-```
-
-### Même appel avec token
-
-```bash
-curl -H "Authorization: Bearer MON_TOKEN" \
-  "http://localhost:8017/search?q=one%20piece"
-```
-
-## Contrat HTTP commun
-
-La plupart des routes renvoient une enveloppe comme celle-ci :
+Exemple simplifié sur `/v1/search` :
 
 ```json
 {
-  "schema_version": "1.0",
-  "ok": true,
-  "found": true,
-  "source": "manga_news",
-  "source_url": "https://www.manga-news.com/...",
-  "cached": false,
-  "fetched_at": "2026-04-20T12:00:00+00:00",
-  "cache_expires_at": "2026-04-21T12:00:00+00:00",
-  "partial": false,
-  "warnings": [],
-  "fingerprint": "...",
-  "data": {}
+  "title": "Dogs: Bullets & Carnage",
+  "url": "https://www.manga-news.com/index.php/serie/Dogs-Bullets-Carnage",
+  "kind": "series",
+  "score": 100,
+  "slug": "Dogs-Bullets-Carnage"
 }
 ```
 
-Les champs importants :
-- `cached`: la réponse vient du cache local ;
-- `partial`: l'API a servi une entrée stale car l'upstream a échoué ;
-- `warnings`: détails utiles quand `partial=true` ;
-- `fingerprint`: hash métier utilisé pour l'ETag ;
-- `source_url`: page Manga News réellement utilisée.
+Sur `/v1/search/resolve`, tu récupères en plus `confidence` :
+- `high`
+- `medium`
+- `low`
+- `none`
 
-### Headers utiles
+### Limite importante
 
-Sur les routes enveloppées, l'API peut renvoyer :
-- `ETag: "<fingerprint>"`
-- `X-Data-Fingerprint: <fingerprint>`
+Le scoring ne peut classer que les résultats que Manga News renvoie déjà.
+Si Manga News ne remonte pas un titre dans sa page de recherche, le score ne peut pas l'inventer.
 
-Tu peux ensuite rejouer la requête avec :
+## Normalisation volume
 
-```http
-If-None-Match: "<fingerprint>"
+Les payloads volume exposent notamment :
+
+```json
+{
+  "number": "91",
+  "number_int": 91,
+  "edition_label": "edition_originale",
+  "is_special": false,
+  "is_one_shot": null
+}
 ```
 
-Si rien n'a changé, la réponse sera `304 Not Modified`.
+## Cache négatif
 
-## Projections série / volume
+Le cache négatif évite de re-solliciter immédiatement Manga-News quand une ressource est :
+- inexistante
+- temporairement cassée
+- impossible à parser
 
-Les routes détail série et volume acceptent :
-- `blocks` : blocs métier prédéfinis ;
-- `fields` : chemins ciblés ;
-- `include_raw_sections=true` : inclut `raw_sections`.
+C'est volontairement court. Le but n'est pas de masquer durablement un problème, juste d'éviter les rafales inutiles.
 
-Exemple minimal sur une série :
+Réglage minimal :
 
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
-  --data-urlencode "fields=title,vf.volumes,next_release_date"
+```env
+NEGATIVE_CACHE_ENABLED=true
+NEGATIVE_CACHE_TTL_SECONDS=120
 ```
 
-Exemple sur un volume :
+## Capture HTML de debug sur erreur de parsing
 
-```bash
-curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
-  --data-urlencode "blocks=identity,release" \
-  --data-urlencode "fields=cover_image"
+Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, l'API sauvegarde :
+- le HTML brut ayant échoué
+- un fichier JSON compagnon avec l'URL, le parser et l'erreur
+
+Exemple :
+
+```env
+DEBUG_CAPTURE_HTML_ON_ERROR=true
+DEBUG_HTML_DUMP_DIR=/tmp/manga-news-debug-html
 ```
 
-## Exemples JSON fournis
+Usage réel :
+- tu actives ça seulement quand Manga-News change son HTML ou quand un parser casse ;
+- tu regardes le dump ;
+- tu corriges le parseur ;
+- tu peux ensuite le désactiver.
 
-Voir [`docs/examples/README.md`](docs/examples/README.md).
+## Endpoint admin de métriques
 
-Les exemples les plus utiles pour démarrer sont :
-- [`docs/examples/search_response_one_piece.json`](docs/examples/search_response_one_piece.json)
-- [`docs/examples/resolve_response_one_piece.json`](docs/examples/resolve_response_one_piece.json)
-- [`docs/examples/series_one_piece.json`](docs/examples/series_one_piece.json)
-- [`docs/examples/volume_one_piece_110.json`](docs/examples/volume_one_piece_110.json)
-- [`docs/examples/planning_example.json`](docs/examples/planning_example.json)
-- [`docs/examples/error_upstream_parse.json`](docs/examples/error_upstream_parse.json)
+Route :
+- `GET /v1/admin/metrics`
 
-## Validation locale
+Cette route expose des compteurs simples, utiles en exploitation :
+- réponses HTTP par classe
+- hits/misses de cache
+- stale fallbacks
+- hits de cache négatif
+- erreurs de parsing
+- erreurs upstream
+- nombre de `429`
+- ratios dérivés (`cache_hit_ratio`, `negative_cache_hit_ratio`, `upstream_error_ratio`)
 
-Avant de livrer ou consommer l'API :
+## Endpoint admin de cache
+
+Routes :
+- `GET /v1/admin/cache/stats`
+- `POST /v1/admin/cache/invalidate`
+
+`/v1/admin/cache/stats` expose :
+- stats du cache principal
+- stats du cache négatif
+- stats des snapshots watch
+
+## Requêtes rapides
+
+### Santé
 
 ```bash
-python scripts/validate_contract_and_docs.py
+curl http://localhost:8017/v1/health
+```
+
+### Résoudre un volume directement
+
+```bash
+curl "http://localhost:8017/v1/lookup/volume?series=One%20Piece&number=91"
+```
+
+### Charger une série
+
+```bash
+curl "http://localhost:8017/v1/series/One-piece-Edition-originale"
+```
+
+### Charger un volume
+
+```bash
+curl "http://localhost:8017/v1/volume/One-Piece/vol-91"
+```
+
+### Planning filtré
+
+```bash
+curl --get "http://localhost:8017/v1/planning" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "publisher=Glénat" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "sort=date_desc" \
+  --data-urlencode "limit=10"
+```
+
+## Smoke tests One Piece
+
+Fichiers utiles :
+- `docs/ONE_PIECE_API_TESTS.txt`
+- `scripts/run_api_smoke_tests.py`
+
+### 1) Démarrer l'API
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8017
+```
+
+ou :
+
+```bash
+docker compose up -d --build
+```
+
+### 2) Vérifier que l'API répond
+
+```bash
+curl http://localhost:8017/v1/health
+```
+
+### 3) Lancer le batch de tests
+
+Linux / macOS :
+
+```bash
+export BASE_URL="http://localhost:8017/v1"
+export TOKEN="ton_token_public"
+export ADMIN_TOKEN="ton_token_admin"
+python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN"
+```
+
+Windows PowerShell :
+
+```powershell
+$env:BASE_URL = "http://localhost:8017/v1"
+$env:TOKEN = "ton_token_public"
+$env:ADMIN_TOKEN = "ton_token_admin"
+python .\scripts\run_api_smoke_tests.py --base-url $env:BASE_URL --token $env:TOKEN --admin-token $env:ADMIN_TOKEN
+```
+
+### 4) Où lire les sorties
+
+Par défaut, le script écrit des fichiers JSON dans `api_test_outputs/`.
+
+S'il n'a pas les droits d'écriture, il tente automatiquement :
+- le dossier demandé
+- un dossier à côté du script
+- le dossier temporaire système
+
+Tu peux aussi forcer le dossier :
+
+```bash
+python scripts/run_api_smoke_tests.py --output-dir /tmp/api_test_outputs
+```
+
+Ou désactiver complètement l'écriture des sorties :
+
+```bash
+python scripts/run_api_smoke_tests.py --output-dir ""
+```
+
+### 5) Code retour du script
+
+- `0` : tout passe
+- `1` : au moins un test échoue
+
+### 6) Lancer aussi la suite Note: les tests asynchrones sont pris en charge directement via `pytest-asyncio`, déjà inclus dans `requirements.txt`. Aucun plugin supplémentaire n’est à installer si tu fais `pip install -r requirements.txt`.
+
+pytest
+
+```bash
 pytest
 ```
 
-## Notes honnêtes sur l'état actuel
+Le script de smoke test vérifie le contrat HTTP. `pytest` vérifie le projet.
 
-Quelques variables existent dans la config mais **ne pilotent pas encore les routes publiques actuelles** :
-- `ADMIN_TOKEN`
-- `REQUEST_MAX_RETRIES`
-- `REQUEST_BACKOFF_SECONDS`
-- `DEFAULT_LIMIT`
-- `LOG_FORMAT`
-- `RATE_LIMIT_*`
+## OpenAPI
 
-Elles sont présentes parce que le projet a déjà préparé ces concepts, mais la doc n'en fait pas des features actives tant qu'elles ne sont pas réellement branchées au runtime.
+OpenAPI et `/docs` montrent uniquement les routes `/v1` quand les routes legacy sont désactivées.
+
+## Ce qu'il faut retenir
+
+- utilise `/v1` partout
+- sépare `API_TOKEN` et `ADMIN_TOKEN`
+- active le rate limit si l'API est exposée à d'autres outils
+- garde le cache négatif court
+- n'active le dump HTML que pour diagnostiquer un parseur cassé

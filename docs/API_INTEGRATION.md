@@ -1,43 +1,37 @@
-# Guide d'intégration API
+# API Integration Guide
 
-Ce document sert de référence pratique pour un développeur, un service externe ou une autre IA.
+Guide de consommation de l'API pour un autre service, agent, script ou outil.
 
-## 1. Base URL
+## Base URL
 
-Selon l'endroit depuis lequel tu appelles l'API :
-- réseau Docker : `http://manga-news-api:8000`
-- machine hôte : `http://localhost:8017`
-- LAN : `http://<ip-hote>:8017`
+Contrat canonique :
+- Docker : `http://manga-news-api:8000/v1`
+- machine hôte : `http://localhost:8017/v1`
+- LAN : `http://<host-ip>:8017/v1`
 
-Le contrat public **n'a pas** de préfixe `/v1`.
+Ne t'appuie pas sur les routes non versionnées. Elles sont bloquées par défaut.
 
-## 2. Authentification
+## Auth
 
-### Cas 1 — API ouverte
-Si `API_TOKEN` est vide, aucun header n'est nécessaire.
+### Endpoints publics
 
-### Cas 2 — API protégée
-Si `API_TOKEN` est défini, ajoute :
+Si `API_TOKEN` est défini :
 
 ```http
-Authorization: Bearer <token>
+Authorization: Bearer <api-token>
 ```
 
-### Réponse 401 actuelle
-Le format exact actuel est :
+### Endpoints admin
 
-```json
-{
-  "detail": {
-    "code": "AUTH_REQUIRED",
-    "detail": "Missing or invalid bearer token."
-  }
-}
+Si `ADMIN_TOKEN` est défini, les routes `/v1/admin/...` attendent :
+
+```http
+Authorization: Bearer <admin-token>
 ```
 
-## 3. Enveloppe commune
+Si `ADMIN_TOKEN` est vide, fallback sur `API_TOKEN`.
 
-Toutes les routes métier sauf `/health` renvoient une enveloppe standard :
+## Enveloppe commune
 
 ```json
 {
@@ -52,433 +46,314 @@ Toutes les routes métier sauf `/health` renvoient une enveloppe standard :
   "partial": false,
   "warnings": [],
   "fingerprint": "...",
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "returned": 10,
+    "total": 34,
+    "has_more": true
+  },
   "data": {}
 }
 ```
 
-### Sens des champs importants
-- `found=false` : la route a répondu correctement mais sans ressource exploitable ;
-- `cached=true` : la réponse vient du cache SQLite ;
-- `partial=true` : la réponse provient d'un cache stale utilisé après échec upstream ;
-- `warnings` : message explicatif, généralement lié à `partial=true` ;
-- `fingerprint` : hash métier stable servant d'ETag ;
-- `source_url` : URL Manga News effectivement utilisée.
+`pagination` est optionnel, mais présent sur les endpoints de liste.
 
-## 4. Gestion du cache côté client
+## Erreurs stables
 
-Quand un `fingerprint` est présent, l'API renvoie aussi :
-- `ETag: "<fingerprint>"`
-- `X-Data-Fingerprint: <fingerprint>`
+```json
+{
+  "ok": false,
+  "code": "INVALID_REQUEST",
+  "detail": "Unknown volume field path: bogus"
+}
+```
 
-Tu peux alors envoyer :
+Codes à gérer côté client :
+- `INVALID_REQUEST`
+- `AUTH_REQUIRED`
+- `RESOURCE_NOT_FOUND`
+- `UPSTREAM_FETCH_ERROR`
+- `UPSTREAM_PARSE_ERROR`
+- `RATE_LIMITED`
+- `ENDPOINT_NOT_FOUND`
+
+## Headers utiles
+
+- `ETag`
+- `X-Data-Fingerprint`
+- `X-Cache-Status`
+- `X-Request-ID`
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining`
+- `X-RateLimit-Reset`
+- `Retry-After` si `429`
+
+### Requête conditionnelle
 
 ```http
 If-None-Match: "<fingerprint>"
 ```
 
-Si rien n'a changé, l'API répond `304 Not Modified` avec un corps vide.
+Si rien n'a changé : `304 Not Modified`.
 
-## 5. Erreurs documentées
+## Endpoints principaux
 
-### 404
+### Santé
+- `GET /health`
 
-```json
-{
-  "code": "RESOURCE_NOT_FOUND",
-  "detail": "Resource not found on Manga News."
-}
-```
+### Recherche
+- `GET /search?q=...&kind=series|volume|all&mode=best|all&limit=10`
+- `GET /search/resolve?q=...&kind=series|volume|all&limit=10`
 
-### 502 — parsing
+### Série
+- `GET /series/{slug}`
+- `GET /series/by-url?url=...`
+- `GET /series/{slug}/related`
+- `GET /series/by-url/related?url=...`
+- `GET /series/{slug}/editions?edition=all|vf|vo`
+- `GET /series/by-url/editions?url=...&edition=all|vf|vo`
 
-```json
-{
-  "code": "UPSTREAM_PARSE_ERROR",
-  "detail": "Unable to extract the volume title."
-}
-```
+### Volume
+- `GET /lookup/volume?series=...&number=...&limit=10`
+- `GET /volume/{series_slug}/{volume_slug}`
+- `GET /volume/by-url?url=...`
 
-Si `DEBUG_CAPTURE_HTML_ON_ERROR=true`, le détail peut inclure :
+### News
+- `GET /news/global?limit=10`
+- `GET /news/series/{slug}?limit=10`
+- `GET /news/volume/{series_slug}/{volume_slug}?limit=10`
+- `GET /news/volume/by-url?url=...&limit=10`
+
+### Planning
+- `GET /planning?section=manga-vf|manga-vo&year=2026&month=4&page=1&publisher=...&q=...&date_from=...&date_to=...&sort=date_asc|date_desc|title_asc|title_desc&limit=25`
+
+### Admin
+- `GET /admin/cache/stats`
+- `POST /admin/cache/invalidate`
+- `GET /admin/metrics`
+
+## Matching tolérant et score de similarité
+
+La recherche est tolérante aux petites variations de titre. Avant calcul, l'API normalise les chaînes puis applique un fuzzy matching.
+
+Normalisation appliquée :
+- accents retirés ;
+- casse ignorée ;
+- ponctuation remplacée par des espaces ;
+- espaces normalisés ;
+- `&` remplacé par `and` ;
+- bruit éditorial courant réduit (`collector`, `édition originale`, `vol.`, `tome`, etc.).
+
+Exemple réel :
+- requête locale : `Dogs - Bullets & Carnage`
+- titre Manga News : `Dogs: Bullets & Carnage`
+
+Ces deux formes matchent très haut, parce qu'elles convergent vers une forme normalisée proche de :
 
 ```text
-Debug HTML saved to /tmp/manga-news-debug-html/volume-....html
+dogs bullets and carnage
 ```
 
-### 502 — fetch upstream
+### Où c'est implémenté
 
-```json
-{
-  "code": "UPSTREAM_FETCH_ERROR",
-  "detail": "Manga News returned HTTP 503."
-}
-```
+- `app/utils.py`
+  - `normalize_text(...)`
+  - `score_match(...)`
+- `app/manga_news/parsers.py`
+  - `parse_search_page(...)`
 
-## 6. Référence route par route
+### Ce que le client reçoit
 
-### 6.1 `GET /health`
-
-Usage : vérifier que l'application répond.
-
-Réponse :
-
-```json
-{ "ok": true }
-```
-
----
-
-### 6.2 `GET /search`
-
-Usage : rechercher des séries ou des volumes à partir d'un texte libre.
-
-Paramètres :
-- `q` : texte libre, obligatoire ;
-- `kind` : `series`, `volume`, `all` ;
-- `mode` : `best` ou `all` ;
-- `limit` : 1 à 50.
-
-Exemple :
-
-```bash
-curl --get "http://localhost:8017/search" \
-  --data-urlencode "q=black night parade" \
-  --data-urlencode "kind=series" \
-  --data-urlencode "mode=all" \
-  --data-urlencode "limit=5"
-```
-
-Résultat typique par item :
+Sur `/search`, chaque résultat expose :
 - `title`
 - `url`
 - `kind`
 - `score`
-- `slug`
-- `series_slug`
-- `volume_slug`
-- `title_vo`
-- `translated_title`
+- éventuellement `slug`, `series_slug`, `volume_slug`, `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`
 
-Important :
-- `mode=best` retourne **une liste** contenant au mieux un seul item ;
-- `title_vo` et `translated_title` sont enrichis en allant lire la fiche détaillée quand c'est possible ;
-- si l'enrichissement échoue, le résultat principal reste retourné.
-
----
-
-### 6.3 `GET /search/resolve`
-
-Usage : obtenir directement le meilleur candidat et sa confiance.
-
-Paramètres :
-- `q`
-- `kind`
-- `limit`
+Le champ `score` est le signal de similarité exploitable côté client, sur 100.
 
 Exemple :
 
-```bash
-curl --get "http://localhost:8017/search/resolve" \
-  --data-urlencode "q=one piece tome 110" \
-  --data-urlencode "kind=volume" \
-  --data-urlencode "limit=10"
+```json
+{
+  "title": "Dogs: Bullets & Carnage",
+  "url": "https://www.manga-news.com/index.php/serie/Dogs-Bullets-Carnage",
+  "kind": "series",
+  "score": 100,
+  "slug": "Dogs-Bullets-Carnage"
+}
 ```
 
-Réponse :
-- `data.query`
-- `data.kind_requested`
-- `data.confidence` (`high`, `medium`, `low`, `none`)
-- `data.best`
-- `data.candidates`
+Sur `/search/resolve`, l'API ajoute :
+- `confidence`
 
----
+Interprétation pratique :
+- `score` = similarité fine chiffrée ;
+- `confidence` = lecture qualitative de ce score pour décider vite.
 
-### 6.4 `GET /series/{slug}`
-### 6.5 `GET /series/by-url`
+### Recommandation côté client
 
-Usage : fiche détaillée d'une série.
+- si tu veux choisir parmi plusieurs candidats, utilise `/search` et trie/interprète `score` ;
+- si tu veux le meilleur candidat directement, utilise `/search/resolve` et contrôle `confidence` ;
+- ne traite pas un `score` élevé comme une preuve absolue si Manga News remonte peu de résultats ou des titres très voisins.
 
-Paramètres communs :
-- `blocks` : liste CSV de blocs métier ;
-- `fields` : liste CSV de chemins ciblés ;
-- `include_raw_sections` : booléen.
+## Flux recommandés
 
-#### Blocs série disponibles
-- `identity`
-- `staff`
-- `publishing`
-- `presentation`
-- `editions`
-- `stats`
-- `related`
-- `raw` / `raw_sections`
-
-#### Champs métier importants de la fiche série
-- `title`
-- `title_vo`
-- `translated_title`
-- `summary`
-- `authors_story`
-- `authors_art`
-- `translators`
-- `publisher_fr`
-- `publisher_vo`
-- `collection`
-- `type`
-- `genres`
-- `prepublication`
-- `origin`
-- `illustration`
-- `illustration_details`
-- `advisory_age`
-- `cover_image`
-- `vf`
-- `vo`
-- `last_release_date`
-- `next_release_date`
-- `stats`
-- `themes`
-- `strengths`
-- `related`
-- `raw_sections` si demandé
-
-Exemple léger :
-
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
-  --data-urlencode "fields=title,title_vo,translated_title,vf.volumes,next_release_date"
-```
-
-Exemple bloc + champ :
-
-```bash
-curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
-  --data-urlencode "blocks=identity,stats" \
-  --data-urlencode "fields=cover_image"
-```
-
----
-
-### 6.6 `GET /series/{slug}/related`
-### 6.7 `GET /series/by-url/related`
-
-Usage : récupérer les liens liés à une série.
-
-Structure :
-- `series`
-- `volumes`
-- `anime`
-- `drama`
-- `dossiers`
-- `univers`
-- `external`
-- `misc`
-
-Chaque entrée est un `LinkItem` avec `title`, `url`, `kind`.
-
----
-
-### 6.8 `GET /series/{slug}/editions`
-### 6.9 `GET /series/by-url/editions`
-
-Usage : récupérer les éditions VF / VO d'une série.
-
-Paramètre :
-- `edition=all|vf|vo`
-
-Structure :
-- `data.title`
-- `data.series_slug`
-- `data.vf`
-- `data.vo`
-
-Chaque item d'édition expose notamment :
-- `title`
-- `url`
-- `series_slug`
-- `volume_slug`
-- `number`
-- `number_int`
-- `edition_label`
-- `is_special`
-- `is_one_shot`
-- `publication_date`
-- `cover_image`
-
----
-
-### 6.10 `GET /volume/{series_slug}/{volume_slug}`
-### 6.11 `GET /volume/by-url`
-
-Usage : fiche détaillée d'un volume.
-
-Paramètres communs :
-- `blocks`
-- `fields`
-- `include_raw_sections`
-
-#### Blocs volume disponibles
-- `identity`
-- `staff`
-- `publishing`
-- `presentation`
-- `release`
-- `scores`
-- `related`
-- `raw` / `raw_sections`
-
-#### Champs métier importants de la fiche volume
-- `title`
-- `series_title`
-- `number`
-- `number_int`
-- `edition_label`
-- `is_special`
-- `is_one_shot`
-- `title_vo`
-- `translated_title`
-- `summary`
-- `authors_story`
-- `authors_art`
-- `translators`
-- `publisher_fr`
-- `publisher_vo`
-- `collection`
-- `type`
-- `genres`
-- `prepublication`
-- `origin`
-- `illustration`
-- `illustration_details`
-- `advisory_age`
-- `publication_date`
-- `isbn_ean`
-- `price_code`
-- `cover_image`
-- `editorial_score`
-- `reader_score`
-- `related`
-- `raw_sections` si demandé
-
-Exemple :
-
-```bash
-curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
-  --data-urlencode "blocks=identity,release,scores" \
-  --data-urlencode "fields=cover_image"
-```
-
----
-
-### 6.12 `GET /news/global`
-
-Usage : flux RSS global Manga News, normalisé en JSON.
-
-Paramètre :
-- `limit`
-
-Chaque item expose :
-- `title`
-- `url`
-- `published_at`
-- `excerpt`
-- `comments`
-- `category`
-
----
-
-### 6.13 `GET /news/series/{slug}`
-
-Usage : news liées à une série.
-
-Paramètre :
-- `limit`
-
----
-
-### 6.14 `GET /news/volume/{series_slug}/{volume_slug}`
-### 6.15 `GET /news/volume/by-url`
-
-Usage : news liées à un volume.
-
-Paramètre :
-- `limit`
-
-Le endpoint `by-url` est utile quand tu n'as qu'une URL Manga News complète.
-
----
-
-### 6.16 `GET /planning`
-
-Usage : récupérer une page de planning VF ou VO, puis filtrer localement.
-
-Paramètres :
-- `section=manga-vf|manga-vo`
-- `year`
-- `month`
-- `page`
-- `publisher`
-- `q`
-- `date_from`
-- `date_to`
-- `sort=date_asc|date_desc|title_asc|title_desc`
-- `limit`
-
-Important :
-- la route ne fait **pas** de pagination métier universelle ;
-- elle va chercher **une page upstream**, puis applique des filtres locaux ;
-- `total_items` correspond au total **après** filtrage local sur la page chargée, pas à un total global multi-pages côté Manga News.
-
-Chaque item du planning expose notamment :
-- `title`
-- `url`
-- `release_date`
-- `authors`
-- `publisher`
-- `summary`
-- `featured`
-- `series_slug`
-- `volume_slug`
-- `number`
-- `number_int`
-- `edition_label`
-- `is_special`
-- `is_one_shot`
-
-## 7. Flux d'intégration recommandés
-
-### 7.1 À partir d'un titre libre, charger la fiche série
+### Charger une série
 1. `GET /search/resolve?q=<titre>&kind=series`
-2. récupérer `data.best.slug`
+2. lire `data.best.slug`
 3. `GET /series/{slug}`
+4. stocker l'`ETag`
+5. réutiliser `If-None-Match`
 
-### 7.2 À partir d'un titre libre, charger la fiche volume
-1. `GET /search/resolve?q=<titre>&kind=volume`
-2. récupérer `series_slug` et `volume_slug`
-3. `GET /volume/{series_slug}/{volume_slug}`
+### Charger un volume à partir du titre de série et du numéro
+1. `GET /lookup/volume?series=One%20Piece&number=91`
+2. lire `data.resolved.series_slug` et `data.resolved.volume_slug`
+3. consommer directement `data.volume`
 
-### 7.3 UI légère
-- utilise `fields=` ou `blocks=` pour éviter les payloads complets ;
-- stocke `fingerprint` et `ETag` ;
-- rejoue avec `If-None-Match`.
+C'est la route la plus propre si tu connais déjà la série et le numéro.
 
-### 7.4 Synchronisation robuste
-- si `partial=true`, ne détruis pas ta donnée locale ;
-- lis `warnings` ;
-- considère que le cache stale a été servi à cause d'un problème upstream.
+### Charger un volume déjà résolu
+1. `GET /volume/{series_slug}/{volume_slug}`
+2. stocker l'`ETag`
+3. réutiliser `If-None-Match`
 
-## 8. Règles simples pour une autre IA
+## Pagination
 
-Tu peux donner ces règles à un agent consommateur :
-- n'invente jamais de route absente de `/openapi.json` ;
-- n'invente pas de `/v1` ;
-- suppose que tous les champs métier peuvent être absents ou `null` ;
-- pour une recherche, essaie d'abord `/search/resolve` avant `/search` si tu veux un seul candidat ;
-- pour une UI ou un prompt compact, privilégie `fields=` ;
-- exploite `title_vo` et `translated_title` quand ils sont présents, mais ne suppose pas qu'ils existeront à chaque fois ;
-- si tu vois `partial=true`, ne présente pas le résultat comme une donnée fraîche.
+Appliquée à :
+- `/search`
+- `/search/resolve`
+- `/news/*`
+- `/planning`
+- `/lookup/volume`
 
-## 9. Limitations connues
+Le client ne doit plus deviner la taille logique de la réponse.
 
-- Le parsing dépend du HTML public de Manga News.
-- Certaines variables de config existent sans être branchées au runtime public actuel.
-- Les recherches enrichissent les titres alternatifs via des lectures de fiches détaillées ; c'est plus riche, mais aussi plus coûteux qu'un simple scraping de page de recherche.
+## Champs volume normalisés
+
+Les payloads volume exposent :
+- `number`
+- `number_int`
+- `edition_label`
+- `is_special`
+- `is_one_shot`
+
+Exemple :
+
+```json
+{
+  "number": "91",
+  "number_int": 91,
+  "edition_label": "edition_originale",
+  "is_special": false,
+  "is_one_shot": null
+}
+```
+
+## Cache négatif
+
+Le cache négatif évite de re-solliciter trop vite Manga-News quand une ressource est :
+- absente (`RESOURCE_NOT_FOUND`)
+- temporairement indisponible (`UPSTREAM_FETCH_ERROR`)
+- cassée côté parsing (`UPSTREAM_PARSE_ERROR`)
+
+Ce cache doit rester court. Son but n'est pas de masquer les erreurs, juste d'éviter les rafales inutiles.
+
+Variables utiles :
+- `NEGATIVE_CACHE_ENABLED`
+- `NEGATIVE_CACHE_TTL_SECONDS`
+
+## Dump HTML de debug
+
+Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, l'API sauvegarde le HTML brut et un JSON compagnon sur erreur de parsing.
+
+Variables utiles :
+- `DEBUG_CAPTURE_HTML_ON_ERROR`
+- `DEBUG_HTML_DUMP_DIR`
+
+Usage conseillé :
+- active-le uniquement pour diagnostiquer un parseur cassé ;
+- récupère le dump ;
+- corrige le parseur ;
+- désactive ensuite.
+
+## Métriques admin
+
+`GET /admin/metrics` expose des compteurs simples, utiles pour un opérateur :
+- réponses HTTP par classe
+- cache hits / misses / stale fallbacks
+- hits de cache négatif
+- erreurs de parsing
+- erreurs upstream
+- retries upstream
+- nombre de `429`
+- ratios dérivés (`cache_hit_ratio`, `negative_cache_hit_ratio`, `upstream_error_ratio`)
+
+## Cache stats admin
+
+`GET /admin/cache/stats` expose :
+- stats du cache principal
+- stats du cache négatif
+- stats des snapshots watch
+
+`POST /admin/cache/invalidate` permet d'invalider :
+- par `cache_key`
+- par `namespace`
+- par `resource_url`
+- seulement les expirés
+- ou tout le cache
+
+## Rate limiting
+
+Variables utiles :
+- `RATE_LIMIT_ENABLED`
+- `RATE_LIMIT_REQUESTS`
+- `RATE_LIMIT_WINDOW_SECONDS`
+- `RATE_LIMIT_SCOPE`
+- `RATE_LIMIT_INCLUDE_ADMIN`
+- `RATE_LIMIT_EXEMPT_PATHS`
+
+Le client doit :
+- respecter `429`
+- lire `Retry-After`
+- éviter les boucles agressives sur les endpoints admin
+
+## Tests et validation
+
+### Smoke tests HTTP
+
+```bash
+python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN"
+```
+
+### Si le dossier de sortie n'est pas inscriptible
+
+```bash
+python scripts/run_api_smoke_tests.py --output-dir /tmp/api_test_outputs
+```
+
+ou
+
+```bash
+python scripts/run_api_smoke_tests.py --output-dir ""
+```
+
+### Suite projet
+
+```bash
+Note: les tests asynchrones sont pris en charge directement via `pytest-asyncio`, déjà inclus dans `requirements.txt`. Aucun plugin supplémentaire n’est à installer si tu fais `pip install -r requirements.txt`.
+
+pytest
+```
+
+## Recommandations de client
+
+- consomme uniquement `/v1`
+- conserve et rejoue les `ETag`
+- gère explicitement `429`, `401`, `404`, `502`
+- exploite `lookup/volume` au lieu de reconstruire des recherches floues
+- ne traite pas `UPSTREAM_PARSE_ERROR` comme une absence définitive de donnée
+- si l'API est critique, surveille `/v1/admin/metrics`
+- si la similarité de titre compte, exploite `score` sur `/v1/search` et `confidence` sur `/v1/search/resolve`
