@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.cache import SQLiteCache
-from app.manga_news.service import MangaNewsService, project_resource_payload
+from app.manga_news.service import MangaNewsService, project_resource_payload, versioned_cache_key
 
 
 SERIES_PAYLOAD = {
@@ -163,3 +163,52 @@ async def test_get_volume_enriches_with_parent_series_counts(tmp_path: Path):
 
     assert response.data['vf']['volumes'] == 112
     assert response.data['vo']['volumes'] == 114
+
+
+@pytest.mark.asyncio
+async def test_get_series_ignores_incompatible_cached_payload_and_refetches(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    series_url = f'{base_url}/index.php/serie/One-piece-Edition-originale'
+    cache = SQLiteCache(tmp_path / 'cache.sqlite3')
+    cache.set(
+        cache_key=versioned_cache_key('series', series_url),
+        payload={
+            '_schema_version': 'outdated-cache-version',
+            'data': {
+                'title': 'One Piece',
+                'vf': None,
+                'vo': None,
+                'source_url': series_url,
+            },
+            'source_url': series_url,
+        },
+        ttl_seconds=3600,
+        stale_grace_seconds=3600,
+        namespace='series',
+        resource_url=series_url,
+    )
+
+    fetcher = _FakeFetcher({
+        series_url: Path('tests/fixtures/series_one_piece.html').read_text(encoding='utf-8'),
+    })
+    settings = SimpleNamespace(
+        manga_news_base_url=base_url,
+        cache_stale_grace_seconds=3600,
+        cache_ttl_search_seconds=3600,
+        cache_ttl_series_seconds=3600,
+        cache_ttl_volume_seconds=3600,
+        cache_ttl_news_global_seconds=3600,
+        cache_ttl_news_series_seconds=3600,
+        cache_ttl_planning_seconds=3600,
+        search_score_threshold=1,
+        max_limit=50,
+        negative_cache_enabled=True,
+        negative_cache_ttl_seconds=120,
+    )
+    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=cache)
+
+    response = await service.get_series(slug='One-piece-Edition-originale')
+
+    assert response.data['vf']['volumes'] == 112
+    assert response.data['vo']['volumes'] == 114
+    assert fetcher.calls == [series_url]

@@ -37,7 +37,7 @@ from app.utils import clean_ws, fingerprint_data, is_manga_news_url, make_cache_
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-04-21-vfvo-1'
+CACHE_SCHEMA_VERSION = '2026-04-21-vfvo-2'
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
@@ -205,8 +205,13 @@ class MangaNewsService:
             detail = f'{detail} Debug HTML saved to {dump_path}'
         return ParseError(detail, debug_dump_path=dump_path)
 
+    def _is_compatible_cache_payload(self, payload: dict[str, Any]) -> bool:
+        return payload.get('_schema_version') == CACHE_SCHEMA_VERSION
+
     async def _cached_payload(self, *, cache_key: str, ttl_seconds: int, loader, namespace: str | None = None, resource_url: str | None = None):
         entry = self.cache.get(cache_key)
+        if entry and not self._is_compatible_cache_payload(entry.payload):
+            entry = None
         if entry and entry.is_fresh:
             return entry.payload, entry, True, False, []
 
@@ -220,7 +225,7 @@ class MangaNewsService:
             self.cache.clear_negative(cache_key)
             cached_entry = self.cache.set(
                 cache_key=cache_key,
-                payload={'data': payload, 'source_url': source_url},
+                payload={'_schema_version': CACHE_SCHEMA_VERSION, 'data': payload, 'source_url': source_url},
                 ttl_seconds=ttl_seconds,
                 stale_grace_seconds=self.settings.cache_stale_grace_seconds,
                 namespace=namespace,

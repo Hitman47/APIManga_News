@@ -42,3 +42,6 @@ Recommandation pour les consommateurs :
 - ne jamais inventer `/v1` ;
 - repartir de `/openapi.json` pour les routes ;
 - utiliser ce changelog pour repérer les changements documentaires ou contractuels visibles.
+
+
+- 2026-04-21: invalidation automatique des anciennes entrées de cache incompatibles pour `series`, `volume`, `search` et `search/resolve`, afin d'éviter de conserver des payloads sans `vf` / `vo` après une mise à jour du parseur.

@@ -265,3 +265,8 @@ Les compteurs `vf` / `vo` proviennent en priorité du bloc HTML `#numberblock` d
 Quand un résultat de recherche cible un **volume**, l'API relit aussi la fiche **série parente** pour injecter ces compteurs dans le résultat.
 
 Après un changement de parseur, il faut redémarrer l'API. Les clés de cache métier intègrent désormais une version interne, ce qui évite de relire un ancien payload incompatible après mise à jour.
+
+
+## Note de cache importante
+
+Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.

@@ -482,3 +482,8 @@ Tu peux donner ces règles à un agent consommateur :
 - Le parsing dépend du HTML public de Manga News.
 - Certaines variables de config existent sans être branchées au runtime public actuel.
 - Les recherches enrichissent les titres alternatifs via des lectures de fiches détaillées ; c'est plus riche, mais aussi plus coûteux qu'un simple scraping de page de recherche.
+
+
+## Note de cache importante
+
+Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.

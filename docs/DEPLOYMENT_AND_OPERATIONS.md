@@ -199,3 +199,8 @@ Quand un parseur change (par exemple pour mieux lire `#numberblock`), il faut re
 Les clés de cache métier intègrent une version interne afin d'éviter la réutilisation silencieuse d'anciens payloads incompatibles.
 
 En cas de doute lors d'un déploiement, tu peux aussi supprimer le fichier SQLite de cache pour repartir d'un état vierge.
+
+
+## Note de cache importante
+
+Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
