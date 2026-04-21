@@ -6,25 +6,38 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from app.models import ApiErrorResponse, HealthResponse, PlanningResponse, ResolveResponse, SearchResponse, SeriesEditionsResponse, SeriesRelatedResponse, SeriesResponse, VolumeResponse
+from app.models import (
+    ApiErrorResponse,
+    HealthResponse,
+    NewsResponse,
+    PlanningResponse,
+    ResolveResponse,
+    SearchResponse,
+    SeriesEditionsResponse,
+    SeriesRelatedResponse,
+    SeriesResponse,
+    VolumeResponse,
+)
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
 EXAMPLE_MODEL_MAP = {
-    'search_response_one_piece.json': SearchResponse,
+    'health.json': HealthResponse,
+    'search_response_dogs_volume.json': SearchResponse,
     'resolve_response_one_piece.json': ResolveResponse,
     'series_one_piece.json': SeriesResponse,
     'volume_one_piece_91.json': VolumeResponse,
+    'news_global_one_piece_sample.json': NewsResponse,
     'planning_example.json': PlanningResponse,
     'series_related_one_piece.json': SeriesRelatedResponse,
     'series_editions_one_piece.json': SeriesEditionsResponse,
+    'error_resource_not_found.json': ApiErrorResponse,
     'error_upstream_parse.json': ApiErrorResponse,
-    'health.json': HealthResponse,
 }
 
 MARKDOWN_LINK_RE = re.compile(r'\[[^\]]+\]\(([^)]+)\)')
-URL_ROUTE_RE = re.compile(r'https?://([^\s/`")]+)(/[^\s)`"]*)')
-BACKTICK_ROUTE_RE = re.compile(r'`((?:GET|POST)\s+/[^`\s]+|/[^`\s]+)`')
+METHOD_ROUTE_RE = re.compile(r'\b(?:GET|POST|PUT|DELETE|PATCH)\s+(/[^\s`]+)')
+RUNTIME_URL_RE = re.compile(r'https?://(?:localhost|127\.0\.0\.1|manga-news-api|<host>|<host-ip>)(?::\d+)?(/[^\s)"`\']*)')
 
 
 def load_openapi_schema() -> dict[str, Any]:
@@ -40,40 +53,55 @@ def validate_openapi_schema(schema: dict[str, Any] | None = None) -> list[str]:
         return ['OpenAPI schema is not a dictionary.']
     if 'openapi' not in schema:
         errors.append('Missing top-level "openapi" key.')
-    if 'paths' not in schema or not isinstance(schema['paths'], dict):
+    paths = schema.get('paths')
+    if not isinstance(paths, dict):
         errors.append('Missing top-level "paths" dictionary.')
         return errors
+
     required_paths = {
         '/health',
         '/search',
         '/search/resolve',
         '/series/{slug}',
+        '/series/by-url',
         '/series/{slug}/related',
+        '/series/by-url/related',
         '/series/{slug}/editions',
+        '/series/by-url/editions',
         '/volume/{series_slug}/{volume_slug}',
+        '/volume/by-url',
         '/news/global',
+        '/news/series/{slug}',
+        '/news/volume/{series_slug}/{volume_slug}',
+        '/news/volume/by-url',
         '/planning',
     }
-    missing = sorted(required_paths - set(schema['paths']))
+    missing = sorted(required_paths - set(paths))
     if missing:
         errors.append(f'Missing required OpenAPI paths: {", ".join(missing)}')
-    versioned = sorted(path for path in schema['paths'] if re.match(r'^/v\d+/', path))
+    versioned = sorted(path for path in paths if re.match(r'^/v\d+/', path))
     if versioned:
         errors.append(f'Unexpected versioned API paths found: {", ".join(versioned)}')
+
+    info = schema.get('info') or {}
+    if not info.get('description'):
+        errors.append('OpenAPI info.description is empty.')
+
+    for path in ['/search', '/search/resolve', '/series/{slug}', '/volume/{series_slug}/{volume_slug}', '/planning']:
+        operation = (paths.get(path) or {}).get('get') or {}
+        if not operation.get('summary'):
+            errors.append(f'OpenAPI summary missing for {path}')
+        if not operation.get('description'):
+            errors.append(f'OpenAPI description missing for {path}')
     return errors
 
 
-def _iter_doc_like_files(root_dir: Path) -> list[Path]:
+def _iter_markdown_files(root_dir: Path) -> list[Path]:
     files = [root_dir / 'README.md']
     docs_dir = root_dir / 'docs'
     if docs_dir.exists():
         files.extend(sorted(docs_dir.rglob('*.md')))
-        files.extend(sorted(docs_dir.rglob('*.txt')))
     return [path for path in files if path.exists()]
-
-
-def _iter_markdown_files(root_dir: Path) -> list[Path]:
-    return [path for path in _iter_doc_like_files(root_dir) if path.suffix.lower() == '.md']
 
 
 def find_broken_markdown_links(root_dir: str | Path | None = None) -> list[str]:
@@ -92,9 +120,50 @@ def find_broken_markdown_links(root_dir: str | Path | None = None) -> list[str]:
                 continue
             candidate = (markdown_file.parent / clean_target).resolve()
             if not candidate.exists():
-                rel = candidate.relative_to(base) if candidate.is_absolute() and str(candidate).startswith(str(base.resolve())) else candidate
+                rel = candidate.relative_to(base) if str(candidate).startswith(str(base.resolve())) else candidate
                 errors.append(f'{markdown_file.relative_to(base)} -> {target} (missing: {rel})')
     return errors
+
+
+def _path_matches_template(path: str, template: str) -> bool:
+    path_parts = [part for part in path.split('/') if part]
+    template_parts = [part for part in template.split('/') if part]
+    if len(path_parts) != len(template_parts):
+        return False
+    for actual, templ in zip(path_parts, template_parts):
+        if templ.startswith('{') and templ.endswith('}'):
+            continue
+        if actual != templ:
+            return False
+    return True
+
+
+def _is_valid_runtime_path(path: str, templates: set[str]) -> bool:
+    if path in {'/docs', '/redoc', '/openapi.json'}:
+        return True
+    return any(_path_matches_template(path, template) for template in templates)
+
+
+def find_invalid_api_references(root_dir: str | Path | None = None, schema: dict[str, Any] | None = None) -> list[str]:
+    base = Path(root_dir) if root_dir else ROOT_DIR
+    schema = schema or load_openapi_schema()
+    templates = set((schema.get('paths') or {}).keys())
+    errors: list[str] = []
+    for markdown_file in _iter_markdown_files(base):
+        content = markdown_file.read_text(encoding='utf-8')
+        refs = []
+        refs.extend(METHOD_ROUTE_RE.findall(content))
+        refs.extend(RUNTIME_URL_RE.findall(content))
+        for path in refs:
+            parsed_path = urlparse(path).path if '://' in path else path
+            parsed_path = parsed_path.rstrip('`').split('?', 1)[0].split('#', 1)[0]
+            if '...' in parsed_path:
+                continue
+            if not parsed_path.startswith('/'):
+                continue
+            if not _is_valid_runtime_path(parsed_path, templates):
+                errors.append(f'{markdown_file.relative_to(base)} references unknown runtime path: {parsed_path}')
+    return sorted(set(errors))
 
 
 def validate_example_files(root_dir: str | Path | None = None) -> list[str]:
@@ -117,76 +186,4 @@ def validate_example_files(root_dir: str | Path | None = None) -> list[str]:
             model.model_validate(payload)
         except Exception as exc:  # pragma: no cover - pydantic error details vary
             errors.append(f'Example docs/examples/{name} does not match {model.__name__}: {exc}')
-    return errors
-
-
-def _normalize_documented_path(raw_path: str) -> str:
-    path = raw_path.strip()
-    if path.startswith(('GET ', 'POST ')):
-        _, path = path.split(' ', 1)
-    if not path.startswith('/'):
-        parsed = urlparse(path)
-        path = parsed.path or '/'
-    path = path.split('?', 1)[0].rstrip('/') or '/'
-    return path
-
-
-def _matches_openapi_path(path: str, openapi_paths: set[str]) -> bool:
-    if path in openapi_paths:
-        return True
-    path_parts = [part for part in path.strip('/').split('/') if part]
-    for template in openapi_paths:
-        template_parts = [part for part in template.strip('/').split('/') if part]
-        if len(path_parts) != len(template_parts):
-            continue
-        matched = True
-        for got, expected in zip(path_parts, template_parts):
-            if expected.startswith('{') and expected.endswith('}'):
-                continue
-            if got != expected:
-                matched = False
-                break
-        if matched:
-            return True
-    return False
-
-
-def _extract_documented_api_paths(content: str) -> list[str]:
-    documented: list[str] = []
-    allowed_hosts = {'localhost:8017', '127.0.0.1:8017', 'manga-news-api:8000', '<host-ip>:8017'}
-    for line in content.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if 'curl ' in stripped:
-            for host, path in URL_ROUTE_RE.findall(stripped):
-                if host in allowed_hosts:
-                    documented.append(_normalize_documented_path(path))
-            continue
-        if stripped.startswith('- `GET ') or stripped.startswith('- `POST ') or stripped.startswith('`GET ') or stripped.startswith('`POST '):
-            for match in BACKTICK_ROUTE_RE.findall(stripped):
-                documented.append(_normalize_documented_path(match))
-            continue
-        if stripped.startswith('- `/'):
-            for match in BACKTICK_ROUTE_RE.findall(stripped):
-                if '...' in match or '*' in match:
-                    continue
-                documented.append(_normalize_documented_path(match))
-    return documented
-
-
-def find_documented_unknown_api_paths(root_dir: str | Path | None = None, schema: dict[str, Any] | None = None) -> list[str]:
-    base = Path(root_dir) if root_dir else ROOT_DIR
-    schema = schema or load_openapi_schema()
-    openapi_paths = set((schema.get('paths') or {}).keys())
-    allowed_non_api = {'/docs', '/redoc', '/openapi.json'}
-    errors: list[str] = []
-    for doc_file in _iter_doc_like_files(base):
-        content = doc_file.read_text(encoding='utf-8')
-        for path in _extract_documented_api_paths(content):
-            if path in allowed_non_api:
-                continue
-            if _matches_openapi_path(path, openapi_paths):
-                continue
-            errors.append(f'{doc_file.relative_to(base)} documents an unknown API path: {path}')
     return errors

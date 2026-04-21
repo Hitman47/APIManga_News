@@ -1,146 +1,83 @@
-Tests manuels One Piece pour l'API Manga News
-============================================
-
-Base URL recommandée
---------------------
+BASE URL par défaut :
 http://localhost:8017
 
-Variables utiles
-----------------
-Linux / macOS
-export BASE_URL="http://localhost:8017"
-export TOKEN="ton_token_public"
+Si API_TOKEN est défini :
+export TOKEN="ton_token"
+alias apicurl='curl -sS -H "Authorization: Bearer '$TOKEN'"'
 
-Windows PowerShell
-$env:BASE_URL = "http://localhost:8017"
-$env:TOKEN = "ton_token_public"
+Sans auth :
+alias apicurl='curl -sS'
 
-Règle simple
-------------
-- si `API_TOKEN` est actif chez toi, ajoute `Authorization: Bearer $TOKEN`
-- si pas d'auth, enlève simplement le header Authorization
-- il n'y a pas de routes admin publiques à tester dans cette version
+1) Santé
+apicurl "http://localhost:8017/health"
 
-Santé
------
-curl -sS "$BASE_URL/health"
+2) Recherche série One Piece
+apicurl --get "http://localhost:8017/search" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=all" \
+  --data-urlencode "limit=10"
 
-Trouver le tome 91 de One Piece
--------------------------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search?q=one%20piece%20tome%2091&kind=volume&mode=all&limit=10"
+Attendus minimaux :
+- `data[0].title` cohérent
+- `data[0].score` élevé
+- `data[0].title_vo` si disponible
+- `data[0].vf` et `data[0].vo` sur un bon résultat série enrichi
 
-Résoudre directement le meilleur match du tome 91
--------------------------------------------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search/resolve?q=one%20piece%20tome%2091&kind=volume&limit=10"
+3) Resolve série One Piece
+apicurl --get "http://localhost:8017/search/resolve" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "limit=10"
 
-Fiche volume 91
----------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/volume/One-Piece/vol-91"
+Attendus minimaux :
+- `data.best.slug = One-piece-Edition-originale`
+- `data.confidence` non vide
 
-Fiche volume 91 via URL
------------------------
-curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/volume/by-url" --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-91"
+4) Fiche série
+apicurl "http://localhost:8017/series/One-piece-Edition-originale"
 
-News liées au volume 91
------------------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/news/volume/One-Piece/vol-91?limit=10"
+Attendus minimaux :
+- `data.title = One Piece`
+- `data.vf.volumes` non nul
+- `data.vo.volumes` non nul
 
-News volume via URL
--------------------
-curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/news/volume/by-url" --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-91" --data-urlencode "limit=10"
+5) Recherche volume One Piece tome 91
+apicurl --get "http://localhost:8017/search/resolve" \
+  --data-urlencode "q=one piece tome 91" \
+  --data-urlencode "kind=volume" \
+  --data-urlencode "limit=10"
 
-Trouver la série One Piece
---------------------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search?q=one%20piece&kind=series&mode=all&limit=10"
+Attendus minimaux :
+- `data.best.series_slug = One-Piece`
+- `data.best.volume_slug = vol-91`
+- `data.best.number = 91` si l'enrichissement l'a remonté
 
-Résoudre la série One Piece
----------------------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search/resolve?q=one%20piece&kind=series&limit=10"
+6) Fiche volume 91
+apicurl "http://localhost:8017/volume/One-Piece/vol-91"
 
-Fiche série One Piece
----------------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Edition-originale"
+Attendus minimaux :
+- `data.number = 91`
+- `data.number_int = 91`
+- `data.vf.volumes` non nul
+- `data.vo.volumes` non nul
 
-Fiche série via URL
--------------------
-curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/by-url" --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+7) News globales
+apicurl "http://localhost:8017/news/global?limit=10"
 
-Liens liés à la série
----------------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Edition-originale/related"
+8) News série
+apicurl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
 
-Liens liés via URL
-------------------
-curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/by-url/related" --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+9) Planning VF avril 2026
+apicurl --get "http://localhost:8017/planning" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "year=2026" \
+  --data-urlencode "month=4" \
+  --data-urlencode "publisher=Glénat"
 
-Éditions de la série
---------------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Edition-originale/editions?edition=all"
+10) ETag
+curl -i "http://localhost:8017/series/One-piece-Edition-originale"
+curl -i "http://localhost:8017/series/One-piece-Edition-originale" -H 'If-None-Match: "<etag_précédent>"'
 
-Éditions via URL
-----------------
-curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/by-url/editions" --data-urlencode "url=https://www.manga-news.com/index.php/serie/One-piece-Edition-originale" --data-urlencode "edition=all"
-
-News globales
--------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/news/global?limit=10"
-
-News série
-----------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/news/series/One-piece-Edition-originale?limit=10"
-
-Planning VF filtré One Piece
-----------------------------
-curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/planning" --data-urlencode "section=manga-vf" --data-urlencode "q=one piece" --data-urlencode "sort=date_desc" --data-urlencode "limit=10"
-
-ETag / 304
-----------
-1) récupère d'abord un ETag :
-curl -i -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/series/One-piece-Edition-originale"
-
-2) rejoue avec If-None-Match :
-curl -i -sS -H "Authorization: Bearer $TOKEN" -H 'If-None-Match: "<etag-precedent>"' "$BASE_URL/series/One-piece-Edition-originale"
-
-Batch automatisé
-----------------
-python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN"
-
-Si problème de permissions sur api_test_outputs
------------------------------------------------
-python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --output-dir /tmp/api_test_outputs
-
-Désactiver complètement les fichiers de sortie
-----------------------------------------------
-python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --output-dir ""
-
-Tolérance aux variantes de ponctuation
---------------------------------------
-Exemple à tester manuellement :
-- chez toi : `Dogs - Bullets & Carnage`
-- sur Manga News : `Dogs: Bullets & Carnage`
-
-Commande :
-curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/search" --data-urlencode "q=Dogs - Bullets & Carnage" --data-urlencode "kind=series" --data-urlencode "mode=all" --data-urlencode "limit=10"
-
-Attendu :
-- le bon résultat doit remonter malgré la différence `:` vs `-`
-- le champ `score` doit être élevé
-- si la fiche série expose les compteurs, vérifier aussi `vf.volumes`, `vf.status`, `vo.volumes`, `vo.status`
-
-Résolution directe du meilleur match :
-curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/search/resolve" --data-urlencode "q=Dogs - Bullets & Carnage" --data-urlencode "kind=series" --data-urlencode "limit=10"
-
-Attendu :
-- `data.best.title` proche ou égal à `Dogs: Bullets & Carnage`
-- `data.best.score` élevé
-- `data.confidence` au minimum `medium`, idéalement `high`
-
-Compteurs VF / VO visibles dès la recherche
-----------------------------------------
-Commande :
-curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/search" --data-urlencode "q=One Piece" --data-urlencode "kind=series" --data-urlencode "mode=all" --data-urlencode "limit=5"
-
-Attendu :
-- le meilleur résultat série expose `vf.volumes` et `vo.volumes` si ces compteurs sont disponibles ;
-- sur le cas One Piece, on doit voir des compteurs VF et VO distincts ;
-- sur `/search/resolve`, `data.best.vf` et `data.best.vo` doivent refléter les mêmes valeurs.
+11) Batch de smoke tests
+python scripts/run_api_smoke_tests.py --base-url "http://localhost:8017" --token "$TOKEN"

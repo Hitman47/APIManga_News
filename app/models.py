@@ -40,6 +40,11 @@ class SearchResult(BaseModel):
     slug: str | None = None
     series_slug: str | None = None
     volume_slug: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
     title_vo: str | None = None
     translated_title: str | None = None
     vf: EditionStatus | None = None
@@ -58,6 +63,11 @@ class ResolveResult(BaseModel):
     slug: str | None = None
     series_slug: str | None = None
     volume_slug: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
     title_vo: str | None = None
     translated_title: str | None = None
     vf: EditionStatus | None = None
@@ -187,6 +197,8 @@ class VolumeData(BaseModel):
     cover_image: str | None = None
     editorial_score: float | None = None
     reader_score: float | None = None
+    vf: EditionStatus | None = None
+    vo: EditionStatus | None = None
     related: RelatedLinks | None = None
     raw_sections: dict[str, list[str]] | None = None
     source_url: str | None = None

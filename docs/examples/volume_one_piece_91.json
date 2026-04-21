@@ -4,14 +4,14 @@
   "found": true,
   "source": "manga_news",
   "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-91",
-  "cached": true,
-  "fetched_at": "2026-04-20T12:00:00+00:00",
-  "cache_expires_at": "2026-04-27T12:00:00+00:00",
+  "cached": false,
+  "fetched_at": "2026-04-21T10:10:10+00:00",
+  "cache_expires_at": "2026-04-28T10:10:10+00:00",
   "partial": false,
   "warnings": [],
   "fingerprint": "fp-volume-one-piece-91",
   "data": {
-    "title": "One Piece Vol.91",
+    "title": "One Piece - Tome 91",
     "series_title": "One Piece",
     "number": "91",
     "number_int": 91,
@@ -20,40 +20,29 @@
     "is_one_shot": false,
     "title_vo": "ワンピース",
     "translated_title": "One Piece",
-    "summary": "Résumé du volume.",
-    "authors_story": [
-      "Eiichirô ODA"
-    ],
-    "authors_art": [
-      "Eiichirô ODA"
-    ],
-    "translators": [
-      "Djamel RABAHI"
-    ],
+    "summary": "L'aventure continue au pays des samouraïs.",
+    "authors_story": ["Eiichirô ODA"],
+    "authors_art": ["Eiichirô ODA"],
+    "translators": ["Djamel RABAHI"],
     "publisher_fr": "Glénat",
     "publisher_vo": "Shûeisha",
     "collection": "Shonen",
     "type": "Shonen",
-    "genres": [
-      "Aventure",
-      "Fantastique"
-    ],
+    "genres": ["Aventure", "Fantastique"],
     "prepublication": "Shônen Jump",
     "origin": "Japon - 1997",
     "illustration": "208 pages n&b + couleurs",
-    "illustration_details": {
-      "raw": "208 pages n&b + couleurs",
-      "pages": 208,
-      "has_color_pages": true
-    },
-    "advisory_age": null,
+    "illustration_details": { "raw": "208 pages n&b + couleurs", "pages": 208, "has_color_pages": true },
+    "advisory_age": "8+",
     "publication_date": "2019-07-03",
     "isbn_ean": "9782344037102",
-    "price_code": "6.90 EUR",
+    "price_code": "6.90",
     "cover_image": "https://www.manga-news.com/public/images/series/one-piece-91.jpg",
-    "editorial_score": null,
-    "reader_score": null,
-    "related": null,
+    "editorial_score": 16.0,
+    "reader_score": 15.5,
+    "vf": { "volumes": 112, "status": "En cours" },
+    "vo": { "volumes": 114, "status": "En cours" },
+    "related": { "series": [], "volumes": [], "anime": [], "drama": [], "dossiers": [], "univers": [], "external": [], "misc": [] },
     "raw_sections": null,
     "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-91"
   }

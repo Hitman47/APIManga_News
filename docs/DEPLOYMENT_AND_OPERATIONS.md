@@ -1,46 +1,15 @@
-# Déploiement et exploitation
+# Deployment and Operations
 
-Ce document couvre le démarrage, la configuration et les points d'attention opérationnels du projet actuel.
+## Variables principales
 
-## 1. Modes d'exécution
+Voir `.env.example` pour la liste complète.
 
-### Local direct
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8017
-```
-
-### Docker Compose
-
-```bash
-docker compose up -d --build
-```
-
-Par défaut :
-- conteneur : port `8000` ;
-- hôte : port `8017` ;
-- cache SQLite : `./data/cache.sqlite3`.
-
-## 2. Variables utiles aujourd'hui
-
-### Accès et source
+### Variables réellement utiles au runtime actuel
 - `API_TOKEN`
-- `MANGA_NEWS_BASE_URL`
-- `USER_AGENT`
 - `DB_PATH`
-- `ENABLE_DOCS`
-- `LOG_LEVEL`
-- `LOG_FORMAT`
-
-### Réseau et fetch
 - `REQUEST_TIMEOUT_SECONDS`
 - `REQUEST_MAX_RETRIES`
 - `REQUEST_BACKOFF_SECONDS`
-
-### Cache et fraîcheur
 - `CACHE_STALE_GRACE_SECONDS`
 - `CACHE_TTL_SEARCH_SECONDS`
 - `CACHE_TTL_SERIES_SECONDS`
@@ -48,22 +17,15 @@ Par défaut :
 - `CACHE_TTL_NEWS_GLOBAL_SECONDS`
 - `CACHE_TTL_NEWS_SERIES_SECONDS`
 - `CACHE_TTL_PLANNING_SECONDS`
-
-### Recherche
 - `SEARCH_SCORE_THRESHOLD`
-- `MAX_LIMIT`
-
-### Debug et robustesse de parsing
+- `ENABLE_DOCS`
 - `DEBUG_CAPTURE_HTML_ON_ERROR`
 - `DEBUG_HTML_DUMP_DIR`
 - `NEGATIVE_CACHE_ENABLED`
 - `NEGATIVE_CACHE_TTL_SECONDS`
 
-## 3. Variables présentes mais non utilisées comme contrat public
-
-Ces variables existent dans `Settings`, mais le projet actuel ne les expose pas comme comportement public documenté :
+### Variables présentes mais non branchées sur des routes publiques aujourd'hui
 - `ADMIN_TOKEN`
-- `DEFAULT_LIMIT`
 - `RATE_LIMIT_ENABLED`
 - `RATE_LIMIT_REQUESTS`
 - `RATE_LIMIT_WINDOW_SECONDS`
@@ -71,132 +33,107 @@ Ces variables existent dans `Settings`, mais le projet actuel ne les expose pas 
 - `RATE_LIMIT_INCLUDE_ADMIN`
 - `RATE_LIMIT_EXEMPT_PATHS`
 
-Tu peux les laisser dans `.env.example`, mais ne construis pas ton exploitation publique dessus tant que le code des routes n'en dépend pas explicitement.
+Elles existent dans la configuration et certains modules internes, mais ne correspondent pas à des routes/headers publics actifs dans cette version.
 
-## 4. Configurations minimales recommandées
+## Déploiement Docker
 
-### Instance locale simple
-
-```env
-API_TOKEN=
-DB_PATH=/data/cache.sqlite3
-ENABLE_DOCS=true
-SEARCH_SCORE_THRESHOLD=60
-MAX_LIMIT=50
+```bash
+docker compose up -d --build
 ```
 
-### Instance protégée par token
+## Déploiement local Python
 
-```env
-API_TOKEN=mon_token_secret
-DB_PATH=/data/cache.sqlite3
-ENABLE_DOCS=true
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8017
 ```
 
-### Instance de debug parsing
-
-```env
-API_TOKEN=mon_token_secret
-DEBUG_CAPTURE_HTML_ON_ERROR=true
-DEBUG_HTML_DUMP_DIR=/tmp/manga-news-debug-html
-NEGATIVE_CACHE_ENABLED=true
-NEGATIVE_CACHE_TTL_SECONDS=120
-```
-
-## 5. Fichiers persistants
-
-### Cache SQLite
-Le cache vit dans `DB_PATH`.
-
-Avec le compose par défaut :
-- hôte : `./data/cache.sqlite3`
-- conteneur : `/data/cache.sqlite3`
-
-### Dumps HTML de debug
-Si activés, ils sont écrits dans `DEBUG_HTML_DUMP_DIR`.
-
-En conteneur, monte un volume si tu veux les conserver ou les analyser hors conteneur.
-
-## 6. Vérifications post-déploiement
-
-### Santé
+## Vérifications utiles
 
 ```bash
 curl http://localhost:8017/health
-```
-
-### OpenAPI
-
-```bash
 curl http://localhost:8017/openapi.json
+curl http://localhost:8017/docs
+curl http://localhost:8017/redoc
 ```
 
-### Recherche simple
+## Cache
 
-```bash
-curl --get "http://localhost:8017/search" \
-  --data-urlencode "q=one piece" \
-  --data-urlencode "kind=series"
+Le cache principal est SQLite.
+
+### Réglages utiles
+- `DB_PATH`
+- `CACHE_TTL_*`
+- `CACHE_STALE_GRACE_SECONDS`
+
+### Comportement
+- `search` : TTL court à moyen
+- `series` : TTL journalier
+- `volume` : TTL plus long
+- `news` : TTL court
+- `planning` : TTL intermédiaire
+
+## Cache négatif
+
+Le cache négatif est utile pour éviter de refrapper une ressource absente ou cassée juste après un premier échec.
+
+Réglages :
+- `NEGATIVE_CACHE_ENABLED=true|false`
+- `NEGATIVE_CACHE_TTL_SECONDS=<seconds>`
+
+## Dump HTML debug
+
+Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, le service peut sauver le HTML brut d'une page qui casse le parsing.
+
+Réglages :
+- `DEBUG_CAPTURE_HTML_ON_ERROR`
+- `DEBUG_HTML_DUMP_DIR`
+
+Exemple :
+
+```env
+DEBUG_CAPTURE_HTML_ON_ERROR=true
+DEBUG_HTML_DUMP_DIR=/tmp/manga-news-debug-html
 ```
 
-## 7. Interpréter les réponses
+## Logs
 
-### 200 classique
-L'upstream a été lu ou une entrée de cache fraîche a été servie.
+`LOG_LEVEL` et `LOG_FORMAT` existent dans la configuration.
+Le format actuel de l'application reste principalement piloté par `logging.basicConfig(...)` dans `app/main.py`.
 
-### 304
-L'`ETag` envoyé dans `If-None-Match` correspond encore au fingerprint courant.
+## Diagnostic rapide par symptôme
 
-### 404 `RESOURCE_NOT_FOUND`
-La ressource ciblée n'existe pas ou n'est plus accessible sur Manga News.
+### 1. `/docs` ou `/redoc` indisponible
+Vérifie `ENABLE_DOCS=true`.
 
-### 502 `UPSTREAM_PARSE_ERROR`
-La page a répondu, mais le parser n'a pas réussi à extraire un contrat fiable.
+### 2. `401 Unauthorized`
+Le plus souvent : `API_TOKEN` défini mais header Bearer absent ou incorrect.
 
-### 502 `UPSTREAM_FETCH_ERROR`
-L'upstream a échoué côté réseau, HTTP ou contenu vide.
+### 3. `502 UPSTREAM_FETCH_ERROR`
+Manga-News a pu répondre lentement, avec un code de panne, ou refuser temporairement.
 
-## 8. Symptômes fréquents
+Actions :
+- augmenter `REQUEST_TIMEOUT_SECONDS` ;
+- vérifier le réseau sortant ;
+- relancer plus tard ;
+- regarder les logs.
 
-### “J'ai un 401 alors que l'API tourne”
-Cause probable : `API_TOKEN` est défini côté serveur mais pas transmis côté client.
+### 4. `502 UPSTREAM_PARSE_ERROR`
+Le HTML source a probablement changé ou la page n'a pas la structure attendue.
 
-### “La réponse est partielle”
-`partial=true` signifie qu'une entrée stale a été servie. Lis aussi `warnings`.
+Actions :
+- activer `DEBUG_CAPTURE_HTML_ON_ERROR=true` ;
+- inspecter le dump HTML ;
+- écrire ou corriger un test de parser.
 
-### “Je reçois deux fois la même ParseError sans nouveau fetch”
-C'est normal si le negative cache est actif et encore frais.
+### 5. Résultats de recherche trop permissifs ou trop stricts
+Ajuster `SEARCH_SCORE_THRESHOLD`.
 
-### “Je veux le HTML qui a cassé le parser”
-Active `DEBUG_CAPTURE_HTML_ON_ERROR=true` et consulte `DEBUG_HTML_DUMP_DIR`.
-
-### “Je change mes TTL mais je ne vois pas immédiatement l'effet”
-Une entrée positive déjà en cache reste valable jusqu'à son expiration, sauf si tu repars d'un cache vide.
-
-## 9. Coût d'une recherche enrichie
-
-Une recherche série peut relire la fiche détaillée du résultat retenu pour enrichir la réponse avec :
-- `title_vo` ;
-- `translated_title` ;
-- `vf` / `vo` avec nombre de tomes et statut.
-
-Conséquence pratique :
-- `mode=all` avec beaucoup de résultats peut faire plus de fetchs qu'une simple recherche HTML brute ;
-- `mode=best` reste le choix le plus léger quand tu veux juste un meilleur candidat.
-
-## 10. Conseils d'exploitation
-
-- garde l'API derrière ton LAN ou un reverse proxy ;
-- active `API_TOKEN` si plusieurs clients l'utilisent ;
-- garde `/docs` et `/redoc` en dev ;
-- si tu t'appuies fortement sur cette API, surveille surtout les `UPSTREAM_PARSE_ERROR` ;
-- documente côté client que le planning n'est pas une API exhaustive, mais le parsing d'une page donnée.
-
-## 11. Validation avant livraison
+## Validation doc/contrat
 
 ```bash
 python scripts/validate_contract_and_docs.py
-pytest
+pytest -q
 ```
-
-Tests manuels prêts à l'emploi : [`ONE_PIECE_API_TESTS.txt`](ONE_PIECE_API_TESTS.txt).

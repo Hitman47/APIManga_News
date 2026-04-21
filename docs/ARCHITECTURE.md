@@ -1,141 +1,110 @@
 # Architecture
 
-Ce document décrit le fonctionnement réel du projet actuel : requête entrante, service métier, cache, fetch upstream et parsing.
-
 ## Vue d'ensemble
 
 ```mermaid
-flowchart LR
-    C[Client / UI / IA] --> R[Routes FastAPI]
-    R --> S[MangaNewsService]
-    S --> K[SQLiteCache]
-    S --> F[AsyncFetcher]
-    F --> U[Manga News HTML / RSS]
-    S --> P[Parsers HTML / RSS]
-    P --> M[Modèles Pydantic]
-    M --> R
+flowchart TD
+    Client --> FastAPI
+    FastAPI --> MangaNewsService
+    MangaNewsService --> SQLiteCache
+    MangaNewsService --> AsyncFetcher
+    AsyncFetcher --> MangaNews[(Manga-News)]
 ```
 
-## Chaîne de traitement d'une requête
+## Composants principaux
 
-1. **Route FastAPI**
-   - valide les paramètres ;
-   - applique l'authentification si `API_TOKEN` est configuré ;
-   - délègue au `MangaNewsService`.
+### `app/main.py`
+Expose les routes FastAPI, l'OpenAPI, Swagger UI et ReDoc.
 
-2. **Service métier**
-   - construit une clé de cache stable ;
-   - consulte le cache positif ;
-   - consulte le negative cache si activé ;
-   - fetch l'upstream si nécessaire ;
-   - parse le HTML ou le flux RSS ;
-   - construit l'enveloppe finale.
+### `app/manga_news/service.py`
+Couche métier principale.
+Responsabilités :
+- construire les URLs Manga-News ;
+- orchestrer fetch + cache + parsing ;
+- enrichir les résultats de recherche ;
+- projeter les payloads via `blocks` / `fields`.
 
-3. **SQLiteCache**
-   - stocke les réponses positives ;
-   - stocke des erreurs négatives courtes pour les ressources cassées ou absentes ;
-   - conserve une fenêtre stale pour fallback si l'upstream casse ensuite.
+### `app/manga_news/parsers.py`
+Transforme le HTML Manga-News en modèles Pydantic.
 
-4. **AsyncFetcher**
-   - récupère le HTML ou le RSS ;
-   - suit les redirections ;
-   - lève `ResourceNotFound` pour les `404` ;
-   - lève `UpstreamError` pour les autres erreurs réseau/HTTP ou réponses vides.
+### `app/cache.py`
+Cache SQLite persistant avec TTL, stale grace et cache négatif.
 
-5. **Parsers**
-   - transforment le HTML Manga News en structures Pydantic ;
-   - exposent des champs normalisés pour les volumes ;
-   - lèvent `ParseError` quand le contrat attendu n'est pas fiable.
+### `app/http.py`
+Client HTTP asynchrone, retries limités et instrumentation simple.
 
-## Flux de cache
+### `app/models.py`
+Schémas Pydantic du contrat exposé.
+
+## Flux de lecture d'une fiche série
 
 ```mermaid
-flowchart TD
-    A[Requête] --> B{Entrée positive fraîche ?}
-    B -- Oui --> C[Retour cache positif]
-    B -- Non --> D{Entrée négative fraîche ?}
-    D -- Oui --> E[Relance ParseError / ResourceNotFound]
-    D -- Non --> F[Fetch upstream]
-    F --> G{Parsing OK ?}
-    G -- Oui --> H[Écriture cache positif]
-    H --> I[Réponse]
-    G -- Non --> J[Écriture negative cache]
-    J --> K{Ancien cache stale utilisable ?}
-    K -- Oui --> L[Retour stale + warning]
-    K -- Non --> M[Erreur]
+sequenceDiagram
+    participant C as Client
+    participant A as FastAPI
+    participant S as MangaNewsService
+    participant K as SQLiteCache
+    participant M as Manga-News
+
+    C->>A: GET /series/{slug}
+    A->>S: get_series(...)
+    S->>K: lookup cache
+    alt cache hit
+        K-->>S: payload
+    else cache miss
+        S->>M: fetch HTML
+        M-->>S: page HTML
+        S->>S: parse_series_page(...)
+        S->>K: store payload
+    end
+    S-->>A: Envelope
+    A-->>C: JSON + ETag
 ```
 
-## Search vs search/resolve
+## Flux de recherche enrichie
 
-### `/search`
-- interroge plusieurs pages de recherche Manga News selon `kind` ;
-- déduplique les résultats par URL ;
-- trie par `score` décroissant ;
-- peut enrichir chaque résultat retenu avec `title_vo` et `translated_title` via la fiche détaillée ;
-- peut aussi enrichir un résultat de type `series` avec `vf` / `vo` (nombre de tomes + statut) via la fiche série détaillée.
+1. Le service appelle une ou plusieurs pages de recherche Manga-News.
+2. `parse_search_page(...)` extrait les candidats bruts.
+3. Chaque candidat reçoit un `score` fuzzy.
+4. Les meilleurs candidats sont enrichis :
+   - `title_vo`
+   - `translated_title`
+   - pour les séries : `vf` / `vo`
+   - pour les volumes : titres alternatifs + `vf` / `vo` de la série parente si disponibles
 
-### `/search/resolve`
-- s'appuie sur `/search` ;
-- sélectionne un `best` ;
-- calcule `confidence`.
-
-## Projections sur les fiches
-
-Les routes détail `series` et `volume` supportent :
-- `blocks=` pour des groupes de champs prédéfinis ;
-- `fields=` pour des chemins précis ;
-- `include_raw_sections=true` pour inclure les sections brutes parsées.
-
-Ce mécanisme sert à :
-- limiter la taille des payloads ;
-- alimenter une UI compacte ;
-- piloter une IA sans surcharger le contexte ;
-- éviter des post-traitements côté client.
-
-## Normalisation métier déjà intégrée
-
-### Titres alternatifs
+C'est ce qui permet, par exemple, à un résultat volume `Dogs: Bullets & Carnage Vol.1` de renvoyer aussi :
 - `title_vo`
 - `translated_title`
+- `vf: { volumes: 9, status: "En cours" }`
+- `vo: { volumes: 10, status: "En pause" }`
 
-Ils sont disponibles sur les fiches détaillées. Les résultats de recherche peuvent aussi les exposer après enrichissement.
+## Projection des fiches
 
-Pour les résultats de type `series`, la recherche peut également exposer :
-- `vf.volumes` / `vf.status` ;
-- `vo.volumes` / `vo.status`.
+Les routes `/series/...` et `/volume/...` supportent deux mécanismes :
+- `blocks` : projection logique par groupes de champs ;
+- `fields` : projection fine par chemins précis.
 
-### Volumes
-Les parseurs normalisent déjà plusieurs champs :
-- `number`
-- `number_int`
-- `edition_label`
-- `is_special`
-- `is_one_shot`
+Exemple :
+- `blocks=editions,stats`
+- `fields=title,vf.volumes`
 
-Ces champs remontent sur :
-- les fiches volume ;
-- les items d'éditions série ;
-- les items du planning quand ils sont inférables.
+## Cache négatif
 
-## Debug HTML sur parse error
+Le cache négatif évite de refetcher immédiatement une ressource qui a déjà échoué récemment :
+- `RESOURCE_NOT_FOUND`
+- `UPSTREAM_FETCH_ERROR`
+- `UPSTREAM_PARSE_ERROR`
 
-Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, une `ParseError` sur une route cacheable peut écrire :
-- un dump `.html` du contenu upstream ;
-- un fichier `.json` de métadonnées.
+## Dump HTML debug
 
-Le chemin peut être injecté dans le message d'erreur :
+Si `DEBUG_CAPTURE_HTML_ON_ERROR=true`, un `ParseError` sur une ressource cacheable peut provoquer l'écriture de :
+- un dump `.html` ;
+- un companion `.json` avec métadonnées de debug.
 
-```text
-Debug HTML saved to /tmp/manga-news-debug-html/...
-```
+## Ce qui n'est pas exposé aujourd'hui
 
-## Ce qui existe dans le code sans être un contrat public actif
-
-Le projet contient encore quelques briques ou variables de config qui ne sont pas exposées aujourd'hui comme API publique :
-- `ADMIN_TOKEN` ;
-- `RATE_LIMIT_*` ;
-- routes admin ;
-- préfixe de version `/v1` ;
-- endpoint `lookup/volume`.
-
-La documentation doit rester honnête là-dessus.
+Pour éviter les ambiguïtés :
+- pas de `/v1` ;
+- pas de routes admin publiques ;
+- pas de pagination top-level standard ;
+- pas de lookup volume dédié.

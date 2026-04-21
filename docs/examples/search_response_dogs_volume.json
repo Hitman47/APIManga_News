@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/recherche/?cat=manga-volume-vf&q=Dogs: Bullets & Carnage",
+  "cached": false,
+  "fetched_at": "2026-04-21T10:10:10+00:00",
+  "cache_expires_at": "2026-04-22T10:10:10+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "fp-search-dogs",
+  "data": [
+    {
+      "title": "Dogs: Bullets & Carnage Vol.1",
+      "url": "https://www.manga-news.com/index.php/manga/Dogs:-Bullets-Carnage/vol-1",
+      "kind": "volume",
+      "score": 100,
+      "slug": null,
+      "series_slug": "Dogs:-Bullets-Carnage",
+      "volume_slug": "vol-1",
+      "number": "1",
+      "number_int": 1,
+      "edition_label": null,
+      "is_special": false,
+      "is_one_shot": false,
+      "title_vo": "Dogs: Bullets & Carnage",
+      "translated_title": "Dogs: Bullets & Carnage",
+      "vf": { "volumes": 9, "status": "En cours" },
+      "vo": { "volumes": 10, "status": "En pause" }
+    }
+  ]
+}

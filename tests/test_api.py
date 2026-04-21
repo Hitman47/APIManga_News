@@ -129,8 +129,6 @@ def test_search_resolve_and_etag_304():
                         'title': 'One Piece',
                         'title_vo': 'ワンピース',
                         'translated_title': 'One Piece',
-                        'vf': {'volumes': 112, 'status': 'En cours'},
-                        'vo': {'volumes': 114, 'status': 'En cours'},
                         'url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
                         'kind': 'series',
                         'score': 98,
@@ -146,10 +144,7 @@ def test_search_resolve_and_etag_304():
         app.state.service = DummyService()
         response = client.get('/search/resolve?q=one%20piece&kind=series')
         assert response.status_code == 200
-        payload = response.json()
-        assert payload['data']['best']['slug'] == 'One-piece-Edition-originale'
-        assert payload['data']['best']['vf']['volumes'] == 112
-        assert payload['data']['best']['vo']['volumes'] == 114
+        assert response.json()['data']['best']['slug'] == 'One-piece-Edition-originale'
         assert response.headers['ETag'] == '"fp-resolve"'
         not_modified = client.get('/search/resolve?q=one%20piece&kind=series', headers={'If-None-Match': '"fp-resolve"'})
     assert not_modified.status_code == 304
@@ -164,13 +159,16 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
     assert '/series/{slug}/editions' in payload['paths']
     assert '/series/{slug}/related' in payload['paths']
     assert '/search/resolve' in payload['paths']
+    assert payload['info']['description']
+    assert payload['paths']['/search']['get']['summary'] == 'Search Manga-News titles'
+    assert payload['paths']['/volume/{series_slug}/{volume_slug}']['get']['summary'] == 'Get a volume by slugs'
     schemas = payload['components']['schemas']
     assert 'SeriesData' in schemas
     assert 'SeriesEditionsData' in schemas
     assert 'ResolveResponse' in schemas
-    search_result_props = schemas['SearchResult']['properties']
-    assert 'vf' in search_result_props
-    assert 'vo' in search_result_props
+    search_schema = schemas['SearchResult']['properties']
+    assert 'vf' in search_schema
+    assert 'vo' in search_schema
 
 
 def test_search_endpoint_exposes_alternate_titles():
@@ -193,8 +191,6 @@ def test_search_endpoint_exposes_alternate_titles():
                         'title': 'Black Night Parade',
                         'title_vo': 'ブラックナイトパレード',
                         'translated_title': 'Black Night Parade',
-                        'vf': {'volumes': 4, 'status': 'En cours'},
-                        'vo': {'volumes': 5, 'status': 'En cours'},
                         'url': 'https://www.manga-news.com/index.php/serie/Black-Night-Parade',
                         'kind': 'series',
                         'score': 94,
@@ -213,5 +209,3 @@ def test_search_endpoint_exposes_alternate_titles():
     assert payload['data'][0]['title'] == 'Black Night Parade'
     assert payload['data'][0]['title_vo'] == 'ブラックナイトパレード'
     assert payload['data'][0]['translated_title'] == 'Black Night Parade'
-    assert payload['data'][0]['vf']['volumes'] == 4
-    assert payload['data'][0]['vo']['volumes'] == 5

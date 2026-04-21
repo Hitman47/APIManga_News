@@ -1,65 +1,21 @@
-# Exemples JSON
+# JSON examples
 
-Ce dossier contient des exemples JSON **canoniques** et **validés** contre les modèles Pydantic du projet.
+Ces fichiers sont des exemples validés contre les modèles Pydantic du projet.
 
-Ils servent à :
-- comprendre rapidement la forme réelle des réponses ;
-- amorcer un client ou un prompt d'IA ;
-- écrire des tests d'intégration ;
-- vérifier qu'un changement de contrat n'a pas cassé les payloads documentés.
+Ils servent à trois choses :
+- illustrer la doc ;
+- donner un contrat d'entrée lisible à un humain ou à une IA ;
+- fournir un garde-fou de cohérence via `python scripts/validate_contract_and_docs.py`.
 
-## Exemples actuellement fournis
-
-### Santé
+Exemples principaux :
 - `health.json`
-
-### Recherche
-- `search_response_one_piece.json`
+- `search_response_dogs_volume.json`
 - `resolve_response_one_piece.json`
-
-### Série
 - `series_one_piece.json`
+- `volume_one_piece_91.json`
+- `news_global_one_piece_sample.json`
+- `planning_example.json`
 - `series_related_one_piece.json`
 - `series_editions_one_piece.json`
-
-### Volume
-- `volume_one_piece_91.json`
-- `volume_one_piece_110.json`
-
-### Planning
-- `planning_example.json`
-- `planning_manga_vf_april_2026.json`
-
-### News
-- `news_global_one_piece_sample.json`
-
-### Erreurs
 - `error_resource_not_found.json`
 - `error_upstream_parse.json`
-
-## Comment les utiliser
-
-### Pour un développeur
-- lire l'exemple avant d'écrire le mapping client ;
-- vérifier la présence de `null` et des champs optionnels ;
-- comparer ensuite à `/openapi.json`.
-
-### Pour une IA
-- charger d'abord `README.md` et `docs/API_INTEGRATION.md` ;
-- utiliser ces JSON comme exemples réalistes ;
-- ne pas inventer de champs absents de ces exemples et de l'OpenAPI.
-
-## Validation
-
-Commande :
-
-```bash
-python scripts/validate_contract_and_docs.py
-```
-
-Cette validation vérifie que les exemples canoniques restent compatibles avec les modèles du projet.
-
-## Note sur les recherches série
-
-Les exemples `search_*` et `resolve_*` peuvent contenir `vf` et `vo` sur les résultats de type `series`.
-Ces champs servent à exposer rapidement le nombre de tomes VF / VO et leur statut, sans attendre un appel séparé à `/series/{slug}`.

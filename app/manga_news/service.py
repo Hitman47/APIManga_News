@@ -262,6 +262,7 @@ class MangaNewsService:
             data=data,
         )
 
+
     async def _enrich_search_results(self, results: list[Any]) -> list[SearchResult]:
         enriched: list[SearchResult] = []
         for item in results:
@@ -279,8 +280,15 @@ class MangaNewsService:
                     data = volume_payload.get('data', {}) or {}
                     payload['title_vo'] = data.get('title_vo')
                     payload['translated_title'] = data.get('translated_title')
+                    payload['number'] = data.get('number', payload.get('number'))
+                    payload['number_int'] = data.get('number_int', payload.get('number_int'))
+                    payload['edition_label'] = data.get('edition_label', payload.get('edition_label'))
+                    payload['is_special'] = data.get('is_special', payload.get('is_special'))
+                    payload['is_one_shot'] = data.get('is_one_shot', payload.get('is_one_shot'))
+                    payload['vf'] = data.get('vf')
+                    payload['vo'] = data.get('vo')
             except Exception as exc:  # pragma: no cover - best-effort enrichment
-                logger.debug('Search result title enrichment failed for %s: %s', payload.get('url'), exc)
+                logger.debug('Search result enrichment failed for %s: %s', payload.get('url'), exc)
             enriched.append(SearchResult.model_validate(payload))
         return enriched
 
@@ -409,6 +417,7 @@ class MangaNewsService:
             resource_url=target_url,
         )
 
+
     async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
         cache_key = make_cache_key('volume', target_url)
@@ -417,6 +426,16 @@ class MangaNewsService:
             result = await self.fetcher.get_text(target_url)
             try:
                 parsed = parse_volume_page(result.text, result.url)
+                volume_data = parsed.model_dump()
+                resolved_series_slug = series_slug or self._extract_series_slug_from_volume_url(result.url)
+                if resolved_series_slug:
+                    try:
+                        series_payload, *_ = await self._get_series_payload(slug=resolved_series_slug)
+                        series_data = series_payload.get('data', {}) or {}
+                        volume_data['vf'] = series_data.get('vf')
+                        volume_data['vo'] = series_data.get('vo')
+                    except Exception as exc:  # pragma: no cover - best-effort enrichment
+                        logger.debug('Volume enrichment with series edition counts failed for %s: %s', result.url, exc)
             except ParseError as exc:
                 raise self._with_debug_dump(
                     error=exc,
@@ -425,7 +444,7 @@ class MangaNewsService:
                     cache_key=cache_key,
                     resource_kind='volume',
                 ) from exc
-            return parsed.model_dump(), result.url
+            return volume_data, result.url
 
         return await self._cached_payload(
             cache_key=cache_key,
@@ -716,6 +735,14 @@ class MangaNewsService:
         if not slug:
             raise ParseError('A series slug or URL is required.')
         return f'{self.base_url}/index.php/serie/{slug}'
+
+
+    def _extract_series_slug_from_volume_url(self, url: str) -> str | None:
+        parsed = urlparse(url)
+        parts = [part for part in parsed.path.split('/') if part]
+        if len(parts) >= 4 and parts[0] == 'index.php' and parts[1] == 'manga':
+            return parts[2]
+        return None
 
     def _resolve_volume_url(self, *, series_slug: str | None, volume_slug: str | None, url: str | None) -> str:
         if url:

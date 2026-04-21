@@ -4,52 +4,33 @@
   "found": true,
   "source": "manga_news",
   "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
-  "cached": true,
-  "fetched_at": "2026-04-20T12:00:00+00:00",
-  "cache_expires_at": "2026-04-21T12:00:00+00:00",
+  "cached": false,
+  "fetched_at": "2026-04-21T10:10:10+00:00",
+  "cache_expires_at": "2026-04-22T10:10:10+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-series",
+  "fingerprint": "fp-series-one-piece",
   "data": {
     "title": "One Piece",
     "title_vo": "ワンピース",
     "translated_title": "One Piece",
     "summary": "Résumé principal de la série.",
-    "authors_story": [
-      "Eiichirô ODA"
-    ],
-    "authors_art": [
-      "Eiichirô ODA"
-    ],
-    "translators": [
-      "Djamel RABAHI"
-    ],
+    "authors_story": ["Eiichirô ODA"],
+    "authors_art": ["Eiichirô ODA"],
+    "translators": ["Djamel RABAHI", "Julien FAVEREAU"],
     "publisher_fr": "Glénat",
     "publisher_vo": "Shûeisha",
     "collection": "Shonen",
     "type": "Shonen",
-    "genres": [
-      "Aventure",
-      "Fantastique"
-    ],
+    "genres": ["Aventure", "Fantastique"],
     "prepublication": "Shônen Jump",
     "origin": "Japon - 1997",
     "illustration": "n&b + couleurs",
-    "illustration_details": {
-      "raw": "n&b + couleurs",
-      "pages": null,
-      "has_color_pages": true
-    },
+    "illustration_details": { "raw": "n&b + couleurs", "pages": null, "has_color_pages": true },
     "advisory_age": "8+",
     "cover_image": "https://www.manga-news.com/public/images/series/one-piece.jpg",
-    "vf": {
-      "volumes": 112,
-      "status": "En cours"
-    },
-    "vo": {
-      "volumes": 114,
-      "status": "En cours"
-    },
+    "vf": { "volumes": 112, "status": "En cours" },
+    "vo": { "volumes": 114, "status": "En cours" },
     "last_release_date": "2026-04-08",
     "next_release_date": "2026-05-06",
     "stats": {
@@ -60,25 +41,19 @@
       "editorial_score": 16.23,
       "reader_score": 16.5
     },
-    "themes": [
-      "aventure fantastique pirates"
-    ],
+    "themes": ["Série manga incontournable", "aventure fantastique pirates"],
     "strengths": "Un énorme succès populaire.",
     "related": {
-      "series": [],
+      "series": [{ "title": "Monster Perfect Edition", "url": "https://www.manga-news.com/index.php/serie/Monster-perfect-edition", "kind": "series" }],
       "volumes": [],
       "anime": [],
       "drama": [],
       "dossiers": [],
-      "univers": [],
-      "external": [],
+      "univers": [{ "title": "Univers One Piece", "url": "https://www.manga-news.com/index.php/univers/One-piece", "kind": "univers" }],
+      "external": [{ "title": "Wiki externe", "url": "https://example.org/wiki/one-piece", "kind": "external" }],
       "misc": []
     },
-    "raw_sections": {
-      "resume": [
-        "Résumé principal de la série."
-      ]
-    },
+    "raw_sections": null,
     "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
   }
 }
