@@ -1,83 +1,83 @@
-BASE URL par défaut :
+Base URL locale recommandée :
 http://localhost:8017
 
-Si API_TOKEN est défini :
+Exemples de variables :
+
+Linux/macOS
+export BASE_URL="http://localhost:8017"
 export TOKEN="ton_token"
-alias apicurl='curl -sS -H "Authorization: Bearer '$TOKEN'"'
+alias apicurl='curl -sS -H "Authorization: Bearer '"$TOKEN"'"'
 
-Sans auth :
-alias apicurl='curl -sS'
+Windows PowerShell
+$env:BASE_URL = "http://localhost:8017"
+$env:TOKEN = "ton_token"
 
-1) Santé
-apicurl "http://localhost:8017/health"
+1) Health
+apicurl "$BASE_URL/health"
 
 2) Recherche série One Piece
-apicurl --get "http://localhost:8017/search" \
+apicurl --get "$BASE_URL/search" \
   --data-urlencode "q=one piece" \
   --data-urlencode "kind=series" \
-  --data-urlencode "mode=all" \
+  --data-urlencode "mode=best" \
   --data-urlencode "limit=10"
 
-Attendus minimaux :
-- `data[0].title` cohérent
-- `data[0].score` élevé
+Attendu :
+- `data[0].title = One Piece`
 - `data[0].title_vo` si disponible
-- `data[0].vf` et `data[0].vo` sur un bon résultat série enrichi
+- `data[0].vf.volumes = 112`
+- `data[0].vo.volumes = 114`
 
 3) Resolve série One Piece
-apicurl --get "http://localhost:8017/search/resolve" \
+apicurl --get "$BASE_URL/search/resolve" \
   --data-urlencode "q=one piece" \
   --data-urlencode "kind=series" \
   --data-urlencode "limit=10"
 
-Attendus minimaux :
+Attendu :
 - `data.best.slug = One-piece-Edition-originale`
-- `data.confidence` non vide
+- `data.best.vf.volumes = 112`
+- `data.best.vo.volumes = 114`
 
-4) Fiche série
-apicurl "http://localhost:8017/series/One-piece-Edition-originale"
+4) Fiche série One Piece
+apicurl "$BASE_URL/series/One-piece-Edition-originale"
 
-Attendus minimaux :
+Attendu :
 - `data.title = One Piece`
-- `data.vf.volumes` non nul
-- `data.vo.volumes` non nul
+- `data.vf.volumes = 112`
+- `data.vf.status = En cours`
+- `data.vo.volumes = 114`
+- `data.vo.status = En cours`
 
 5) Recherche volume One Piece tome 91
-apicurl --get "http://localhost:8017/search/resolve" \
+apicurl --get "$BASE_URL/search/resolve" \
   --data-urlencode "q=one piece tome 91" \
   --data-urlencode "kind=volume" \
   --data-urlencode "limit=10"
 
-Attendus minimaux :
+Attendu :
 - `data.best.series_slug = One-Piece`
 - `data.best.volume_slug = vol-91`
-- `data.best.number = 91` si l'enrichissement l'a remonté
 
 6) Fiche volume 91
-apicurl "http://localhost:8017/volume/One-Piece/vol-91"
+apicurl "$BASE_URL/volume/One-Piece/vol-91"
 
-Attendus minimaux :
+Attendu :
 - `data.number = 91`
-- `data.number_int = 91`
-- `data.vf.volumes` non nul
-- `data.vo.volumes` non nul
+- `data.vf.volumes = 112`
+- `data.vo.volumes = 114`
 
-7) News globales
-apicurl "http://localhost:8017/news/global?limit=10"
-
-8) News série
-apicurl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
-
-9) Planning VF avril 2026
-apicurl --get "http://localhost:8017/planning" \
+7) Planning VF Glénat / avril 2026 / One Piece
+apicurl --get "$BASE_URL/planning" \
   --data-urlencode "section=manga-vf" \
   --data-urlencode "year=2026" \
   --data-urlencode "month=4" \
-  --data-urlencode "publisher=Glénat"
+  --data-urlencode "publisher=Glénat" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "sort=date_desc" \
+  --data-urlencode "limit=10"
 
-10) ETag
-curl -i "http://localhost:8017/series/One-piece-Edition-originale"
-curl -i "http://localhost:8017/series/One-piece-Edition-originale" -H 'If-None-Match: "<etag_précédent>"'
-
-11) Batch de smoke tests
-python scripts/run_api_smoke_tests.py --base-url "http://localhost:8017" --token "$TOKEN"
+Si les compteurs restent `null` alors que Manga-News les affiche, vérifier :
+- que la réponse ne vient pas d'un vieux cache applicatif ;
+- que l'application tourne bien avec le build courant ;
+- que la page source contient toujours un bloc `#numberblock`.

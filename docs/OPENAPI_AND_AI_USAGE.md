@@ -1,44 +1,35 @@
-# OpenAPI, Swagger, ReDoc and AI Usage
+# OpenAPI and AI Usage
 
-## Endpoints de documentation
+## Règle de base
 
-- `/openapi.json`
-- `/docs`
-- `/redoc`
+Ne consomme que ce que `/openapi.json` expose réellement.
 
-## Ce que montre correctement l'OpenAPI actuel
+Cette version n'expose pas :
+- de préfixe `/v1` ;
+- de routes admin ;
+- de `lookup/volume`.
 
-- les routes réellement exposées ;
-- les schémas Pydantic du contrat ;
-- les summaries et descriptions principales ;
-- les exemples de réponses sur les routes clés.
+## Stratégie pour une IA
 
-## Ce que l'OpenAPI ne doit pas te faire inventer
+1. Lire `/openapi.json`.
+2. Pour trouver une ressource : commencer par `/search/resolve`.
+3. Si un slug est nécessaire : réutiliser `best.slug`, `best.series_slug` ou `best.volume_slug`.
+4. Lire ensuite `/series/{slug}` ou `/volume/{series_slug}/{volume_slug}`.
+5. Réutiliser `ETag` quand possible.
 
-La doc générée et ce guide insistent sur quatre points :
-- pas de `/v1` ;
-- pas de routes admin HTTP ;
-- pas de `lookup/volume` ;
-- pas de pagination top-level commune aux endpoints de liste.
+## Champs utiles
 
-## Mode d'emploi pour une autre IA
+Pour les recherches et résolutions :
+- `score`
+- `confidence`
+- `title_vo`
+- `translated_title`
+- `vf`
+- `vo`
+- `number`
+- `number_int`
 
-Règles de consommation sûres :
-1. Commencer par lire `/openapi.json`.
-2. Utiliser seulement les routes présentes dans `paths`.
-3. Ne pas supposer que tous les champs sont toujours présents.
-4. Utiliser `/search/resolve` pour obtenir un meilleur candidat.
-5. Utiliser `score` comme indice de similarité, pas comme vérité absolue.
-6. Réutiliser `ETag` et `If-None-Match`.
-
-### Prompt système conseillé pour un agent consommateur
-
-> Tu consommes une API Manga-News privée. Lis d'abord `/openapi.json`, puis n'utilise que les routes réellement présentes. N'invente pas de `/v1`, pas de routes admin, pas de `lookup/volume`. Pour trouver une ressource, privilégie `/search/resolve`. Tous les champs métier peuvent être absents ou null selon la page source.
-
-## ReDoc
-
-ReDoc est particulièrement utile pour :
-- parcourir les schémas ;
-- voir les champs `vf`, `vo`, `title_vo`, `translated_title` ;
-- vérifier les paramètres `blocks`, `fields`, `include_raw_sections` ;
-- relire les exemples de réponses sans ouvrir la doc markdown.
+Pour une IA ou un client automatisé :
+- les compteurs `vf` / `vo` peuvent provenir soit directement de la fiche série, soit d'un enrichissement de la série parente pour une fiche volume ;
+- ils sont attendus sur les résultats de recherche enrichis, sur `search/resolve`, sur `series/{slug}` et sur `volume/{series_slug}/{volume_slug}` ;
+- tous les champs métier peuvent être absents ou `null` selon la page source.

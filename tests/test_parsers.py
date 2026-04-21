@@ -228,15 +228,34 @@ def test_parse_series_editions_page():
     assert parsed.items[1].cover_image.endswith('one-piece-110.jpg')
 
 
-def test_parse_series_page_supports_hyphenated_vf_vo_counters():
+
+def test_parse_series_page_reads_vf_vo_from_numberblock_markup():
     html = '''
-    <html><head><meta property="og:title" content="Dogs: Bullets & Carnage - Manga news"></head><body>
-      <div>Titre VO : Dogs: Bullets & Carnage</div>
-      <div>Titre traduit : Dogs: Bullets & Carnage</div>
-      <div>VF-9 (En cours)</div>
-      <div>VO-10 (En pause)</div>
-    </body></html>
+    <html>
+      <head><meta property="og:title" content="One Piece - Manga série - Manga news" /></head>
+      <body>
+        <h1>One Piece</h1>
+        <div id="numberblock">
+          <div>
+            <div>
+              <span class="version">VF:</span><span>112</span>
+              <span class="small">(En cours)</span>
+            </div>
+          </div>
+          <div>
+            <a href="https://www.manga-news.com/index.php/serie-vo/One-Piece-vo" title="One Piece vo">
+              <span class="version">VO</span>: 114
+              <span class="small">(En cours)</span>
+            </a>
+          </div>
+        </div>
+        <div>Dernier paru</div><div>08/04/2026</div>
+        <div>A paraître</div><div>06/05/2026</div>
+      </body>
+    </html>
     '''
-    parsed = parse_series_page(html, 'https://www.manga-news.com/index.php/serie/Dogs--Bullets-Carnage')
-    assert parsed.vf is not None and parsed.vf.volumes == 9 and parsed.vf.status == 'En cours'
-    assert parsed.vo is not None and parsed.vo.volumes == 10 and parsed.vo.status == 'En pause'
+    parsed = parse_series_page(html, 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale')
+    assert parsed.vf is not None and parsed.vf.volumes == 112 and parsed.vf.status == 'En cours'
+    assert parsed.vo is not None and parsed.vo.volumes == 114 and parsed.vo.status == 'En cours'
+    assert parsed.last_release_date == '2026-04-08'
+    assert parsed.next_release_date == '2026-05-06'

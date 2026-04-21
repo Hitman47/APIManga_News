@@ -1,17 +1,9 @@
 # Manga News Private API
 
-API non officielle, auto-hébergeable, qui convertit des pages publiques de Manga-News en JSON proprement exploitable.
+API privée non officielle pour lire et normaliser des pages Manga-News.
 
-Cette documentation est écrite pour être suffisante à elle seule pour :
-- démarrer l'API ;
-- comprendre le contrat HTTP réel ;
-- intégrer l'API dans un autre service, un script ou un agent IA ;
-- tester rapidement les endpoints principaux ;
-- éviter les erreurs classiques de contrat.
+Cette base expose **uniquement** les routes réellement présentes dans `/openapi.json` :
 
-## Ce que l'API expose réellement
-
-Routes publiques disponibles aujourd'hui :
 - `GET /health`
 - `GET /search`
 - `GET /search/resolve`
@@ -29,30 +21,29 @@ Routes publiques disponibles aujourd'hui :
 - `GET /news/volume/by-url`
 - `GET /planning`
 
-Points importants :
-- il n'y a **pas** de préfixe `/v1` ;
-- il n'y a **pas** de routes admin publiques dans cette version ;
-- il n'y a **pas** de pagination top-level normalisée sur les listes ;
-- l'authentification Bearer est **optionnelle** et dépend seulement de `API_TOKEN`.
+## Ce que fait réellement l'API
 
-## Ce que l'API fait bien
-
-- recherche tolérante aux variations de ponctuation, casse, accents et espaces ;
-- résolution d'un meilleur candidat avec `score` et `confidence` ;
 - parsing détaillé des fiches série et volume ;
-- remontée des titres alternatifs : `title_vo`, `translated_title` ;
-- remontée des compteurs d'édition `vf` / `vo` sur :
-  - les fiches série ;
-  - les fiches volume ;
-  - les résultats de recherche enrichis quand l'information parentale a pu être lue ;
-- projection partielle des fiches série/volume via `blocks` et `fields` ;
+- recherche floue tolérante à la ponctuation et aux variantes proches ;
+- remontée des titres alternatifs `title_vo` et `translated_title` ;
+- remontée des compteurs d'édition `vf` / `vo` quand Manga-News les expose ;
+- projection partielle des fiches via `blocks` et `fields` ;
 - cache SQLite persistant ;
 - cache négatif court ;
-- support ETag / `If-None-Match`.
+- version interne de clé de cache pour éviter de relire d'anciens payloads incompatibles après un changement de parseur ou d'enrichissement ;
+- `ETag` et `X-Data-Fingerprint` pour les clients qui veulent éviter des relectures inutiles.
+
+## Ce que cette version **ne** fait pas
+
+- pas de préfixe `/v1` ;
+- pas de route admin publique ;
+- pas de route `lookup/volume` ;
+- pas d'écriture sur Manga-News ;
+- pas de garantie que le HTML de Manga-News restera stable dans le temps.
 
 ## Installation rapide
 
-### Local Python
+### Local
 
 ```bash
 python -m venv .venv
@@ -62,30 +53,23 @@ cp .env.example .env
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8017
 ```
 
-### Docker Compose
+### Docker
 
 ```bash
 docker compose up -d --build
 ```
 
-Accès local ensuite :
-- Swagger UI : `http://localhost:8017/docs`
-- ReDoc : `http://localhost:8017/redoc`
-- OpenAPI brut : `http://localhost:8017/openapi.json`
-
 ## Authentification
 
-Si `API_TOKEN` est vide, l'API est ouverte sur le réseau où elle tourne.
-
-Si `API_TOKEN` est défini, toutes les routes publiques attendent :
+Si `API_TOKEN` est défini, toutes les routes métier attendent :
 
 ```http
 Authorization: Bearer <API_TOKEN>
 ```
 
-L'état actuel du code n'expose pas de routes admin séparées. `ADMIN_TOKEN` existe encore dans la configuration comme réserve de conception, mais n'est pas utilisé par les routes HTTP publiques actuelles.
+Si `API_TOKEN` est vide, l'API est lisible sans authentification.
 
-## Réponses : enveloppe commune
+## Enveloppe de réponse
 
 Toutes les routes métier renvoient une enveloppe de ce type :
 
@@ -106,27 +90,13 @@ Toutes les routes métier renvoient une enveloppe de ce type :
 }
 ```
 
-Exceptions :
-- `/health` renvoie simplement `{ "ok": true }`.
-
 ## Headers utiles
 
-Headers réellement émis aujourd'hui :
-- `ETag: "<fingerprint>"`
-- `X-Data-Fingerprint: <fingerprint>`
+- `ETag` : dérivé du `fingerprint` de `data` ;
+- `X-Data-Fingerprint` : même information, plus simple à lire ;
+- `304 Not Modified` si `If-None-Match` correspond à l'`ETag` courant.
 
-Utilisation recommandée :
-1. stocker l'`ETag` reçu ;
-2. renvoyer ensuite `If-None-Match: "<fingerprint>"` ;
-3. si la ressource n'a pas changé, l'API répond `304 Not Modified`.
-
-## Endpoints : démarrage recommandé
-
-### Vérifier l'API
-
-```bash
-curl http://localhost:8017/health
-```
+## Cas d'usage recommandés
 
 ### Trouver une série
 
@@ -156,114 +126,78 @@ curl --get "http://localhost:8017/search/resolve" \
 curl "http://localhost:8017/volume/One-Piece/vol-91"
 ```
 
+### Lire le planning VF
+
+```bash
+curl --get "http://localhost:8017/planning" \
+  --data-urlencode "section=manga-vf" \
+  --data-urlencode "year=2026" \
+  --data-urlencode "month=4" \
+  --data-urlencode "publisher=Glénat"
+```
+
 ## Matching tolérant des titres
 
-L'API ne compare pas naïvement les titres bruts.
+Le projet normalise les chaînes avant comparaison (`app/utils.py`) :
 
-Avant scoring, les titres sont normalisés :
-- accents retirés ;
+- accents supprimés ;
 - casse ignorée ;
-- ponctuation remplacée par des espaces ;
+- ponctuation remplacée ;
 - espaces normalisés ;
-- `&` remplacé par `and`.
+- `&` converti en `and`.
 
-Exemple important :
+Exemple :
+
 - Manga-News : `Dogs: Bullets & Carnage`
 - côté client : `Dogs - Bullets & Carnage`
 
-Le résultat peut quand même sortir avec un `score` très élevé, parce que les deux formes convergent vers une version normalisée très proche.
+Ces deux formes convergent vers une forme normalisée équivalente. Le résultat est visible dans :
 
-Ce comportement est implémenté dans :
-- `app/utils.py` → `normalize_text(...)`
-- `app/utils.py` → `score_match(...)`
-- `app/manga_news/parsers.py` → `parse_search_page(...)`
+- `score` sur `/search` ;
+- `score` et `confidence` sur `/search/resolve`.
 
-## Champs métier importants
+## Où trouver les compteurs VF / VO
 
-### Dans les résultats de recherche
+Les compteurs `vf` / `vo` viennent du bloc HTML `#numberblock` côté Manga-News.
 
-Les résultats `/search` et `/search/resolve` peuvent contenir :
-- `title`
-- `url`
-- `kind`
-- `score`
-- `slug`
-- `series_slug`
-- `volume_slug`
-- `number`
-- `number_int`
-- `edition_label`
-- `is_special`
-- `is_one_shot`
-- `title_vo`
-- `translated_title`
-- `vf`
-- `vo`
+Ils sont utiles :
 
-`vf` et `vo` sont surtout utiles quand le résultat peut être rattaché à une fiche série détaillée.
+- sur les résultats `series`, directement depuis la fiche série ;
+- sur les résultats `volume`, via la fiche volume puis la série parente ;
+- sur `/search/resolve`, puisque cette route réutilise les résultats enrichis de `/search` ;
+- sur les fiches détaillées `/series/{slug}` et `/volume/{series_slug}/{volume_slug}`.
 
-### Dans les fiches série
+### Important
 
-Une fiche série contient notamment :
-- `title`
-- `title_vo`
-- `translated_title`
-- `summary`
-- `authors_story`
-- `authors_art`
-- `publisher_fr`
-- `publisher_vo`
-- `genres`
-- `vf`
-- `vo`
-- `last_release_date`
-- `next_release_date`
-- `stats`
-- `related`
+Sur un volume, `vf` / `vo` ne viennent pas de la page volume elle-même :
+- la page volume fournit l'identité du tome ;
+- la série parente fournit les compteurs globaux.
 
-### Dans les fiches volume
+## Dépannage rapide : compteurs VF/VO à `null`
 
-Une fiche volume contient notamment :
-- `title`
-- `series_title`
-- `number`
-- `number_int`
-- `edition_label`
-- `is_special`
-- `is_one_shot`
-- `title_vo`
-- `translated_title`
-- `publication_date`
-- `isbn_ean`
-- `price_code`
-- `editorial_score`
-- `reader_score`
-- `vf`
-- `vo`
+Si tu vois encore `vf` / `vo` à `null` alors que la page Manga-News les affiche clairement :
 
-`vf` / `vo` sur un volume ne viennent pas de la page volume elle-même, mais de la fiche série parente quand elle a pu être relue.
+- vérifie d'abord si la réponse est `cached: true` ;
+- redémarre l'application avec le code le plus récent ;
+- au besoin supprime le fichier SQLite de cache (`DB_PATH`) pour forcer une régénération immédiate ;
+- vérifie enfin la page source : l'API lit ces compteurs dans le bloc HTML `#numberblock`.
 
-## Documentation détaillée
+## Fichiers de doc à lire ensuite
 
-- [Guide d'intégration API](docs/API_INTEGRATION.md)
-- [Architecture et flux internes](docs/ARCHITECTURE.md)
-- [Déploiement et exploitation](docs/DEPLOYMENT_AND_OPERATIONS.md)
-- [OpenAPI, Swagger, ReDoc et usage IA](docs/OPENAPI_AND_AI_USAGE.md)
-- [Cas d'usage et recettes](docs/USE_CASES_AND_RECIPES.md)
-- [Scénario de test One Piece](docs/ONE_PIECE_API_TESTS.txt)
-- [Changelog de contrat API](docs/API_CHANGELOG.md)
-- [Exemples JSON validés](docs/examples/README.md)
+- [API_INTEGRATION.md](docs/API_INTEGRATION.md)
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [DEPLOYMENT_AND_OPERATIONS.md](docs/DEPLOYMENT_AND_OPERATIONS.md)
+- [OPENAPI_AND_AI_USAGE.md](docs/OPENAPI_AND_AI_USAGE.md)
+- [USE_CASES_AND_RECIPES.md](docs/USE_CASES_AND_RECIPES.md)
+- [ONE_PIECE_API_TESTS.txt](docs/ONE_PIECE_API_TESTS.txt)
+- [API_CHANGELOG.md](docs/API_CHANGELOG.md)
+- [docs/examples/README.md](docs/examples/README.md)
 
 ## Validation avant livraison
 
 ```bash
 python scripts/validate_contract_and_docs.py
-pytest -q
+pytest
 ```
 
-Ces commandes vérifient :
-- le schéma OpenAPI ;
-- les liens markdown ;
-- l'absence de références documentaires à des routes inexistantes ;
-- la validité des exemples JSON ;
-- les tests unitaires et d'intégration du projet.
+Le script de smoke test vérifie le contrat HTTP. `pytest` vérifie le projet.

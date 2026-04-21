@@ -198,18 +198,38 @@ def _extract_raw_sections(lines: list[str]) -> dict[str, list[str]]:
     return sections
 
 
-def _extract_vf_vo(lines: list[str]) -> tuple[EditionStatus | None, EditionStatus | None, str | None, str | None]:
+def _extract_edition_status_from_text(text: str | None, label: str) -> EditionStatus | None:
+    if not text:
+        return None
+    match = re.search(
+        rf'{label}\s*[:\-–—]?\s*(\d+)\s*(?:\(([^)]+)\))?',
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    status = clean_ws(match.group(2)) or None
+    return EditionStatus(volumes=int(match.group(1)), status=status)
+
+
+
+def _extract_vf_vo(soup: BeautifulSoup, lines: list[str]) -> tuple[EditionStatus | None, EditionStatus | None, str | None, str | None]:
     vf_status = None
     vo_status = None
     last_release = None
     next_release = None
+
+    number_block = soup.find(id='numberblock')
+    if number_block:
+        number_text = clean_ws(number_block.get_text(' ', strip=True))
+        vf_status = _extract_edition_status_from_text(number_text, 'VF')
+        vo_status = _extract_edition_status_from_text(number_text, 'VO')
+
     for index, line in enumerate(lines):
-        vf_match = re.search(r'VF\s*[:\-–—]?\s*(\d+)\s*\(([^)]+)\)', line, flags=re.IGNORECASE)
-        if vf_match:
-            vf_status = EditionStatus(volumes=int(vf_match.group(1)), status=clean_ws(vf_match.group(2)))
-        vo_match = re.search(r'VO\s*[:\-–—]?\s*(\d+)\s*\(([^)]+)\)', line, flags=re.IGNORECASE)
-        if vo_match:
-            vo_status = EditionStatus(volumes=int(vo_match.group(1)), status=clean_ws(vo_match.group(2)))
+        if vf_status is None:
+            vf_status = _extract_edition_status_from_text(line, 'VF')
+        if vo_status is None:
+            vo_status = _extract_edition_status_from_text(line, 'VO')
         if normalize_text(line) == 'dernier paru' and index + 1 < len(lines):
             last_release = parse_french_date(lines[index + 1])
         if normalize_text(line) in {'a paraitre', 'a paraître'} and index + 1 < len(lines):
@@ -363,7 +383,7 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
         if normalize_text(value).startswith('serie '):
             value = value.split(' ', 1)[1]
         themes.extend(unique_list(value.split('   ')))
-    vf, vo, last_release_date, next_release_date = _extract_vf_vo(lines)
+    vf, vo, last_release_date, next_release_date = _extract_vf_vo(soup, lines)
     stats = SeriesStats(
         likes=_extract_number_after(lines, "J'aime"),
         in_collection=_extract_number_after(lines, 'Dans ma collection'),

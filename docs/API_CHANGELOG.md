@@ -1,32 +1,15 @@
 # API Changelog
 
-## 2026-04-21
+## 2026-04-21 — VF/VO counters robustness and cache refresh
 
-### Documentation and OpenAPI realignment
-- ReDoc / Swagger descriptions rewritten to match the live contract.
-- All `/v1` references removed from the markdown documentation.
-- All phantom admin routes removed from the markdown documentation.
-- All phantom `lookup/volume` references removed.
-- The documentation now states explicitly that list endpoints do **not** expose a shared top-level `pagination` block.
+- Series parsing now reads VF/VO counters directly from the Manga-News `#numberblock` markup when available, with line-based fallback.
+- `search`, `search/resolve`, `series` and `volume` now use a versioned cache-key schema so stale cached payloads created before VF/VO enrichment are not reused after deployment.
+- Search and detailed payload docs were realigned with the actual runtime contract.
 
-### Search and volume enrichment
-- `SearchResult` and `ResolveResult` now expose when available:
-  - `number`
-  - `number_int`
-  - `edition_label`
-  - `is_special`
-  - `is_one_shot`
-  - `title_vo`
-  - `translated_title`
-  - `vf`
-  - `vo`
-- `VolumeData` now exposes `vf` and `vo` when the parent series could be resolved.
+## Current compatibility note
 
-### Contract/doc validation
-- Contract validation now fails if the documentation references:
-  - `/v1`
-  - `/lookup/volume`
-  - `/admin/...`
-  - `X-Cache-Status`
-  - `X-Request-ID`
-  - a fake top-level `pagination` block
+The current public contract is **not versioned**.
+
+Do not invent `/v1`.
+Do not assume admin routes.
+Start from `/openapi.json`.
