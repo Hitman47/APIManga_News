@@ -125,6 +125,7 @@ curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/search" --data-urlencod
 Attendu :
 - le bon résultat doit remonter malgré la différence `:` vs `-`
 - le champ `score` doit être élevé
+- si la fiche série expose les compteurs, vérifier aussi `vf.volumes`, `vf.status`, `vo.volumes`, `vo.status`
 
 Résolution directe du meilleur match :
 curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/search/resolve" --data-urlencode "q=Dogs - Bullets & Carnage" --data-urlencode "kind=series" --data-urlencode "limit=10"
@@ -133,3 +134,13 @@ Attendu :
 - `data.best.title` proche ou égal à `Dogs: Bullets & Carnage`
 - `data.best.score` élevé
 - `data.confidence` au minimum `medium`, idéalement `high`
+
+Compteurs VF / VO visibles dès la recherche
+----------------------------------------
+Commande :
+curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/search" --data-urlencode "q=One Piece" --data-urlencode "kind=series" --data-urlencode "mode=all" --data-urlencode "limit=5"
+
+Attendu :
+- le meilleur résultat série expose `vf.volumes` et `vo.volumes` si ces compteurs sont disponibles ;
+- sur le cas One Piece, on doit voir des compteurs VF et VO distincts ;
+- sur `/search/resolve`, `data.best.vf` et `data.best.vo` doivent refléter les mêmes valeurs.

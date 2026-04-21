@@ -1,6 +1,13 @@
 # Changelog du contrat API
 
-Ce changelog suit le **contrat consommateur** : routes, formes de réponses, champs exposés et documentation d'intégration. Il ne cherche pas à lister chaque refactor interne.
+## Non versionné
+
+### Ajout — recherche enrichie avec compteurs VF / VO de série
+- `/search` et `/search/resolve` peuvent désormais exposer `vf` et `vo` sur les résultats de type `series`.
+- Ces champs reprennent le nombre de tomes et le statut (`En cours`, `Terminé`, `En pause`, etc.) quand la fiche série Manga News les expose.
+- Aucun changement de route ; extension additive du payload uniquement.
+
+suit le **contrat consommateur** : routes, formes de réponses, champs exposés et documentation d'intégration. Il ne cherche pas à lister chaque refactor interne.
 
 ## 2026-04-21 — réalignement complet doc + ReDoc + OpenAPI
 

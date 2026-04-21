@@ -18,6 +18,7 @@ curl --get "http://localhost:8017/search" \
 - `data[].score`
 - `data[].title_vo`
 - `data[].translated_title`
+- `data[].vf.volumes` et `data[].vo.volumes` pour les résultats de type `series` quand ces compteurs sont disponibles
 
 ## 2. Résoudre directement le meilleur candidat
 
@@ -32,6 +33,7 @@ curl --get "http://localhost:8017/search/resolve" \
 - `data.best.series_slug`
 - `data.best.volume_slug`
 - `data.best.score`
+- `data.best.vf` / `data.best.vo` si le meilleur candidat est une série
 - `data.confidence`
 
 ## 3. Charger une fiche série complète
@@ -227,3 +229,21 @@ Traiter `partial=true` comme une donnée fraîche.
 
 ### Mauvaise pratique 6
 Inventer une route admin ou `lookup/volume` parce qu'une vieille doc en parlait.
+
+## 18. Vérifier les compteurs VF / VO directement depuis la recherche
+
+```bash
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=Dogs - Bullets & Carnage" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=all" \
+  --data-urlencode "limit=10"
+```
+
+À lire dans la réponse :
+- `data[0].title`
+- `data[0].score`
+- `data[0].vf.volumes` et `data[0].vf.status`
+- `data[0].vo.volumes` et `data[0].vo.status`
+
+Exemple d'usage UI : afficher directement `VF 9 / VO 10` dans une liste de résultats sans charger tout de suite `/series/{slug}`.

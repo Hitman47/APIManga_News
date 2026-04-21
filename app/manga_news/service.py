@@ -272,6 +272,8 @@ class MangaNewsService:
                     data = series_payload.get('data', {}) or {}
                     payload['title_vo'] = data.get('title_vo')
                     payload['translated_title'] = data.get('translated_title')
+                    payload['vf'] = data.get('vf')
+                    payload['vo'] = data.get('vo')
                 elif payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug'):
                     volume_payload, *_ = await self._get_volume_payload(series_slug=payload['series_slug'], volume_slug=payload['volume_slug'])
                     data = volume_payload.get('data', {}) or {}

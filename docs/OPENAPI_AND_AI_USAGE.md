@@ -30,6 +30,7 @@ Elle peut supposer que :
 - les routes présentes dans `/openapi.json` existent ;
 - la plupart des réponses métier utilisent une enveloppe commune ;
 - `title_vo` et `translated_title` peuvent apparaître dans les recherches **et** dans les fiches détaillées ;
+- pour un résultat de type `series`, `vf` et `vo` peuvent aussi apparaître dans `/search` et `/search/resolve` si la fiche série a pu être relue ;
 - les champs métier peuvent être absents ou `null` ;
 - `ETag` et `X-Data-Fingerprint` sont disponibles sur les réponses enveloppées dotées d'un fingerprint.
 

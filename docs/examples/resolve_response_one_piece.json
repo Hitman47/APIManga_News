@@ -23,7 +23,15 @@
       "series_slug": "One-piece-Edition-originale",
       "volume_slug": null,
       "title_vo": "ワンピース",
-      "translated_title": "One Piece"
+      "translated_title": "One Piece",
+      "vf": {
+        "volumes": 112,
+        "status": "En cours"
+      },
+      "vo": {
+        "volumes": 114,
+        "status": "En cours"
+      }
     },
     "candidates": [
       {
@@ -35,7 +43,15 @@
         "series_slug": "One-piece-Edition-originale",
         "volume_slug": null,
         "title_vo": "ワンピース",
-        "translated_title": "One Piece"
+        "translated_title": "One Piece",
+        "vf": {
+          "volumes": 112,
+          "status": "En cours"
+        },
+        "vo": {
+          "volumes": 114,
+          "status": "En cours"
+        }
       },
       {
         "title": "One Piece Magazine",
@@ -46,7 +62,9 @@
         "series_slug": "One-piece-Magazine",
         "volume_slug": null,
         "title_vo": null,
-        "translated_title": null
+        "translated_title": null,
+        "vf": null,
+        "vo": null
       }
     ]
   }

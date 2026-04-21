@@ -155,7 +155,7 @@ Le service :
 2. parse les résultats HTML ;
 3. déduplique par URL ;
 4. trie par `score` décroissant ;
-5. enrichit les résultats retenus avec `title_vo` et `translated_title` si la fiche détaillée peut être relue.
+5. enrichit les résultats retenus avec `title_vo`, `translated_title` et, pour les séries, `vf` / `vo` si la fiche détaillée peut être relue.
 
 ### `/search/resolve`
 
@@ -175,6 +175,8 @@ Le service :
 - `volume_slug`
 - `title_vo`
 - `translated_title`
+- `vf` *(uniquement pertinent pour un résultat de type `series`)*
+- `vo` *(uniquement pertinent pour un résultat de type `series`)*
 
 ## 9. Matching tolérant et score
 
@@ -187,6 +189,19 @@ Exemple réel :
 Le client doit utiliser :
 - `score` pour mesurer la similarité sur 100 ;
 - `confidence` sur `/search/resolve` pour une lecture plus grossière.
+
+### Compteurs de tomes VF / VO dans la recherche
+
+Quand un résultat de recherche est de type `series`, l'API tente de relire la fiche série correspondante pour enrichir le résultat avec :
+- `vf.volumes` et `vf.status` ;
+- `vo.volumes` et `vo.status`.
+
+C'est utile pour des cas comme :
+- vérifier rapidement si une série a une édition VO plus avancée que la VF ;
+- afficher un badge `VF 9 / VO 10` directement dans une UI de recherche ;
+- décider côté client s'il faut charger la fiche série complète ou non.
+
+Ces champs ne sont pas garantis : si la fiche ne les expose pas clairement, ils peuvent rester à `null`.
 
 ### Cas d'usage conseillé
 
@@ -204,6 +219,8 @@ Le client doit utiliser :
 - `title`
 - `title_vo`
 - `translated_title`
+- `vf` *(uniquement pertinent pour un résultat de type `series`)*
+- `vo` *(uniquement pertinent pour un résultat de type `series`)*
 - `summary`
 - `authors_story`
 - `authors_art`
@@ -313,6 +330,8 @@ Routes :
 - `is_one_shot`
 - `title_vo`
 - `translated_title`
+- `vf` *(uniquement pertinent pour un résultat de type `series`)*
+- `vo` *(uniquement pertinent pour un résultat de type `series`)*
 - `summary`
 - `authors_story`
 - `authors_art`

@@ -86,4 +86,6 @@ async def test_search_enriches_alternate_titles_from_detail_pages(tmp_path: Path
     assert response.data[0]['title'] == 'One Piece'
     assert response.data[0]['title_vo'] == 'ワンピース'
     assert response.data[0]['translated_title'] == 'One Piece'
+    assert response.data[0]['vf']['volumes'] == 112
+    assert response.data[0]['vo']['volumes'] == 114
     assert fetcher.calls.count(series_url) == 1

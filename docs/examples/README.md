@@ -58,3 +58,8 @@ python scripts/validate_contract_and_docs.py
 ```
 
 Cette validation vérifie que les exemples canoniques restent compatibles avec les modèles du projet.
+
+## Note sur les recherches série
+
+Les exemples `search_*` et `resolve_*` peuvent contenir `vf` et `vo` sur les résultats de type `series`.
+Ces champs servent à exposer rapidement le nombre de tomes VF / VO et leur statut, sans attendre un appel séparé à `/series/{slug}`.

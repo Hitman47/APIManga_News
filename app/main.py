@@ -82,7 +82,7 @@ TAGS_METADATA = [
     },
     {
         'name': 'Search',
-        'description': 'Recherche floue de séries ou de volumes à partir du moteur de recherche Manga News, avec score de similarité et titres alternatifs quand ils sont disponibles.',
+        'description': 'Recherche floue de séries ou de volumes à partir du moteur de recherche Manga News, avec score de similarité, titres alternatifs et, pour les séries, compteurs VF/VO quand ils sont disponibles.',
     },
     {
         'name': 'Series',
@@ -144,6 +144,7 @@ app = FastAPI(
         '- `ETag` et `X-Data-Fingerprint` sur les réponses enveloppées ;\n'
         '- negative cache court pour éviter de retaper immédiatement une ressource cassée ou absente ;\n'
         '- titres alternatifs (`title_vo`, `translated_title`) visibles sur les fiches détaillées et les résultats de recherche enrichis ;\n'
+        '- pour les résultats de recherche de type `series`, exposition possible de `vf` et `vo` avec nombre de tomes et statut ;\n'
         '- projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail.\n\n'
         'Ce que l’API **n’expose pas** aujourd’hui comme contrat public : routes admin, versionnement `/v1`, pagination normalisée commune, rate limit public branché aux routes.'
     ),
@@ -229,7 +230,7 @@ async def health():
     summary='Rechercher des séries ou des volumes.',
     description=(
         'Interroge le moteur de recherche Manga News puis reclasse les résultats par score de similarité. '
-        'Les résultats retenus sont enrichis si possible avec `title_vo` et `translated_title` en relisant la fiche détaillée correspondante.'
+        'Les résultats retenus sont enrichis si possible avec `title_vo`, `translated_title` et, pour les séries, `vf` / `vo` en relisant la fiche détaillée correspondante.'
     ),
     responses={200: {'description': 'Liste de résultats triés par score décroissant.', 'content': {'application/json': {'example': SEARCH_EXAMPLE}}}, **COMMON_ERROR_RESPONSES},
 )
@@ -251,7 +252,7 @@ async def search(
     response_model=ResolveResponse,
     tags=['Search'],
     summary='Résoudre le meilleur candidat pour une requête.',
-    description='S’appuie sur `/search`, choisit un meilleur candidat (`best`) et calcule un niveau de confiance (`high`, `medium`, `low`, `none`).',
+    description='S’appuie sur `/search`, choisit un meilleur candidat (`best`) et calcule un niveau de confiance (`high`, `medium`, `low`, `none`). Le meilleur candidat et les candidats restants reprennent les champs enrichis de recherche, y compris `vf` / `vo` pour les séries quand disponibles.',
     responses={200: {'description': 'Résultat résolu avec meilleur candidat et liste de candidats.', 'content': {'application/json': {'example': RESOLVE_EXAMPLE}}}, **COMMON_ERROR_RESPONSES},
 )
 async def search_resolve(

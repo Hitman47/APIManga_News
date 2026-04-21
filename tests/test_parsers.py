@@ -226,3 +226,17 @@ def test_parse_series_editions_page():
     assert parsed.items[0].number == '109'
     assert parsed.items[1].publication_date == '2026-04-27'
     assert parsed.items[1].cover_image.endswith('one-piece-110.jpg')
+
+
+def test_parse_series_page_supports_hyphenated_vf_vo_counters():
+    html = '''
+    <html><head><meta property="og:title" content="Dogs: Bullets & Carnage - Manga news"></head><body>
+      <div>Titre VO : Dogs: Bullets & Carnage</div>
+      <div>Titre traduit : Dogs: Bullets & Carnage</div>
+      <div>VF-9 (En cours)</div>
+      <div>VO-10 (En pause)</div>
+    </body></html>
+    '''
+    parsed = parse_series_page(html, 'https://www.manga-news.com/index.php/serie/Dogs--Bullets-Carnage')
+    assert parsed.vf is not None and parsed.vf.volumes == 9 and parsed.vf.status == 'En cours'
+    assert parsed.vo is not None and parsed.vo.volumes == 10 and parsed.vo.status == 'En pause'

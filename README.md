@@ -8,6 +8,7 @@ Cette documentation est volontairement stricte : elle décrit **uniquement** le 
 
 - recherche floue de séries et de volumes via Manga News ;
 - résolution du meilleur candidat avec score et niveau de confiance ;
+- enrichissement des résultats de recherche série avec le nombre de tomes VF et VO quand Manga News les expose sur la fiche série ;
 - fiches détaillées de séries et de volumes ;
 - extraction des liens liés à une série ;
 - extraction des éditions VF / VO d'une série ;
@@ -159,6 +160,18 @@ Toutes les routes métier renvoient une enveloppe stable du même type général
   "data": {}
 }
 ```
+
+### Champs clés de recherche
+
+Sur `/search` et `/search/resolve`, les résultats exposent maintenant, selon le type de ressource et les données relues depuis la fiche détaillée :
+- `title` ;
+- `title_vo` ;
+- `translated_title` ;
+- `score` ;
+- `slug`, `series_slug`, `volume_slug` ;
+- `vf` et `vo` **pour les résultats de type `series`**, avec le nombre de tomes et le statut (`En cours`, `Terminé`, `En pause`, etc.) quand Manga News l'affiche sur la fiche série.
+
+Exemple : une recherche sur `Dogs - Bullets & Carnage` peut renvoyer le titre Manga News `Dogs: Bullets & Carnage` avec un `score` élevé, plus `vf` / `vo` si la fiche série expose ces compteurs.
 
 ### Sens des champs d'enveloppe
 

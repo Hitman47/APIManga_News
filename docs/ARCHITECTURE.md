@@ -71,7 +71,8 @@ flowchart TD
 - interroge plusieurs pages de recherche Manga News selon `kind` ;
 - déduplique les résultats par URL ;
 - trie par `score` décroissant ;
-- peut enrichir chaque résultat retenu avec `title_vo` et `translated_title` via la fiche détaillée.
+- peut enrichir chaque résultat retenu avec `title_vo` et `translated_title` via la fiche détaillée ;
+- peut aussi enrichir un résultat de type `series` avec `vf` / `vo` (nombre de tomes + statut) via la fiche série détaillée.
 
 ### `/search/resolve`
 - s'appuie sur `/search` ;
@@ -98,6 +99,10 @@ Ce mécanisme sert à :
 - `translated_title`
 
 Ils sont disponibles sur les fiches détaillées. Les résultats de recherche peuvent aussi les exposer après enrichissement.
+
+Pour les résultats de type `series`, la recherche peut également exposer :
+- `vf.volumes` / `vf.status` ;
+- `vo.volumes` / `vo.status`.
 
 ### Volumes
 Les parseurs normalisent déjà plusieurs champs :

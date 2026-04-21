@@ -204,10 +204,10 @@ def _extract_vf_vo(lines: list[str]) -> tuple[EditionStatus | None, EditionStatu
     last_release = None
     next_release = None
     for index, line in enumerate(lines):
-        vf_match = re.search(r'VF\s*:?\s*(\d+)\s*\(([^)]+)\)', line, flags=re.IGNORECASE)
+        vf_match = re.search(r'VF\s*[:\-–—]?\s*(\d+)\s*\(([^)]+)\)', line, flags=re.IGNORECASE)
         if vf_match:
             vf_status = EditionStatus(volumes=int(vf_match.group(1)), status=clean_ws(vf_match.group(2)))
-        vo_match = re.search(r'VO\s*:?\s*(\d+)\s*\(([^)]+)\)', line, flags=re.IGNORECASE)
+        vo_match = re.search(r'VO\s*[:\-–—]?\s*(\d+)\s*\(([^)]+)\)', line, flags=re.IGNORECASE)
         if vo_match:
             vo_status = EditionStatus(volumes=int(vo_match.group(1)), status=clean_ws(vo_match.group(2)))
         if normalize_text(line) == 'dernier paru' and index + 1 < len(lines):

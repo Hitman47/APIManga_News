@@ -42,6 +42,8 @@ class SearchResult(BaseModel):
     volume_slug: str | None = None
     title_vo: str | None = None
     translated_title: str | None = None
+    vf: EditionStatus | None = None
+    vo: EditionStatus | None = None
 
 
 class SearchResponse(BaseEnvelope):
@@ -58,6 +60,8 @@ class ResolveResult(BaseModel):
     volume_slug: str | None = None
     title_vo: str | None = None
     translated_title: str | None = None
+    vf: EditionStatus | None = None
+    vo: EditionStatus | None = None
 
 
 class ResolveData(BaseModel):

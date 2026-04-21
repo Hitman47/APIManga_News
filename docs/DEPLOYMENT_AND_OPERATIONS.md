@@ -173,7 +173,18 @@ Active `DEBUG_CAPTURE_HTML_ON_ERROR=true` et consulte `DEBUG_HTML_DUMP_DIR`.
 ### “Je change mes TTL mais je ne vois pas immédiatement l'effet”
 Une entrée positive déjà en cache reste valable jusqu'à son expiration, sauf si tu repars d'un cache vide.
 
-## 9. Conseils d'exploitation
+## 9. Coût d'une recherche enrichie
+
+Une recherche série peut relire la fiche détaillée du résultat retenu pour enrichir la réponse avec :
+- `title_vo` ;
+- `translated_title` ;
+- `vf` / `vo` avec nombre de tomes et statut.
+
+Conséquence pratique :
+- `mode=all` avec beaucoup de résultats peut faire plus de fetchs qu'une simple recherche HTML brute ;
+- `mode=best` reste le choix le plus léger quand tu veux juste un meilleur candidat.
+
+## 10. Conseils d'exploitation
 
 - garde l'API derrière ton LAN ou un reverse proxy ;
 - active `API_TOKEN` si plusieurs clients l'utilisent ;
@@ -181,7 +192,7 @@ Une entrée positive déjà en cache reste valable jusqu'à son expiration, sauf
 - si tu t'appuies fortement sur cette API, surveille surtout les `UPSTREAM_PARSE_ERROR` ;
 - documente côté client que le planning n'est pas une API exhaustive, mais le parsing d'une page donnée.
 
-## 10. Validation avant livraison
+## 11. Validation avant livraison
 
 ```bash
 python scripts/validate_contract_and_docs.py
