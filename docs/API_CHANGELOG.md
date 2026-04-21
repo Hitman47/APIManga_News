@@ -1,16 +1,14 @@
 # Changelog du contrat API
 
-Ce changelog suit le **contrat consommateur** : routes, formes de réponses, champs exposés, doc d'intégration. Il ne cherche pas à lister chaque refactor interne.
+Ce changelog suit le **contrat consommateur** : routes, formes de réponses, champs exposés et documentation d'intégration. Il ne cherche pas à lister chaque refactor interne.
 
-## 2026-04-20 — passe de documentation complète
+## 2026-04-21 — réalignement complet doc + ReDoc + OpenAPI
 
-- Reprise complète de la documentation pour la réaligner sur le code réellement présent dans le projet.
-- Clarification explicite qu'il n'existe **pas** de préfixe `/v1`.
-- Clarification des routes réellement publiques et de leurs limites.
-- Clarification des variables réellement actives vs. présentes mais non branchées au runtime public.
-- Documentation détaillée de `title_vo` / `translated_title` sur les fiches détaillées et dans les recherches enrichies.
-- Documentation détaillée de la normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`.
-- Nettoyage des exemples JSON pour supprimer les artefacts de doc qui n'appartenaient pas au contrat réel.
+- Reprise complète de la documentation narrative pour la réaligner sur le code réellement présent dans le projet.
+- Nettoyage de la grosse régression documentaire : suppression des références erronées à `/v1`, `lookup/volume`, routes admin et pagination commune inexistante.
+- ReDoc enrichi : titres de section, résumés, descriptions détaillées, tags métier et exemples de réponses sur les routes publiques.
+- Clarification du périmètre exact du contrat public et des éléments internes non encore exposés comme API publique.
+- Ajout d'une validation documentaire qui signale désormais aussi les routes API documentées mais absentes du schéma OpenAPI.
 
 ## 2026-04-20 — enrichissement recherche et volume
 

@@ -3,25 +3,23 @@ Tests manuels One Piece pour l'API Manga News
 
 Base URL recommandée
 --------------------
-http://localhost:8017/v1
+http://localhost:8017
 
 Variables utiles
 ----------------
 Linux / macOS
-export BASE_URL="http://localhost:8017/v1"
+export BASE_URL="http://localhost:8017"
 export TOKEN="ton_token_public"
-export ADMIN_TOKEN="ton_token_admin"
 
 Windows PowerShell
-$env:BASE_URL = "http://localhost:8017/v1"
+$env:BASE_URL = "http://localhost:8017"
 $env:TOKEN = "ton_token_public"
-$env:ADMIN_TOKEN = "ton_token_admin"
 
 Règle simple
 ------------
-- endpoints publics : header Bearer avec TOKEN
-- endpoints admin : header Bearer avec ADMIN_TOKEN
-- si pas d'auth chez toi, enlève simplement les headers Authorization
+- si `API_TOKEN` est actif chez toi, ajoute `Authorization: Bearer $TOKEN`
+- si pas d'auth, enlève simplement le header Authorization
+- il n'y a pas de routes admin publiques à tester dans cette version
 
 Santé
 -----
@@ -34,10 +32,6 @@ curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search?q=one%20piece%20tom
 Résoudre directement le meilleur match du tome 91
 -------------------------------------------------
 curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/search/resolve?q=one%20piece%20tome%2091&kind=volume&limit=10"
-
-Lookup volume direct par série + numéro
----------------------------------------
-curl -sS -H "Authorization: Bearer $TOKEN" "$BASE_URL/lookup/volume?series=One%20Piece&number=91&limit=10"
 
 Fiche volume 91
 ---------------
@@ -99,22 +93,6 @@ Planning VF filtré One Piece
 ----------------------------
 curl -sS -G -H "Authorization: Bearer $TOKEN" "$BASE_URL/planning" --data-urlencode "section=manga-vf" --data-urlencode "q=one piece" --data-urlencode "sort=date_desc" --data-urlencode "limit=10"
 
-Admin cache stats
------------------
-curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" "$BASE_URL/admin/cache/stats"
-
-Admin metrics
--------------
-curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" "$BASE_URL/admin/metrics"
-
-Admin invalidate série
-----------------------
-curl -sS -X POST "$BASE_URL/admin/cache/invalidate" -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"resource_url":"https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"}'
-
-Admin invalidate volume
------------------------
-curl -sS -X POST "$BASE_URL/admin/cache/invalidate" -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"resource_url":"https://www.manga-news.com/index.php/manga/One-Piece/vol-91"}'
-
 ETag / 304
 ----------
 1) récupère d'abord un ETag :
@@ -125,18 +103,18 @@ curl -i -sS -H "Authorization: Bearer $TOKEN" -H 'If-None-Match: "<etag-preceden
 
 Batch automatisé
 ----------------
-python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN"
+python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN"
 
 Si problème de permissions sur api_test_outputs
 -----------------------------------------------
-python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN" --output-dir /tmp/api_test_outputs
+python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --output-dir /tmp/api_test_outputs
 
 Désactiver complètement les fichiers de sortie
 ----------------------------------------------
-python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --admin-token "$ADMIN_TOKEN" --output-dir ""
+python scripts/run_api_smoke_tests.py --base-url "$BASE_URL" --token "$TOKEN" --output-dir ""
 
 Tolérance aux variantes de ponctuation
-------------------------------------
+--------------------------------------
 Exemple à tester manuellement :
 - chez toi : `Dogs - Bullets & Carnage`
 - sur Manga News : `Dogs: Bullets & Carnage`

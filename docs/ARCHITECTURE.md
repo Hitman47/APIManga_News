@@ -1,64 +1,65 @@
 # Architecture
 
-Ce document explique comment les composants s'enchaînent réellement.
+Ce document décrit le fonctionnement réel du projet actuel : requête entrante, service métier, cache, fetch upstream et parsing.
 
 ## Vue d'ensemble
 
 ```mermaid
 flowchart LR
-    C[Client / Outil / IA] --> A[FastAPI routes]
-    A --> B[MangaNewsService]
-    B --> D[SQLiteCache]
-    B --> E[AsyncFetcher]
-    E --> F[Manga News HTML / RSS]
-    B --> G[Parsers HTML / RSS]
-    G --> H[Modèles Pydantic]
-    H --> A
+    C[Client / UI / IA] --> R[Routes FastAPI]
+    R --> S[MangaNewsService]
+    S --> K[SQLiteCache]
+    S --> F[AsyncFetcher]
+    F --> U[Manga News HTML / RSS]
+    S --> P[Parsers HTML / RSS]
+    P --> M[Modèles Pydantic]
+    M --> R
 ```
 
 ## Chaîne de traitement d'une requête
 
 1. **Route FastAPI**
    - valide les paramètres ;
-   - vérifie le Bearer token si `API_TOKEN` est actif ;
+   - applique l'authentification si `API_TOKEN` est configuré ;
    - délègue au `MangaNewsService`.
 
 2. **Service métier**
-   - calcule une clé de cache stable ;
+   - construit une clé de cache stable ;
    - consulte le cache positif ;
    - consulte le negative cache si activé ;
    - fetch l'upstream si nécessaire ;
-   - parse la réponse ;
+   - parse le HTML ou le flux RSS ;
    - construit l'enveloppe finale.
 
-3. **Cache SQLite**
+3. **SQLiteCache**
    - stocke les réponses positives ;
-   - stocke aussi les erreurs négatives courtes (`negative_cache_entries`) ;
-   - garde une fenêtre stale pour servir une ancienne réponse si l'upstream échoue.
+   - stocke des erreurs négatives courtes pour les ressources cassées ou absentes ;
+   - conserve une fenêtre stale pour fallback si l'upstream casse ensuite.
 
-4. **Fetcher HTTP**
-   - envoie les requêtes vers Manga News ;
+4. **AsyncFetcher**
+   - récupère le HTML ou le RSS ;
    - suit les redirections ;
-   - traduit les erreurs HTTP / réseau en erreurs applicatives.
+   - lève `ResourceNotFound` pour les `404` ;
+   - lève `UpstreamError` pour les autres erreurs réseau/HTTP ou réponses vides.
 
 5. **Parsers**
-   - analysent le HTML / RSS ;
-   - extraient les champs normalisés ;
-   - lèvent `ParseError` quand la page n'est pas exploitable.
+   - transforment le HTML Manga News en structures Pydantic ;
+   - exposent des champs normalisés pour les volumes ;
+   - lèvent `ParseError` quand le contrat attendu n'est pas fiable.
 
 ## Flux de cache
 
 ```mermaid
 flowchart TD
     A[Requête] --> B{Entrée positive fraîche ?}
-    B -- Oui --> C[Retour cache]
+    B -- Oui --> C[Retour cache positif]
     B -- Non --> D{Entrée négative fraîche ?}
-    D -- Oui --> E[Relance ResourceNotFound / ParseError]
+    D -- Oui --> E[Relance ParseError / ResourceNotFound]
     D -- Non --> F[Fetch upstream]
     F --> G{Parsing OK ?}
-    G -- Oui --> H[Écrit cache positif]
+    G -- Oui --> H[Écriture cache positif]
     H --> I[Réponse]
-    G -- Non --> J[Écrit negative cache]
+    G -- Non --> J[Écriture negative cache]
     J --> K{Ancien cache stale utilisable ?}
     K -- Oui --> L[Retour stale + warning]
     K -- Non --> M[Erreur]
@@ -68,67 +69,68 @@ flowchart TD
 
 ### `/search`
 - interroge plusieurs pages de recherche Manga News selon `kind` ;
-- déduplique les URLs ;
-- trie par score ;
-- enrichit ensuite chaque résultat retenu avec `title_vo` et `translated_title` si possible.
+- déduplique les résultats par URL ;
+- trie par `score` décroissant ;
+- peut enrichir chaque résultat retenu avec `title_vo` et `translated_title` via la fiche détaillée.
 
 ### `/search/resolve`
 - s'appuie sur `/search` ;
-- choisit un `best` ;
-- calcule une confiance (`high`, `medium`, `low`, `none`).
+- sélectionne un `best` ;
+- calcule `confidence`.
 
-## Projections série / volume
+## Projections sur les fiches
 
-Le service supporte deux mécanismes :
-- `blocks=` : blocs métier prédéfinis ;
-- `fields=` : chemins précis ;
-- `include_raw_sections=true` : sections brutes du HTML déjà nettoyées.
+Les routes détail `series` et `volume` supportent :
+- `blocks=` pour des groupes de champs prédéfinis ;
+- `fields=` pour des chemins précis ;
+- `include_raw_sections=true` pour inclure les sections brutes parsées.
 
-C'est utile pour :
-- les UI légères ;
-- les prompts d'IA ;
+Ce mécanisme sert à :
 - limiter la taille des payloads ;
-- éviter des post-traitements inutiles côté client.
+- alimenter une UI compacte ;
+- piloter une IA sans surcharger le contexte ;
+- éviter des post-traitements côté client.
 
-## Particularités utiles
+## Normalisation métier déjà intégrée
 
 ### Titres alternatifs
 - `title_vo`
 - `translated_title`
 
-Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit.
+Ils sont disponibles sur les fiches détaillées. Les résultats de recherche peuvent aussi les exposer après enrichissement.
 
-### Normalisation volume
-Les parseurs produisent des champs standardisés pour les volumes :
+### Volumes
+Les parseurs normalisent déjà plusieurs champs :
 - `number`
 - `number_int`
 - `edition_label`
 - `is_special`
 - `is_one_shot`
 
-Ces champs se retrouvent sur :
+Ces champs remontent sur :
 - les fiches volume ;
 - les items d'éditions série ;
-- les items du planning.
+- les items du planning quand ils sont inférables.
 
-## Debug HTML
+## Debug HTML sur parse error
 
-Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, un `ParseError` sur une route cacheable peut sauver :
-- un dump `.html` de la page upstream ;
+Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, une `ParseError` sur une route cacheable peut écrire :
+- un dump `.html` du contenu upstream ;
 - un fichier `.json` de métadonnées.
 
-Le chemin est injecté dans le message d'erreur :
+Le chemin peut être injecté dans le message d'erreur :
 
 ```text
 Debug HTML saved to /tmp/manga-news-debug-html/...
 ```
 
-## Ce qui existe dans le code mais n'est pas encore une vraie feature publique
+## Ce qui existe dans le code sans être un contrat public actif
 
-Présent dans la config ou dans des modules, mais non exposé comme contrat public aujourd'hui :
-- admin API publique ;
-- rate limiting branché aux routes ;
-- format de logs JSON activé depuis la config runtime ;
-- retries/backoff pilotés par les variables `REQUEST_MAX_RETRIES` / `REQUEST_BACKOFF_SECONDS`.
+Le projet contient encore quelques briques ou variables de config qui ne sont pas exposées aujourd'hui comme API publique :
+- `ADMIN_TOKEN` ;
+- `RATE_LIMIT_*` ;
+- routes admin ;
+- préfixe de version `/v1` ;
+- endpoint `lookup/volume`.
 
-Le documente comme tel est plus honnête que de faire semblant que tout est déjà actif.
+La documentation doit rester honnête là-dessus.

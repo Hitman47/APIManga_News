@@ -1,6 +1,6 @@
 # Cas d'usage et recettes
 
-Des recettes courtes, concrètes, reproductibles.
+Des recettes courtes, concrètes et alignées avec le contrat réel.
 
 ## 1. Recherche simple d'une série
 
@@ -15,6 +15,7 @@ curl --get "http://localhost:8017/search" \
 À lire dans la réponse :
 - `data[].title`
 - `data[].slug`
+- `data[].score`
 - `data[].title_vo`
 - `data[].translated_title`
 
@@ -30,6 +31,7 @@ curl --get "http://localhost:8017/search/resolve" \
 À lire :
 - `data.best.series_slug`
 - `data.best.volume_slug`
+- `data.best.score`
 - `data.confidence`
 
 ## 3. Charger une fiche série complète
@@ -143,7 +145,7 @@ curl --get "http://localhost:8017/planning" \
   --data-urlencode "limit=25"
 ```
 
-Rappel important : `total_items` est calculé après filtrage local sur la page chargée.
+Rappel : `total_items` est calculé après filtrage local sur la page chargée.
 
 ## 13. Éviter de refetch la même fiche
 
@@ -162,7 +164,7 @@ curl -i "http://localhost:8017/series/One-piece-Edition-originale" \
 
 ## 14. Exploiter les titres alternatifs
 
-Cas pratique : tu affiches à la fois le titre principal et le titre VO.
+Cas pratique : afficher à la fois le titre principal, le titre VO et le titre traduit quand ils existent.
 
 ```bash
 curl --get "http://localhost:8017/search" \
@@ -171,12 +173,27 @@ curl --get "http://localhost:8017/search" \
   --data-urlencode "mode=all"
 ```
 
-Puis affiche :
+Puis afficher :
 - `title`
 - `title_vo`
 - `translated_title`
 
-## 15. Débugger un parse upstream cassé
+## 15. Vérifier la tolérance aux variantes de ponctuation
+
+```bash
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=Dogs - Bullets & Carnage" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=all" \
+  --data-urlencode "limit=10"
+```
+
+Attendu :
+- le bon résultat remonte malgré `:` vs `-` ;
+- `score` reste élevé ;
+- `/search/resolve` doit généralement produire `confidence=medium` ou `high`.
+
+## 16. Débugger un parse upstream cassé
 
 Active dans l'environnement :
 
@@ -191,7 +208,7 @@ Puis rejoue la requête qui casse. Le détail de l'erreur peut inclure :
 Debug HTML saved to /tmp/manga-news-debug-html/...
 ```
 
-## 16. Mauvaises pratiques à éviter
+## 17. Mauvaises pratiques à éviter
 
 ### Mauvaise pratique 1
 Supposer que `title_vo` ou `translated_title` seront toujours présents.
@@ -207,3 +224,6 @@ Coder `/v1/...` alors que le contrat réel est sans version.
 
 ### Mauvaise pratique 5
 Traiter `partial=true` comme une donnée fraîche.
+
+### Mauvaise pratique 6
+Inventer une route admin ou `lookup/volume` parce qu'une vieille doc en parlait.
