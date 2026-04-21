@@ -198,38 +198,61 @@ def _extract_raw_sections(lines: list[str]) -> dict[str, list[str]]:
     return sections
 
 
-def _extract_edition_status_from_text(text: str | None, label: str) -> EditionStatus | None:
-    if not text:
+def _edition_status_from_text(text: str | None, label: str) -> EditionStatus | None:
+    cleaned = clean_ws(text)
+    if not cleaned:
         return None
-    match = re.search(
-        rf'{label}\s*[:\-–—]?\s*(\d+)\s*(?:\(([^)]+)\))?',
-        text,
-        flags=re.IGNORECASE,
-    )
+    pattern = re.compile(rf'{label}\s*:?\s*(\d+)\s*(?:\(([^)]+)\))?', flags=re.IGNORECASE)
+    match = pattern.search(cleaned)
     if not match:
         return None
-    status = clean_ws(match.group(2)) or None
+    status = clean_ws(match.group(2) or '') or None
     return EditionStatus(volumes=int(match.group(1)), status=status)
 
 
+def _extract_vf_vo_from_numberblock(soup: BeautifulSoup) -> tuple[EditionStatus | None, EditionStatus | None]:
+    container = soup.find(id='numberblock')
+    if not container:
+        return None, None
+
+    vf_status: EditionStatus | None = None
+    vo_status: EditionStatus | None = None
+
+    vf_version = container.select_one('.version')
+    if vf_version and normalize_text(vf_version.get_text(' ', strip=True)).startswith('vf'):
+        parent = vf_version.parent if getattr(vf_version, 'parent', None) else None
+        vf_status = _edition_status_from_text(parent.get_text(' ', strip=True) if parent else None, 'VF')
+
+    for anchor in container.find_all('a', href=True):
+        text = anchor.get_text(' ', strip=True)
+        if '/serie-vo/' in anchor.get('href', '') or normalize_text(text).startswith('vo'):
+            vo_status = _edition_status_from_text(text, 'VO')
+            if vo_status:
+                break
+
+    if not vf_status or not vo_status:
+        normalized_lines = [clean_ws(text) for text in container.stripped_strings]
+        for idx, line in enumerate(normalized_lines):
+            normalized = normalize_text(line)
+            if not vf_status and normalized.startswith('vf'):
+                joined = ' '.join(normalized_lines[idx:idx + 3])
+                vf_status = _edition_status_from_text(joined, 'VF')
+            if not vo_status and normalized.startswith('vo'):
+                joined = ' '.join(normalized_lines[idx:idx + 3])
+                vo_status = _edition_status_from_text(joined, 'VO')
+
+    return vf_status, vo_status
+
 
 def _extract_vf_vo(soup: BeautifulSoup, lines: list[str]) -> tuple[EditionStatus | None, EditionStatus | None, str | None, str | None]:
-    vf_status = None
-    vo_status = None
+    vf_status, vo_status = _extract_vf_vo_from_numberblock(soup)
     last_release = None
     next_release = None
-
-    number_block = soup.find(id='numberblock')
-    if number_block:
-        number_text = clean_ws(number_block.get_text(' ', strip=True))
-        vf_status = _extract_edition_status_from_text(number_text, 'VF')
-        vo_status = _extract_edition_status_from_text(number_text, 'VO')
-
     for index, line in enumerate(lines):
-        if vf_status is None:
-            vf_status = _extract_edition_status_from_text(line, 'VF')
-        if vo_status is None:
-            vo_status = _extract_edition_status_from_text(line, 'VO')
+        if not vf_status:
+            vf_status = _edition_status_from_text(line, 'VF')
+        if not vo_status:
+            vo_status = _edition_status_from_text(line, 'VO')
         if normalize_text(line) == 'dernier paru' and index + 1 < len(lines):
             last_release = parse_french_date(lines[index + 1])
         if normalize_text(line) in {'a paraitre', 'a paraître'} and index + 1 < len(lines):

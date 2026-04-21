@@ -47,8 +47,8 @@ class SearchResult(BaseModel):
     is_one_shot: bool | None = None
     title_vo: str | None = None
     translated_title: str | None = None
-    vf: EditionStatus | None = None
-    vo: EditionStatus | None = None
+    vf: 'EditionStatus | None' = None
+    vo: 'EditionStatus | None' = None
 
 
 class SearchResponse(BaseEnvelope):
@@ -70,8 +70,8 @@ class ResolveResult(BaseModel):
     is_one_shot: bool | None = None
     title_vo: str | None = None
     translated_title: str | None = None
-    vf: EditionStatus | None = None
-    vo: EditionStatus | None = None
+    vf: 'EditionStatus | None' = None
+    vo: 'EditionStatus | None' = None
 
 
 class ResolveData(BaseModel):
@@ -195,10 +195,10 @@ class VolumeData(BaseModel):
     isbn_ean: str | None = None
     price_code: str | None = None
     cover_image: str | None = None
-    editorial_score: float | None = None
-    reader_score: float | None = None
     vf: EditionStatus | None = None
     vo: EditionStatus | None = None
+    editorial_score: float | None = None
+    reader_score: float | None = None
     related: RelatedLinks | None = None
     raw_sections: dict[str, list[str]] | None = None
     source_url: str | None = None

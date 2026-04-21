@@ -1,53 +1,142 @@
 # Architecture
 
+Ce document explique comment les composants s'enchaînent réellement.
+
 ## Vue d'ensemble
 
 ```mermaid
 flowchart LR
-    Client --> API[FastAPI]
-    API --> Service[MangaNewsService]
-    Service --> Fetcher[AsyncFetcher]
-    Service --> Cache[SQLiteCache]
-    Fetcher --> MN[Manga-News]
+    C[Client / Outil / IA] --> A[FastAPI routes]
+    A --> B[MangaNewsService]
+    B --> D[SQLiteCache]
+    B --> E[AsyncFetcher]
+    E --> F[Manga News HTML / RSS]
+    B --> G[Parsers HTML / RSS]
+    G --> H[Modèles Pydantic]
+    H --> A
 ```
 
-## Rôles
+## Chaîne de traitement d'une requête
 
-- `app/main.py` : exposition HTTP et OpenAPI ;
-- `app/manga_news/service.py` : orchestration, cache, enrichissement, projections ;
-- `app/manga_news/parsers.py` : lecture HTML et normalisation ;
-- `app/cache.py` : cache SQLite principal + cache négatif ;
-- `app/utils.py` : normalisation de texte, matching, dates, slugs.
+1. **Route FastAPI**
+   - valide les paramètres ;
+   - vérifie le Bearer token si `API_TOKEN` est actif ;
+   - délègue au `MangaNewsService`.
 
-## Flux de recherche
+2. **Service métier**
+   - calcule une clé de cache stable ;
+   - consulte le cache positif ;
+   - consulte le negative cache si activé ;
+   - fetch l'upstream si nécessaire ;
+   - parse la réponse ;
+   - construit l'enveloppe finale.
+
+3. **Cache SQLite**
+   - stocke les réponses positives ;
+   - stocke aussi les erreurs négatives courtes (`negative_cache_entries`) ;
+   - garde une fenêtre stale pour servir une ancienne réponse si l'upstream échoue.
+
+4. **Fetcher HTTP**
+   - envoie les requêtes vers Manga News ;
+   - suit les redirections ;
+   - traduit les erreurs HTTP / réseau en erreurs applicatives.
+
+5. **Parsers**
+   - analysent le HTML / RSS ;
+   - extraient les champs normalisés ;
+   - lèvent `ParseError` quand la page n'est pas exploitable.
+
+## Flux de cache
 
 ```mermaid
-sequenceDiagram
-    participant C as Client
-    participant A as API
-    participant S as Service
-    participant M as Manga-News
-    participant K as Cache
-
-    C->>A: GET /search?q=...
-    A->>S: search(...)
-    S->>K: lookup cache
-    alt cache miss
-        S->>M: fetch page(s) de recherche
-        S->>S: parse + score + dedupe
-        S->>M: enrichissement éventuel fiche série/volume
-        S->>K: store payload
-    end
-    S-->>A: enveloppe
-    A-->>C: JSON + ETag
+flowchart TD
+    A[Requête] --> B{Entrée positive fraîche ?}
+    B -- Oui --> C[Retour cache]
+    B -- Non --> D{Entrée négative fraîche ?}
+    D -- Oui --> E[Relance ResourceNotFound / ParseError]
+    D -- Non --> F[Fetch upstream]
+    F --> G{Parsing OK ?}
+    G -- Oui --> H[Écrit cache positif]
+    H --> I[Réponse]
+    G -- Non --> J[Écrit negative cache]
+    J --> K{Ancien cache stale utilisable ?}
+    K -- Oui --> L[Retour stale + warning]
+    K -- Non --> M[Erreur]
 ```
 
-## D'où viennent les compteurs VF / VO
+## Search vs search/resolve
 
-- source HTML : bloc `#numberblock` sur la fiche série Manga-News ;
-- consommation directe : `/series/{slug}` ;
-- consommation indirecte : `/volume/{series_slug}/{volume_slug}` et résultats de recherche enrichis.
+### `/search`
+- interroge plusieurs pages de recherche Manga News selon `kind` ;
+- déduplique les URLs ;
+- trie par score ;
+- enrichit ensuite chaque résultat retenu avec `title_vo` et `translated_title` si possible.
 
-Cela explique pourquoi :
-- un volume peut avoir `vf` / `vo` même si sa page propre ne contient pas ces compteurs ;
-- un résultat de recherche volume peut avoir `vf` / `vo` après enrichissement de la série parente.
+### `/search/resolve`
+- s'appuie sur `/search` ;
+- choisit un `best` ;
+- calcule une confiance (`high`, `medium`, `low`, `none`).
+
+## Projections série / volume
+
+Le service supporte deux mécanismes :
+- `blocks=` : blocs métier prédéfinis ;
+- `fields=` : chemins précis ;
+- `include_raw_sections=true` : sections brutes du HTML déjà nettoyées.
+
+C'est utile pour :
+- les UI légères ;
+- les prompts d'IA ;
+- limiter la taille des payloads ;
+- éviter des post-traitements inutiles côté client.
+
+## Particularités utiles
+
+### Titres alternatifs
+- `title_vo`
+- `translated_title`
+
+Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit.
+
+### Normalisation volume
+Les parseurs produisent des champs standardisés pour les volumes :
+- `number`
+- `number_int`
+- `edition_label`
+- `is_special`
+- `is_one_shot`
+
+Ces champs se retrouvent sur :
+- les fiches volume ;
+- les items d'éditions série ;
+- les items du planning.
+
+## Debug HTML
+
+Quand `DEBUG_CAPTURE_HTML_ON_ERROR=true`, un `ParseError` sur une route cacheable peut sauver :
+- un dump `.html` de la page upstream ;
+- un fichier `.json` de métadonnées.
+
+Le chemin est injecté dans le message d'erreur :
+
+```text
+Debug HTML saved to /tmp/manga-news-debug-html/...
+```
+
+## Ce qui existe dans le code mais n'est pas encore une vraie feature publique
+
+Présent dans la config ou dans des modules, mais non exposé comme contrat public aujourd'hui :
+- admin API publique ;
+- rate limiting branché aux routes ;
+- format de logs JSON activé depuis la config runtime ;
+- retries/backoff pilotés par les variables `REQUEST_MAX_RETRIES` / `REQUEST_BACKOFF_SECONDS`.
+
+Le documente comme tel est plus honnête que de faire semblant que tout est déjà actif.
+
+## Enrichissement des recherches
+
+Pour certains résultats `/search`, le service relit une fiche détaillée avant de répondre :
+- résultat `series` -> relit la fiche série pour injecter `title_vo`, `translated_title`, `vf`, `vo` ;
+- résultat `volume` -> relit la fiche volume pour injecter les champs normalisés du volume, puis relit la fiche série parente pour injecter `vf` / `vo`.
+
+Ce comportement rend les réponses plus utiles, mais explique aussi pourquoi une recherche peut déclencher plusieurs fetchs amont lors d'un cache froid.

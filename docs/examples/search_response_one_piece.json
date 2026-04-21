@@ -21,6 +21,11 @@
       "volume_slug": null,
       "title_vo": "ワンピース",
       "translated_title": "One Piece",
+      "number": null,
+      "number_int": null,
+      "edition_label": null,
+      "is_special": null,
+      "is_one_shot": null,
       "vf": {
         "volumes": 112,
         "status": "En cours"
@@ -40,6 +45,11 @@
       "volume_slug": null,
       "title_vo": null,
       "translated_title": null,
+      "number": null,
+      "number_int": null,
+      "edition_label": null,
+      "is_special": null,
+      "is_one_shot": null,
       "vf": null,
       "vo": null
     }

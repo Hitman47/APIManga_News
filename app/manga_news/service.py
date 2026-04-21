@@ -37,6 +37,8 @@ from app.utils import clean_ws, fingerprint_data, is_manga_news_url, make_cache_
 
 logger = logging.getLogger(__name__)
 
+CACHE_SCHEMA_VERSION = '2026-04-21-vfvo-1'
+
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
     'staff': ['authors_story', 'authors_art', 'translators'],
@@ -53,18 +55,13 @@ VOLUME_BLOCKS = {
     'staff': ['authors_story', 'authors_art', 'translators'],
     'publishing': ['publisher_fr', 'publisher_vo', 'collection', 'type', 'genres', 'prepublication', 'origin', 'advisory_age'],
     'presentation': ['summary', 'illustration', 'illustration_details', 'cover_image'],
+    'editions': ['vf', 'vo'],
     'release': ['publication_date', 'isbn_ean', 'price_code'],
     'scores': ['editorial_score', 'reader_score'],
     'related': ['related'],
     'raw': ['raw_sections'],
     'raw_sections': ['raw_sections'],
 }
-
-CACHE_KEY_SCHEMA_VERSION = '2026-04-21-vf-vo-counters-v2'
-
-
-def _make_cache_key(*parts: str) -> str:
-    return make_cache_key(CACHE_KEY_SCHEMA_VERSION, *parts)
 
 
 def _split_csv_param(value: str | None) -> list[str]:
@@ -156,6 +153,10 @@ def slugify_block_name(block: str) -> str:
     return normalize_text(block).replace(' ', '_').replace('-', '_')
 
 
+def versioned_cache_key(*parts: str) -> str:
+    return make_cache_key(CACHE_SCHEMA_VERSION, *parts)
+
+
 class MangaNewsService:
     def __init__(self, settings: Settings, fetcher: AsyncFetcher, cache: SQLiteCache):
         self.settings = settings
@@ -207,17 +208,7 @@ class MangaNewsService:
     async def _cached_payload(self, *, cache_key: str, ttl_seconds: int, loader, namespace: str | None = None, resource_url: str | None = None):
         entry = self.cache.get(cache_key)
         if entry and entry.is_fresh:
-            repaired_payload = self._repair_cached_payload(entry.payload)
-            if repaired_payload is not entry.payload:
-                entry = self.cache.set(
-                    cache_key=cache_key,
-                    payload=repaired_payload,
-                    ttl_seconds=ttl_seconds,
-                    stale_grace_seconds=self.settings.cache_stale_grace_seconds,
-                    namespace=namespace,
-                    resource_url=repaired_payload.get('source_url') or resource_url,
-                )
-            return repaired_payload, entry, True, False, []
+            return entry.payload, entry, True, False, []
 
         if getattr(self.settings, 'negative_cache_enabled', True):
             negative_entry = self.cache.get_negative(cache_key)
@@ -259,21 +250,6 @@ class MangaNewsService:
                 return entry.payload, entry, True, True, [warning]
             raise
 
-    def _repair_cached_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        data = payload.get('data')
-        if not isinstance(data, dict):
-            return payload
-
-        repaired = deepcopy(payload)
-        repaired_data = repaired.get('data') or {}
-        changed = False
-        for field in ('vf', 'vo'):
-            if field not in repaired_data:
-                repaired_data[field] = None
-                changed = True
-        return repaired if changed else payload
-
-
     def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool | None = None) -> Envelope:
         data = payload.get('data')
         if found is None:
@@ -303,13 +279,24 @@ class MangaNewsService:
                     data = series_payload.get('data', {}) or {}
                     payload['title_vo'] = data.get('title_vo')
                     payload['translated_title'] = data.get('translated_title')
+                    payload['vf'] = data.get('vf')
+                    payload['vo'] = data.get('vo')
                 elif payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug'):
                     volume_payload, *_ = await self._get_volume_payload(series_slug=payload['series_slug'], volume_slug=payload['volume_slug'])
                     data = volume_payload.get('data', {}) or {}
                     payload['title_vo'] = data.get('title_vo')
                     payload['translated_title'] = data.get('translated_title')
+                    payload['number'] = data.get('number')
+                    payload['number_int'] = data.get('number_int')
+                    payload['edition_label'] = data.get('edition_label')
+                    payload['is_special'] = data.get('is_special')
+                    payload['is_one_shot'] = data.get('is_one_shot')
+                    series_payload, *_ = await self._get_series_payload(slug=payload['series_slug'])
+                    series_data = series_payload.get('data', {}) or {}
+                    payload['vf'] = series_data.get('vf')
+                    payload['vo'] = series_data.get('vo')
             except Exception as exc:  # pragma: no cover - best-effort enrichment
-                logger.debug('Search result title enrichment failed for %s: %s', payload.get('url'), exc)
+                logger.debug('Search result enrichment failed for %s: %s', payload.get('url'), exc)
             enriched.append(SearchResult.model_validate(payload))
         return enriched
 
@@ -362,7 +349,7 @@ class MangaNewsService:
                 f'{self.base_url}/index.php/recherche/?cat=manga-volume-vf&q={query}',
                 f'{self.base_url}/index.php/recherche/?cat=manga-volume-vo&q={query}',
             ])
-        cache_key = _make_cache_key('search', query, kind, mode, str(limit), *search_urls)
+        cache_key = versioned_cache_key('search', query, kind, mode, str(limit), *search_urls)
 
         async def loader():
             aggregated = []
@@ -414,7 +401,7 @@ class MangaNewsService:
 
     async def _get_series_payload(self, *, slug: str | None = None, url: str | None = None):
         target_url = self._resolve_series_url(slug=slug, url=url)
-        cache_key = _make_cache_key('series', target_url)
+        cache_key = versioned_cache_key('series', target_url)
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
@@ -440,7 +427,7 @@ class MangaNewsService:
 
     async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        cache_key = _make_cache_key('volume', target_url)
+        cache_key = versioned_cache_key('volume', target_url)
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
@@ -494,8 +481,18 @@ class MangaNewsService:
         include_raw_sections: bool = False,
     ) -> Envelope:
         payload, entry, cached, partial, warnings = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug, url=url)
+        data = deepcopy(payload.get('data', {}) or {})
+        target_series_slug = series_slug or self._extract_series_slug_from_volume_url(payload.get('source_url') or url or '')
+        if target_series_slug:
+            try:
+                series_payload, *_ = await self._get_series_payload(slug=target_series_slug)
+                series_data = series_payload.get('data', {}) or {}
+                data['vf'] = series_data.get('vf')
+                data['vo'] = series_data.get('vo')
+            except Exception as exc:  # pragma: no cover - best-effort enrichment
+                logger.debug('Volume enrichment failed for %s: %s', payload.get('source_url'), exc)
         projected = project_resource_payload(
-            payload.get('data', {}) or {},
+            data,
             resource='volume',
             blocks=_split_csv_param(blocks),
             fields=_split_csv_param(fields),
@@ -516,7 +513,7 @@ class MangaNewsService:
     async def get_series_editions(self, *, slug: str | None = None, url: str | None = None, edition: Literal['all', 'vf', 'vo'] = 'all') -> Envelope:
         target_url = self._resolve_series_url(slug=slug, url=url)
         target_slug = self._extract_series_slug(target_url)
-        cache_key = _make_cache_key('series-editions', target_url, edition)
+        cache_key = versioned_cache_key('series-editions', target_url, edition)
 
         async def loader():
             series_result = await self.fetcher.get_text(target_url)
@@ -547,7 +544,7 @@ class MangaNewsService:
 
     async def get_global_news(self, *, limit: int) -> Envelope:
         rss_url = f'{self.base_url}/index.php/feed/news'
-        cache_key = _make_cache_key('news-global', rss_url, str(limit))
+        cache_key = versioned_cache_key('news-global', rss_url, str(limit))
 
         async def loader():
             result = await self.fetcher.get_text(rss_url)
@@ -614,7 +611,7 @@ class MangaNewsService:
         target_url = f'{self.base_url}{path}'
         if query_string:
             target_url = f'{target_url}?{query_string}'
-        cache_key = _make_cache_key('planning', target_url)
+        cache_key = versioned_cache_key('planning', target_url)
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
@@ -721,7 +718,7 @@ class MangaNewsService:
             raise ParseError(f'{field_name} must be a valid date.') from exc
 
     async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> Envelope:
-        cache_key = _make_cache_key(cache_namespace, target_url, str(limit))
+        cache_key = versioned_cache_key(cache_namespace, target_url, str(limit))
 
         async def loader():
             result = await self.fetcher.get_text(target_url)
@@ -754,6 +751,16 @@ class MangaNewsService:
         if not series_slug or not volume_slug:
             raise ParseError('series_slug and volume_slug are required when no direct URL is provided.')
         return f'{self.base_url}/index.php/manga/{series_slug}/{volume_slug}'
+
+    def _extract_series_slug_from_volume_url(self, volume_url: str) -> str | None:
+        if not volume_url:
+            return None
+        path_parts = [part for part in urlparse(volume_url).path.split('/') if part]
+        if 'manga' in path_parts:
+            idx = path_parts.index('manga')
+            if len(path_parts) > idx + 1:
+                return path_parts[idx + 1]
+        return None
 
     def _extract_series_slug(self, series_url: str) -> str:
         path_parts = [part for part in urlparse(series_url).path.split('/') if part]

@@ -9,7 +9,7 @@
   "cache_expires_at": "2026-04-22T10:10:10+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-search-dogs",
+  "fingerprint": "fp-search-dogs-volume",
   "data": [
     {
       "title": "Dogs: Bullets & Carnage Vol.1",
@@ -25,9 +25,15 @@
       "is_special": false,
       "is_one_shot": false,
       "title_vo": "Dogs: Bullets & Carnage",
-      "translated_title": "Dogs: Bullets & Carnage",
-      "vf": { "volumes": 9, "status": "En cours" },
-      "vo": { "volumes": 10, "status": "En pause" }
+      "translated_title": "Dogs - Bullets & Carnage",
+      "vf": {
+        "volumes": 9,
+        "status": "En cours"
+      },
+      "vo": {
+        "volumes": 10,
+        "status": "En pause"
+      }
     }
   ]
 }

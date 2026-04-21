@@ -9,7 +9,7 @@
   "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-search-series-one-piece",
+  "fingerprint": "fp-search-one-piece",
   "data": [
     {
       "title": "One Piece",
@@ -21,6 +21,11 @@
       "volume_slug": null,
       "title_vo": "ワンピース",
       "translated_title": "One Piece",
+      "number": null,
+      "number_int": null,
+      "edition_label": null,
+      "is_special": null,
+      "is_one_shot": null,
       "vf": {
         "volumes": 112,
         "status": "En cours"
@@ -40,6 +45,11 @@
       "volume_slug": null,
       "title_vo": null,
       "translated_title": null,
+      "number": null,
+      "number_int": null,
+      "edition_label": null,
+      "is_special": null,
+      "is_one_shot": null,
       "vf": null,
       "vo": null
     }

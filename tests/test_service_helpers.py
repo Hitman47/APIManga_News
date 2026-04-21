@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 from app.cache import SQLiteCache
 from app.manga_news.service import MangaNewsService, project_resource_payload
-from app.utils import make_cache_key
 
 
 SERIES_PAYLOAD = {
@@ -90,22 +89,23 @@ async def test_search_enriches_alternate_titles_from_detail_pages(tmp_path: Path
     assert fetcher.calls.count(series_url) == 1
 
 
-
 @pytest.mark.asyncio
-async def test_series_fetch_ignores_legacy_cache_key_after_payload_schema_change(tmp_path: Path):
+async def test_search_enriches_volume_results_with_series_counts(tmp_path: Path):
     base_url = 'https://www.manga-news.com'
-    series_url = f'{base_url}/index.php/serie/One-piece-Edition-originale'
-    cache = SQLiteCache(tmp_path / 'cache.sqlite3')
-    cache.set(
-        cache_key=make_cache_key('series', series_url),
-        payload={'data': {'title': 'stale payload', 'vf': None, 'vo': None}, 'source_url': series_url},
-        ttl_seconds=3600,
-        stale_grace_seconds=3600,
-        namespace='series',
-        resource_url=series_url,
-    )
+    search_url = f'{base_url}/index.php/recherche/?cat=manga-volume-vf&q=dogs bullets carnage'
+    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-volume-vo&q=dogs bullets carnage'
+    volume_url = f'{base_url}/index.php/manga/Dogs:-Bullets-Carnage/vol-1'
+    series_url = f'{base_url}/index.php/serie/Dogs:-Bullets-Carnage'
+
+    search_html = f'''<html><body><a href="{volume_url}">Dogs: Bullets &amp; Carnage Vol.1</a></body></html>'''
+    volume_html = '''<html><body><h1>Dogs: Bullets &amp; Carnage Vol.1</h1><ul><li>Titre VO: Dogs: Bullets &amp; Carnage</li><li>Titre traduit: Dogs - Bullets &amp; Carnage</li></ul></body></html>'''
+    series_html = '''<html><body><h1>Dogs: Bullets &amp; Carnage</h1><div id="numberblock"><div><div><span class="version">VF:</span><span>9</span><span class="small">(En cours)</span></div></div><div><a href="https://www.manga-news.com/index.php/serie-vo/Dogs-Bullets-Carnage-vo"><span class="version">VO</span>: 10 <span class="small">(En pause)</span></a></div></div></body></html>'''
+
     fetcher = _FakeFetcher({
-        series_url: Path('tests/fixtures/series_one_piece.html').read_text(encoding='utf-8'),
+        search_url: search_html,
+        search_url_vo: '<html><body></body></html>',
+        volume_url: volume_html,
+        series_url: series_html,
     })
     settings = SimpleNamespace(
         manga_news_base_url=base_url,
@@ -121,11 +121,45 @@ async def test_series_fetch_ignores_legacy_cache_key_after_payload_schema_change
         negative_cache_enabled=True,
         negative_cache_ttl_seconds=120,
     )
-    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=cache)
+    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
 
-    response = await service.get_series(slug='One-piece-Edition-originale')
+    response = await service.search(query='dogs bullets carnage', kind='volume', mode='all', limit=5)
 
-    assert fetcher.calls == [series_url]
-    assert response.data['title'] == 'One Piece'
+    first = response.data[0]
+    assert first['number'] == '1'
+    assert first['title_vo'] == 'Dogs: Bullets & Carnage'
+    assert first['translated_title'] == 'Dogs - Bullets & Carnage'
+    assert first['vf']['volumes'] == 9
+    assert first['vo']['volumes'] == 10
+
+
+@pytest.mark.asyncio
+async def test_get_volume_enriches_with_parent_series_counts(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    volume_url = f'{base_url}/index.php/manga/One-Piece/vol-110'
+    series_url = f'{base_url}/index.php/serie/One-Piece'
+
+    fetcher = _FakeFetcher({
+        volume_url: Path('tests/fixtures/volume_one_piece_110.html').read_text(encoding='utf-8'),
+        series_url: '<html><body><h1>One Piece</h1><div id="numberblock"><div><div><span class="version">VF:</span><span>112</span><span class="small">(En cours)</span></div></div><div><a href="https://www.manga-news.com/index.php/serie-vo/One-Piece-vo"><span class="version">VO</span>: 114 <span class="small">(En cours)</span></a></div></div></body></html>',
+    })
+    settings = SimpleNamespace(
+        manga_news_base_url=base_url,
+        cache_stale_grace_seconds=3600,
+        cache_ttl_search_seconds=3600,
+        cache_ttl_series_seconds=3600,
+        cache_ttl_volume_seconds=3600,
+        cache_ttl_news_global_seconds=3600,
+        cache_ttl_news_series_seconds=3600,
+        cache_ttl_planning_seconds=3600,
+        search_score_threshold=1,
+        max_limit=50,
+        negative_cache_enabled=True,
+        negative_cache_ttl_seconds=120,
+    )
+    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
+
+    response = await service.get_volume(series_slug='One-Piece', volume_slug='vol-110')
+
     assert response.data['vf']['volumes'] == 112
     assert response.data['vo']['volumes'] == 114

@@ -9,7 +9,7 @@
   "cache_expires_at": "2026-04-21T12:00:00+00:00",
   "partial": false,
   "warnings": [],
-  "fingerprint": "fp-search-resolve-series-one-piece",
+  "fingerprint": "fp-resolve-one-piece",
   "data": {
     "query": "one piece",
     "kind_requested": "series",
@@ -24,6 +24,11 @@
       "volume_slug": null,
       "title_vo": "ワンピース",
       "translated_title": "One Piece",
+      "number": null,
+      "number_int": null,
+      "edition_label": null,
+      "is_special": null,
+      "is_one_shot": null,
       "vf": {
         "volumes": 112,
         "status": "En cours"
@@ -44,6 +49,11 @@
         "volume_slug": null,
         "title_vo": "ワンピース",
         "translated_title": "One Piece",
+        "number": null,
+        "number_int": null,
+        "edition_label": null,
+        "is_special": null,
+        "is_one_shot": null,
         "vf": {
           "volumes": 112,
           "status": "En cours"
@@ -52,6 +62,24 @@
           "volumes": 114,
           "status": "En cours"
         }
+      },
+      {
+        "title": "One Piece Magazine",
+        "url": "https://www.manga-news.com/index.php/serie/One-piece-Magazine",
+        "kind": "series",
+        "score": 73,
+        "slug": "One-piece-Magazine",
+        "series_slug": "One-piece-Magazine",
+        "volume_slug": null,
+        "title_vo": null,
+        "translated_title": null,
+        "number": null,
+        "number_int": null,
+        "edition_label": null,
+        "is_special": null,
+        "is_one_shot": null,
+        "vf": null,
+        "vo": null
       }
     ]
   }

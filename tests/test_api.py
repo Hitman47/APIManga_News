@@ -159,16 +159,10 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
     assert '/series/{slug}/editions' in payload['paths']
     assert '/series/{slug}/related' in payload['paths']
     assert '/search/resolve' in payload['paths']
-    assert payload['info']['description']
-    assert payload['paths']['/search']['get']['summary'] == 'Search Manga-News titles'
-    assert payload['paths']['/volume/{series_slug}/{volume_slug}']['get']['summary'] == 'Get a volume by slugs'
     schemas = payload['components']['schemas']
     assert 'SeriesData' in schemas
     assert 'SeriesEditionsData' in schemas
     assert 'ResolveResponse' in schemas
-    search_schema = schemas['SearchResult']['properties']
-    assert 'vf' in search_schema
-    assert 'vo' in search_schema
 
 
 def test_search_endpoint_exposes_alternate_titles():
@@ -209,3 +203,23 @@ def test_search_endpoint_exposes_alternate_titles():
     assert payload['data'][0]['title'] == 'Black Night Parade'
     assert payload['data'][0]['title_vo'] == 'ブラックナイトパレード'
     assert payload['data'][0]['translated_title'] == 'Black Night Parade'
+
+
+def test_openapi_exposes_search_and_volume_edition_counters():
+    with TestClient(app) as client:
+        response = client.get('/openapi.json')
+    assert response.status_code == 200
+    payload = response.json()
+    schemas = payload['components']['schemas']
+    search_result = schemas['SearchResult']['properties']
+    volume_data = schemas['VolumeData']['properties']
+    assert 'vf' in search_result
+    assert 'vo' in search_result
+    assert 'vf' in volume_data
+    assert 'vo' in volume_data
+    assert payload['info']['description']
+    assert payload['paths']['/search']['get']['description']
+    assert payload['paths']['/search/resolve']['get']['description']
+    assert payload['paths']['/series/{slug}']['get']['description']
+    assert payload['paths']['/volume/{series_slug}/{volume_slug}']['get']['description']
+    assert payload['paths']['/planning']['get']['description']

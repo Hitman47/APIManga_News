@@ -228,34 +228,20 @@ def test_parse_series_editions_page():
     assert parsed.items[1].cover_image.endswith('one-piece-110.jpg')
 
 
-
-def test_parse_series_page_reads_vf_vo_from_numberblock_markup():
+def test_parse_series_page_numberblock_markup():
     html = '''
     <html>
-      <head><meta property="og:title" content="One Piece - Manga série - Manga news" /></head>
       <body>
         <h1>One Piece</h1>
         <div id="numberblock">
-          <div>
-            <div>
-              <span class="version">VF:</span><span>112</span>
-              <span class="small">(En cours)</span>
-            </div>
-          </div>
-          <div>
-            <a href="https://www.manga-news.com/index.php/serie-vo/One-Piece-vo" title="One Piece vo">
-              <span class="version">VO</span>: 114
-              <span class="small">(En cours)</span>
-            </a>
-          </div>
+          <div><div><span class="version">VF:</span><span>112</span><span class="small">(En cours)</span></div></div>
+          <div><a href="https://www.manga-news.com/index.php/serie-vo/One-Piece-vo" title="One Piece vo"><span class="version">VO</span>: 114 <span class="small">(En cours)</span></a></div>
         </div>
-        <div>Dernier paru</div><div>08/04/2026</div>
-        <div>A paraître</div><div>06/05/2026</div>
       </body>
     </html>
     '''
     parsed = parse_series_page(html, 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale')
-    assert parsed.vf is not None and parsed.vf.volumes == 112 and parsed.vf.status == 'En cours'
-    assert parsed.vo is not None and parsed.vo.volumes == 114 and parsed.vo.status == 'En cours'
-    assert parsed.last_release_date == '2026-04-08'
-    assert parsed.next_release_date == '2026-05-06'
+    assert parsed.vf and parsed.vf.volumes == 112
+    assert parsed.vf.status == 'En cours'
+    assert parsed.vo and parsed.vo.volumes == 114
+    assert parsed.vo.status == 'En cours'

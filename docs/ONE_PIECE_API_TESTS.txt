@@ -1,83 +1,224 @@
-Base URL locale recommandée :
+Manga News Private API - scénario manuel One Piece
+==================================================
+
+Base URL hôte par défaut :
 http://localhost:8017
 
-Exemples de variables :
+Si API_TOKEN est défini, ajouter à chaque requête :
+Authorization: Bearer <token>
 
-Linux/macOS
-export BASE_URL="http://localhost:8017"
-export TOKEN="ton_token"
-alias apicurl='curl -sS -H "Authorization: Bearer '"$TOKEN"'"'
-
-Windows PowerShell
-$env:BASE_URL = "http://localhost:8017"
-$env:TOKEN = "ton_token"
+Ordre conseillé :
+1) vérifier /health
+2) résoudre la série
+3) charger la fiche série
+4) résoudre un volume
+5) charger la fiche volume
+6) tester les news
+7) tester le planning
+8) tester l'ETag / 304
+9) valider docs + contrat
 
 1) Health
-apicurl "$BASE_URL/health"
+---------
+curl http://localhost:8017/health
 
-2) Recherche série One Piece
-apicurl --get "$BASE_URL/search" \
+Attendu :
+- HTTP 200
+- {"ok": true}
+
+Exemples :
+- docs/examples/health.json
+- docs/examples/health_ok.json
+
+2) Recherche libre de la série
+------------------------------
+curl --get "http://localhost:8017/search" \
   --data-urlencode "q=one piece" \
   --data-urlencode "kind=series" \
-  --data-urlencode "mode=best" \
-  --data-urlencode "limit=10"
+  --data-urlencode "mode=all" \
+  --data-urlencode "limit=5"
 
 Attendu :
-- `data[0].title = One Piece`
-- `data[0].title_vo` si disponible
-- `data[0].vf.volumes = 112`
-- `data[0].vo.volumes = 114`
+- au moins un résultat
+- un résultat avec slug proche de One-piece-Edition-originale
+- title_vo / translated_title possibles
+- vf / vo attendus sur le meilleur résultat série si l'enrichissement détaillé a réussi
 
-3) Resolve série One Piece
-apicurl --get "$BASE_URL/search/resolve" \
+Exemple :
+- docs/examples/search_response_one_piece.json
+
+3) Résolution de la série
+-------------------------
+curl --get "http://localhost:8017/search/resolve" \
   --data-urlencode "q=one piece" \
   --data-urlencode "kind=series" \
-  --data-urlencode "limit=10"
+  --data-urlencode "limit=5"
 
 Attendu :
-- `data.best.slug = One-piece-Edition-originale`
-- `data.best.vf.volumes = 112`
-- `data.best.vo.volumes = 114`
+- data.best.kind == "series"
+- data.best.slug proche de One-piece-Edition-originale
+- data.confidence renseigné
+- data.best.vf.volumes et data.best.vo.volumes renseignés si l'enrichissement détaillé a réussi
 
-4) Fiche série One Piece
-apicurl "$BASE_URL/series/One-piece-Edition-originale"
+Exemples :
+- docs/examples/resolve_response_one_piece.json
+- docs/examples/search_resolve_series_one_piece.json
+
+4) Fiche série complète
+-----------------------
+curl "http://localhost:8017/series/One-piece-Edition-originale"
 
 Attendu :
-- `data.title = One Piece`
-- `data.vf.volumes = 112`
-- `data.vf.status = En cours`
-- `data.vo.volumes = 114`
-- `data.vo.status = En cours`
+- data.title == "One Piece"
+- data.title_vo présent si la page le contient
+- publisher_fr renseigné
+- headers ETag et X-Data-Fingerprint présents
 
-5) Recherche volume One Piece tome 91
-apicurl --get "$BASE_URL/search/resolve" \
-  --data-urlencode "q=one piece tome 91" \
+Exemple :
+- docs/examples/series_one_piece.json
+
+5) Fiche série légère
+---------------------
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,title_vo,translated_title,vf.volumes,next_release_date"
+
+Attendu :
+- payload réduit
+- title présent
+- vf.volumes présent si disponible
+
+6) Liens liés à la série
+------------------------
+curl "http://localhost:8017/series/One-piece-Edition-originale/related"
+
+Attendu :
+- data.related présent
+- catégories de liens présentes même si certaines listes sont vides
+
+Exemple :
+- docs/examples/series_related_one_piece.json
+
+7) Éditions de la série
+-----------------------
+curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
+
+Attendu :
+- data.vf et/ou data.vo présents
+- items éventuels avec number / publication_date / cover_image
+
+Exemples :
+- docs/examples/series_editions_one_piece.json
+- docs/examples/series_editions_one_piece_all.json
+
+8) Résolution d'un volume
+-------------------------
+curl --get "http://localhost:8017/search/resolve" \
+  --data-urlencode "q=one piece tome 110" \
   --data-urlencode "kind=volume" \
   --data-urlencode "limit=10"
 
 Attendu :
-- `data.best.series_slug = One-Piece`
-- `data.best.volume_slug = vol-91`
+- data.best.kind == "volume"
+- series_slug et volume_slug présents
 
-6) Fiche volume 91
-apicurl "$BASE_URL/volume/One-Piece/vol-91"
+9) Fiche volume complète
+------------------------
+curl "http://localhost:8017/volume/One-Piece/vol-110"
 
 Attendu :
-- `data.number = 91`
-- `data.vf.volumes = 112`
-- `data.vo.volumes = 114`
+- title renseigné
+- number / number_int cohérents
+- publication_date / isbn_ean présents si disponibles
+- title_vo / translated_title présents si disponibles
+- headers ETag et X-Data-Fingerprint présents
 
-7) Planning VF Glénat / avril 2026 / One Piece
-apicurl --get "$BASE_URL/planning" \
+Exemples :
+- docs/examples/volume_one_piece_91.json
+- docs/examples/volume_one_piece_110.json
+
+10) News globales
+-----------------
+curl "http://localhost:8017/news/global?limit=5"
+
+Attendu :
+- liste de news
+- title / url / published_at exploitables
+
+Exemple :
+- docs/examples/news_global_one_piece_sample.json
+
+11) News de série
+-----------------
+curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
+
+Attendu :
+- liste de news liées à la série si Manga News en propose
+
+12) News de volume
+------------------
+curl "http://localhost:8017/news/volume/One-Piece/vol-110?limit=10"
+
+Alternative by-url :
+curl --get "http://localhost:8017/news/volume/by-url" \
+  --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-110" \
+  --data-urlencode "limit=10"
+
+13) Planning VF filtré
+----------------------
+curl --get "http://localhost:8017/planning" \
   --data-urlencode "section=manga-vf" \
   --data-urlencode "year=2026" \
   --data-urlencode "month=4" \
   --data-urlencode "publisher=Glénat" \
   --data-urlencode "q=one piece" \
-  --data-urlencode "sort=date_desc" \
+  --data-urlencode "date_from=2026-04-01" \
+  --data-urlencode "date_to=2026-04-30" \
+  --data-urlencode "sort=date_asc" \
+  --data-urlencode "limit=25"
+
+Attendu :
+- data.section == "manga-vf"
+- items filtrés localement
+- total_items = total après filtrage local sur la page chargée
+
+Exemples :
+- docs/examples/planning_example.json
+- docs/examples/planning_manga_vf_april_2026.json
+
+14) Test ETag / 304
+-------------------
+- faire une requête sur /series/One-piece-Edition-originale
+- récupérer l'ETag
+- rejouer la même requête avec If-None-Match
+
+Attendu :
+- HTTP 304
+- corps vide
+
+15) Validation doc + contrat
+----------------------------
+python scripts/validate_contract_and_docs.py
+
+16) Validation test suite
+-------------------------
+pytest
+
+But du scénario :
+- vérifier les routes réelles ;
+- vérifier les exemples JSON ;
+- vérifier que la doc suffit à démarrer ;
+- vérifier qu'aucune hypothèse de `/v1` ou d'endpoint admin ne traîne encore.
+
+10) Vérification manuelle du cas Dogs
+------------------------------------
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=Dogs: Bullets & Carnage" \
+  --data-urlencode "kind=volume" \
+  --data-urlencode "mode=best" \
   --data-urlencode "limit=10"
 
-Si les compteurs restent `null` alors que Manga-News les affiche, vérifier :
-- que la réponse ne vient pas d'un vieux cache applicatif ;
-- que l'application tourne bien avec le build courant ;
-- que la page source contient toujours un bloc `#numberblock`.
+Attendu :
+- un résultat volume pour `vol-1` ;
+- `number == "1"` ;
+- `title_vo` et `translated_title` renseignés ;
+- `vf.volumes == 9` et `vo.volumes == 10` si la fiche série parente a bien été relue.
