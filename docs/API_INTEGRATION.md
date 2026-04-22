@@ -152,12 +152,6 @@ curl "http://localhost:8017/health/runtime?include_recent=true"
 
 Usage : rechercher des séries ou des volumes à partir d'un texte libre.
 
-Comportement de tri important :
-- les égalités exactes sur le titre ou le slug sont prioritaires ;
-- les titres qui commencent par la requête passent avant les titres qui la contiennent plus loin ;
-- les titres très longs ou manifestement dérivés (`roman`, `guide`, `philosophie`, `recettes`, `gaiden`, etc.) sont déclassés quand la requête cible un nom de licence brut.
-
-
 Paramètres :
 - `q` : texte libre, obligatoire ;
 - `kind` : `series`, `volume`, `all` ;
@@ -186,10 +180,13 @@ Résultat typique par item :
 - `volume_slug`
 - `title_vo`
 - `translated_title`
+- `source_type` : valeur du champ `Type` sur la fiche Manga-News quand elle est disponible
+- `media_kind` : classification métier (`manga`, `manga_spinoff`, `novel`, `essay`, `cookbook`, `guide`, etc.)
 
 Important :
 - `mode=best` retourne **une liste** contenant au mieux un seul item ;
 - `title_vo` et `translated_title` sont enrichis en allant lire la fiche détaillée quand c'est possible ;
+- le ranking ne repose plus sur le seul fuzzy score : la route priorise les mangas principaux avant les romans, essais, guides, artbooks ou livres dérivés quand la requête cible une licence nue ;
 - les fiches source de recherche sont mises en cache indépendamment du rendu final, donc changer `mode` ou `limit` sur une même requête ne force pas forcément un nouveau fetch upstream ;
 - si l'enrichissement échoue, le résultat principal reste retourné.
 

@@ -33,7 +33,9 @@
       "vo": {
         "volumes": 10,
         "status": "En pause"
-      }
+      },
+      "source_type": "Seinen",
+      "media_kind": "manga"
     }
   ]
 }

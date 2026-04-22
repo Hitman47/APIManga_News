@@ -1,9 +1,8 @@
-## 2026-04-22 — correction du ranking métier de la recherche
+## 2026-04-22 — ranking métier de `/search`
 
-- Le tri de `/search` et `/search/resolve` ne dépend plus uniquement d'un fuzzy score brut.
-- Les égalités exactes titre/slug sont maintenant priorisées devant les titres plus longs contenant simplement la licence.
-- Les résultats dérivés ou annexes (`roman`, `guide`, `philosophie`, `recettes`, `gaiden`, `shinden`, `retsuden`, etc.) reçoivent un malus quand la requête cible un nom de série brut.
-- `mode=best` devient plus fiable pour les grosses licences ambiguës comme `Naruto`, où la série principale doit passer avant les ouvrages périphériques.
+- `/search` et `/search/resolve` exposent désormais `source_type` et `media_kind` sur les résultats.
+- Le ranking ne repose plus uniquement sur le fuzzy score : l'API priorise désormais la série manga principale avant les romans, essais, guides, cookbooks ou livres dérivés quand la requête cible une licence nue.
+- Les spin-offs manga peuvent être reclassés devant les ouvrages annexes grâce aux séries liées détectées sur la fiche détaillée.
 
 ## 2026-04-22 — verrouillage du contrat par défaut et observabilité runtime
 

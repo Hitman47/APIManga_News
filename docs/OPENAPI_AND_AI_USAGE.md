@@ -110,3 +110,5 @@ Cette validation vérifie :
 ## Defaults serveur et query params
 
 L'OpenAPI expose `enrich`, `include_editions` et `include_parent_editions`. Quand ces query params sont absents, le comportement tombe sur les variables serveur documentées dans `.env.example`. `/health/runtime` permet ensuite de vérifier les defaults effectivement actifs sur l'instance.
+
+Les résultats `/search` et `/search/resolve` exposent aussi `source_type` et `media_kind`. `source_type` correspond au champ `Type` de la fiche Manga-News quand il est disponible. `media_kind` est une classification calculée par l'API pour différencier manga principal, spin-off, roman, essai, guide, artbook, cookbook, etc.

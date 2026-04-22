@@ -5,7 +5,7 @@ import json
 import re
 import unicodedata
 from datetime import UTC, datetime
-from typing import Iterable
+from typing import Any, Iterable
 from urllib.parse import quote, urljoin, urlparse
 
 from dateutil import parser as date_parser
@@ -42,18 +42,39 @@ EDITION_NOISE_PATTERN = re.compile(
     r"deluxe|perfect|ultimate|kanzenban|double|triple|grand format|roman|light novel|novel|tome|vol(?:ume)?)\b",
     flags=re.IGNORECASE,
 )
-LEADING_ARTICLES_PATTERN = re.compile(r'^(le|la|les|un|une|des|the)\s+', flags=re.IGNORECASE)
-SEARCH_METADATA_SUFFIX_PATTERN = re.compile(r'\s*\(\d{4}\).*$')
-SEARCH_DERIVATIVE_PHRASES = (
-    'agir et penser comme',
-    'philosophie de',
-    'recettes cachees',
-    'recettes cachées',
-    'les arcanes de',
+RANKING_NOISE_PATTERN = re.compile(
+    r"\b((?:tome|v(?:ol)?\.?|volume)\s*\d+|edition originale|ed\. originale|edition|collector|collectors?|"
+    r"deluxe|perfect|ultimate|kanzenban|double|triple|grand format|tome|vol(?:ume)?)\b",
+    flags=re.IGNORECASE,
 )
-SEARCH_DERIVATIVE_TOKENS = {
-    'roman', 'novel', 'guide', 'artbook', 'fanbook', 'databook', 'cookbook',
-    'recettes', 'philosophie', 'gaiden', 'shinden', 'retsuden', 'kizuna', 'arcanes',
+LEADING_ARTICLES_PATTERN = re.compile(r'^(le|la|les|un|une|des|the)\s+', flags=re.IGNORECASE)
+TITLE_METADATA_SUFFIX_PATTERN = re.compile(r'\s*\(\d{4}\).*$')
+
+NOVEL_PATTERN = re.compile(r'\b(roman|novel|light\s*novel)\b', flags=re.IGNORECASE)
+ESSAY_PATTERN = re.compile(r'\b(essai|philosophie)\b', flags=re.IGNORECASE)
+COOKBOOK_PATTERN = re.compile(r'\b(recette|recettes|cook\s*book|cookbook|cuisine)\b', flags=re.IGNORECASE)
+GUIDE_PATTERN = re.compile(r'\b(guide\s*book|guidebook|guide|fan\s*book|fanbook|databook)\b', flags=re.IGNORECASE)
+ARTBOOK_PATTERN = re.compile(r'\b(art\s*book|artbook)\b', flags=re.IGNORECASE)
+ANIME_COMICS_PATTERN = re.compile(r'\b(anime\s*comics?|anime\s*comic)\b', flags=re.IGNORECASE)
+SPINOFF_PATTERN = re.compile(
+    r'\b(gaiden|shinden|retsuden|kizuna|side\s*story|spin\s*off|spinoff|next\s*generations)\b',
+    flags=re.IGNORECASE,
+)
+MANGA_TYPE_KEYWORDS = {
+    'manga', 'shonen', 'shônen', 'shounen', 'shojo', 'shoujo', 'seinen', 'josei', 'kodomo',
+    'manhwa', 'manhua', 'webtoon',
+}
+MEDIA_KIND_PRIORITY = {
+    'manga': 0,
+    'manga_spinoff': 1,
+    'special': 2,
+    'novel': 3,
+    'guide': 4,
+    'artbook': 5,
+    'anime_comics': 6,
+    'cookbook': 7,
+    'essay': 8,
+    'misc': 9,
 }
 
 
@@ -74,6 +95,25 @@ def normalize_text(value: str | None) -> str:
     normalized = unicodedata.normalize('NFKD', cleaned)
     normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
     normalized = EDITION_NOISE_PATTERN.sub(' ', normalized)
+    normalized = LEADING_ARTICLES_PATTERN.sub('', normalized)
+    normalized = normalized.replace('&', ' and ')
+    normalized = re.sub(r'\bpartie\b', 'part', normalized)
+    normalized = re.sub(r'[^a-z0-9]+', ' ', normalized)
+    return re.sub(r'\s+', ' ', normalized).strip()
+
+
+def strip_title_metadata_suffix(value: str | None) -> str:
+    cleaned = clean_ws(value)
+    if not cleaned:
+        return ''
+    return clean_ws(TITLE_METADATA_SUFFIX_PATTERN.sub('', cleaned))
+
+
+def normalize_title_for_ranking(value: str | None) -> str:
+    cleaned = strip_title_metadata_suffix(value).lower()
+    normalized = unicodedata.normalize('NFKD', cleaned)
+    normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = RANKING_NOISE_PATTERN.sub(' ', normalized)
     normalized = LEADING_ARTICLES_PATTERN.sub('', normalized)
     normalized = normalized.replace('&', ' and ')
     normalized = re.sub(r'\bpartie\b', 'part', normalized)
@@ -118,99 +158,113 @@ def score_match(query: str, candidate: str, extra: str | None = None) -> int:
     return int(base)
 
 
-def _search_title_base(candidate: str) -> str:
-    stripped = SEARCH_METADATA_SUFFIX_PATTERN.sub('', clean_ws(candidate))
-    return normalize_text(stripped)
+def infer_media_kind(
+    *,
+    title: str | None,
+    source_type: str | None = None,
+    kind: str | None = None,
+    is_special: bool | None = None,
+    related_series_titles: Iterable[str] | None = None,
+    query: str | None = None,
+) -> str:
+    title_blob = normalize_title_for_ranking(title)
+    type_blob = normalize_title_for_ranking(source_type)
+    combined = ' '.join(part for part in [title_blob, type_blob] if part)
+
+    if ESSAY_PATTERN.search(combined):
+        return 'essay'
+    if COOKBOOK_PATTERN.search(combined):
+        return 'cookbook'
+    if GUIDE_PATTERN.search(combined):
+        return 'guide'
+    if ARTBOOK_PATTERN.search(combined):
+        return 'artbook'
+    if ANIME_COMICS_PATTERN.search(combined):
+        return 'anime_comics'
+    if NOVEL_PATTERN.search(combined):
+        return 'novel'
+
+    related_to_query = False
+    normalized_query = normalize_title_for_ranking(query) if query else ''
+    if normalized_query and related_series_titles:
+        related_to_query = any(normalize_title_for_ranking(item) == normalized_query for item in related_series_titles)
+
+    has_spinoff_hint = bool(SPINOFF_PATTERN.search(combined)) or related_to_query
+    type_tokens = set(type_blob.split())
+    is_manga_like = kind == 'volume' or bool(MANGA_TYPE_KEYWORDS.intersection(type_tokens)) or kind == 'series'
+
+    if has_spinoff_hint and is_manga_like:
+        return 'manga_spinoff'
+    if is_manga_like:
+        return 'manga'
+    if is_special:
+        return 'special'
+    return 'misc'
 
 
-def _search_slug_base(extra: str | None) -> str:
-    if not extra:
-        return ''
-    parsed = urlparse(extra)
-    path_parts = [part for part in parsed.path.split('/') if part]
-    if not path_parts:
-        return ''
-    return normalize_text(path_parts[-1])
+def media_kind_priority(media_kind: str | None) -> int:
+    return MEDIA_KIND_PRIORITY.get(media_kind or 'misc', MEDIA_KIND_PRIORITY['misc'])
 
 
-def _search_rank_data(query: str, candidate: str, extra: str | None = None) -> dict[str, int | bool]:
-    normalized_query = normalize_text(query)
-    title_base = _search_title_base(candidate)
-    slug_base = _search_slug_base(extra)
-    raw_score = score_match(query, candidate, extra=extra)
+def _search_result_value(result: Any, key: str) -> Any:
+    if isinstance(result, dict):
+        return result.get(key)
+    return getattr(result, key, None)
 
-    query_tokens = normalized_query.split()
-    title_tokens = title_base.split()
-    query_token_count = len(query_tokens)
-    title_token_count = len(title_tokens)
-    extra_tokens = max(0, title_token_count - query_token_count)
 
-    exact_title = bool(normalized_query and title_base == normalized_query)
-    exact_slug = bool(normalized_query and slug_base == normalized_query)
-    startswith_title = bool(normalized_query and title_base.startswith(normalized_query + ' '))
-    contains_title = bool(normalized_query and f' {normalized_query} ' in f' {title_base} ')
+def search_result_sort_key(query: str, result: Any) -> tuple[Any, ...]:
+    query_norm = normalize_title_for_ranking(query)
+    query_tokens = query_norm.split()
+    query_volume_number = extract_volume_number(query)
 
-    derivative_penalty = 0
-    if not exact_title and not exact_slug:
-        lowered_candidate = clean_ws(candidate).lower()
-        lowered_title_base = title_base.lower()
-        for phrase in SEARCH_DERIVATIVE_PHRASES:
-            if phrase in lowered_candidate or phrase in lowered_title_base:
-                derivative_penalty += 12
-        derivative_penalty += 8 * sum(1 for token in title_tokens if token in SEARCH_DERIVATIVE_TOKENS)
+    title = _search_result_value(result, 'title') or ''
+    slug = _search_result_value(result, 'slug') or ''
+    kind = _search_result_value(result, 'kind') or 'series'
+    source_type = _search_result_value(result, 'source_type')
+    is_special = _search_result_value(result, 'is_special')
+    media_kind = _search_result_value(result, 'media_kind')
+    if not media_kind:
+        media_kind = infer_media_kind(
+            title=title,
+            source_type=source_type,
+            kind=kind,
+            is_special=is_special,
+        )
 
-    rank_score = raw_score
-    if exact_title:
-        rank_score = max(rank_score, 100)
-    elif exact_slug:
-        rank_score = max(rank_score, 99)
+    title_norm = normalize_title_for_ranking(title)
+    slug_norm = normalize_title_for_ranking((slug or '').replace('-', ' '))
+    exact_title = title_norm == query_norm and bool(query_norm)
+    exact_slug = slug_norm == query_norm and bool(query_norm)
+    startswith_query = title_norm.startswith(f'{query_norm} ') or title_norm == query_norm
+    contains_query = bool(query_norm) and query_norm in title_norm
+    token_count = len(title_norm.split())
+    extra_tokens = max(token_count - len(query_tokens), 0)
+
+    kind_priority = 0
+    number_match_priority = 1
+    if query_volume_number:
+        kind_priority = 0 if kind == 'volume' else 1
+        result_number = _search_result_value(result, 'number')
+        number_match_priority = 0 if clean_ws(result_number) == clean_ws(query_volume_number) else 1
     else:
-        if startswith_title:
-            rank_score += 8
-        elif contains_title:
-            rank_score += 4
-        else:
-            rank_score -= 6
-        rank_score -= min(extra_tokens * 4, 24)
-        rank_score -= derivative_penalty
-        if query_token_count == 1 and query_tokens and query_tokens[0] in title_tokens and title_tokens and title_tokens[0] != query_tokens[0]:
-            rank_score -= 6
+        kind_priority = 0 if kind == 'series' else 1
 
-    rank_score = max(0, min(100, int(rank_score)))
-    slug_similarity = fuzz.ratio(normalized_query, slug_base) if slug_base else 0
-    title_similarity = fuzz.ratio(normalized_query, title_base) if title_base else 0
-    return {
-        'score': rank_score,
-        'raw_score': raw_score,
-        'exact_title': exact_title,
-        'exact_slug': exact_slug,
-        'startswith_title': startswith_title,
-        'contains_title': contains_title,
-        'derivative_penalty': derivative_penalty,
-        'extra_tokens': extra_tokens,
-        'title_similarity': int(title_similarity),
-        'slug_similarity': int(slug_similarity),
-        'title_length': len(title_base),
-    }
+    special_priority = 1 if is_special else 0
+    score = int(_search_result_value(result, 'score') or 0)
 
-
-def search_rank_score(query: str, candidate: str, extra: str | None = None) -> int:
-    return int(_search_rank_data(query, candidate, extra=extra)['score'])
-
-
-def search_sort_key(query: str, candidate: str, extra: str | None = None) -> tuple[int, int, int, int, int, int, int, int, int, int]:
-    data = _search_rank_data(query, candidate, extra=extra)
     return (
-        int(data['score']),
-        int(bool(data['exact_title'])),
-        int(bool(data['exact_slug'])),
-        int(bool(data['startswith_title'])),
-        int(bool(data['contains_title'])),
-        -int(data['derivative_penalty']),
-        -int(data['extra_tokens']),
-        int(data['title_similarity']),
-        int(data['slug_similarity']),
-        -int(data['title_length']),
+        0 if exact_title else 1,
+        0 if exact_slug else 1,
+        kind_priority,
+        media_kind_priority(media_kind),
+        0 if startswith_query else 1,
+        0 if contains_query else 1,
+        number_match_priority,
+        special_priority,
+        extra_tokens,
+        -score,
+        token_count,
+        title_norm,
     )
 
 

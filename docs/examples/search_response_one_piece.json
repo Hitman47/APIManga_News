@@ -33,7 +33,9 @@
       "vo": {
         "volumes": 114,
         "status": "En cours"
-      }
+      },
+      "source_type": "Shonen",
+      "media_kind": "manga"
     },
     {
       "title": "One Piece Magazine",
@@ -51,7 +53,9 @@
       "is_special": null,
       "is_one_shot": null,
       "vf": null,
-      "vo": null
+      "vo": null,
+      "source_type": null,
+      "media_kind": "guide"
     }
   ]
 }

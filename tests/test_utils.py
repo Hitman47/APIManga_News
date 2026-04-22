@@ -1,4 +1,4 @@
-from app.utils import normalize_text, parse_french_date, project_dict_fields, score_match, search_rank_score, search_sort_key
+from app.utils import infer_media_kind, normalize_text, parse_french_date, project_dict_fields, score_match, search_result_sort_key
 
 
 def test_normalize_text_handles_accents_and_noise():
@@ -37,20 +37,47 @@ def test_score_match_handles_punctuation_variants():
     assert score_match('Dogs - Bullets & Carnage', 'Dogs: Bullets & Carnage') >= 95
 
 
-def test_search_rank_prefers_exact_series_over_related_books():
-    main_score = search_rank_score('naruto', 'Naruto (1999) Masashi KISHIMOTO', 'https://www.manga-news.com/index.php/serie/Naruto')
-    philosophy_score = search_rank_score('naruto', 'Philosophie de Naruto (la) (2021)', 'https://www.manga-news.com/index.php/serie/Philosophie-de-Naruto-la')
-    recipe_score = search_rank_score('naruto', 'Recettes cachées de Naruto Shippuden (2022)', 'https://www.manga-news.com/index.php/serie/Recettes-cachees-de-Naruto-Shippuden-le')
-
-    assert main_score == 100
-    assert main_score > philosophy_score
-    assert main_score > recipe_score
+def test_infer_media_kind_distinguishes_books_from_manga():
+    assert infer_media_kind(title='Naruto (1999) Masashi KISHIMOTO', kind='series', source_type='Shonen') == 'manga'
+    assert infer_media_kind(title='Naruto - Roman (2008) Masashi KISHIMOTO', kind='series', source_type='Roman') == 'novel'
+    assert infer_media_kind(title='Philosophie de Naruto (la) (2021)', kind='series', source_type='Essai') == 'essay'
+    assert infer_media_kind(title='Recettes cachées de Naruto Shippuden (les) (2022)', kind='series') == 'cookbook'
 
 
-def test_search_sort_key_prefers_exact_license_before_derived_series():
-    naruto_key = search_sort_key('naruto', 'Naruto (1999) Masashi KISHIMOTO', 'https://www.manga-news.com/index.php/serie/Naruto')
-    gaiden_key = search_sort_key('naruto', 'Naruto Gaiden (2015) Masashi KISHIMOTO', 'https://www.manga-news.com/index.php/serie/Naruto-Gaiden-Boruto')
-    philosophy_key = search_sort_key('naruto', 'Philosophie de Naruto (la) (2021)', 'https://www.manga-news.com/index.php/serie/Philosophie-de-Naruto-la')
+def test_search_result_sort_key_prioritizes_main_manga_over_books():
+    query = 'naruto'
+    results = [
+        {
+            'title': 'Naruto - Roman (2008) Masashi KISHIMOTO',
+            'slug': 'Naruto-Roman',
+            'kind': 'series',
+            'score': 100,
+            'source_type': 'Roman',
+            'media_kind': 'novel',
+            'is_special': True,
+        },
+        {
+            'title': 'Naruto (1999) Masashi KISHIMOTO',
+            'slug': 'Naruto',
+            'kind': 'series',
+            'score': 100,
+            'source_type': 'Shonen',
+            'media_kind': 'manga',
+            'is_special': False,
+        },
+        {
+            'title': 'Philosophie de Naruto (la) (2021)',
+            'slug': 'Philosophie-de-Naruto-la',
+            'kind': 'series',
+            'score': 100,
+            'source_type': 'Essai',
+            'media_kind': 'essay',
+            'is_special': False,
+        },
+    ]
 
-    assert naruto_key > gaiden_key
-    assert naruto_key > philosophy_key
+    ranked = sorted(results, key=lambda item: search_result_sort_key(query, item))
+
+    assert ranked[0]['slug'] == 'Naruto'
+    assert ranked[1]['slug'] == 'Naruto-Roman'
+    assert ranked[2]['slug'] == 'Philosophie-de-Naruto-la'

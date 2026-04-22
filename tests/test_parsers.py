@@ -4,6 +4,7 @@ from app.manga_news.parsers import (
     parse_search_page,
     parse_series_editions_page,
     parse_series_page,
+    parse_series_search_meta_page,
     parse_volume_page,
     parse_volume_search_meta_page,
 )
@@ -194,6 +195,51 @@ def test_parse_volume_search_meta_page():
     assert parsed.translated_title == 'One Piece'
 
 
+def test_parse_series_search_meta_page_extracts_type_related_and_media_kind():
+    html = '''
+    <html>
+      <body>
+        <h1>Boruto - Naruto Next Generations</h1>
+        <ul>
+          <li>Type: Shonen</li>
+        </ul>
+        <div>Manga en relation</div>
+        <a href="/index.php/serie/Naruto">Naruto</a>
+      </body>
+    </html>
+    '''
+
+    parsed = parse_series_search_meta_page(html, 'https://www.manga-news.com/index.php/serie/Boruto-Naruto-Next-Generations')
+
+    assert parsed.source_type == 'Shonen'
+    assert parsed.media_kind == 'manga_spinoff'
+    assert parsed.related and parsed.related.series[0].title == 'Naruto'
+
+
+def test_parse_search_page_prioritizes_main_manga_before_books():
+    html = '''
+    <html>
+      <body>
+        <a href="/index.php/serie/Philosophie-de-Naruto-la">Philosophie de Naruto (la) (2021)</a>
+        <a href="/index.php/serie/Naruto-Roman">Naruto - Roman (2008) Masashi KISHIMOTO</a>
+        <a href="/index.php/serie/Naruto">Naruto (1999) Masashi KISHIMOTO</a>
+      </body>
+    </html>
+    '''
+
+    parsed = parse_search_page(
+        html,
+        'https://www.manga-news.com/index.php/recherche/?cat=manga-serie-vf&q=naruto',
+        'https://www.manga-news.com',
+        query='naruto',
+        kind='series',
+        score_threshold=1,
+        limit=10,
+    )
+
+    assert [item.slug for item in parsed[:3]] == ['Naruto', 'Naruto-Roman', 'Philosophie-de-Naruto-la']
+
+
 
 def test_parse_news_page():
     parsed = parse_news_page(
@@ -260,30 +306,3 @@ def test_parse_series_page_numberblock_markup():
     assert parsed.vf.status == 'En cours'
     assert parsed.vo and parsed.vo.volumes == 114
     assert parsed.vo.status == 'En cours'
-
-
-def test_parse_search_page_prefers_exact_main_series_over_related_titles():
-    html = """
-    <html>
-      <body>
-        <a href="/index.php/serie/Philosophie-de-Naruto-la">Philosophie de Naruto (la) (2021)</a>
-        <a href="/index.php/serie/Recettes-cachees-de-Naruto-Shippuden-le">Recettes cachées de Naruto Shippuden (les) (2022)</a>
-        <a href="/index.php/serie/Naruto">Naruto (1999) Masashi KISHIMOTO</a>
-        <a href="/index.php/serie/Naruto-Gaiden-Boruto">Naruto Gaiden (2015) Masashi KISHIMOTO</a>
-      </body>
-    </html>
-    """
-    parsed = parse_search_page(
-        html,
-        'https://www.manga-news.com/index.php/recherche/?cat=manga-serie-vf&q=naruto',
-        'https://www.manga-news.com',
-        query='naruto',
-        kind='series',
-        score_threshold=1,
-        limit=10,
-    )
-
-    assert parsed[0].slug == 'Naruto'
-    assert parsed[0].score == 100
-    assert [item.slug for item in parsed].index('Naruto') < [item.slug for item in parsed].index('Philosophie-de-Naruto-la')
-    assert [item.slug for item in parsed].index('Naruto') < [item.slug for item in parsed].index('Recettes-cachees-de-Naruto-Shippuden-le')

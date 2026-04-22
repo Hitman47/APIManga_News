@@ -29,7 +29,6 @@ Routes publiques actuellement disponibles :
 
 Fonctions utiles déjà en place :
 - recherche série / volume ;
-- classement métier de la recherche : égalité exacte titre/slug priorisée, séries principales avant ouvrages dérivés quand la requête cible un nom de licence brut ;
 - résolution du meilleur match ;
 - fiches détaillées série et volume ;
 - titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées **et** dans les résultats de recherche quand l'enrichissement réussit ;
@@ -58,13 +57,6 @@ Les optimisations suivantes sont maintenant réellement branchées dans le runti
 Deux variables règlent la concurrence sur les parties les plus coûteuses :
 - `SEARCH_SOURCE_CONCURRENCY`
 - `SEARCH_ENRICHMENT_CONCURRENCY`
-
-## Logique de ranking de la recherche
-
-La recherche n'utilise plus uniquement un fuzzy score brut. Le tri favorise maintenant, dans cet ordre, les égalités exactes de titre/slug, puis les titres qui commencent par la requête, puis les résultats contenant la requête avec peu de mots additionnels. Les titres manifestement dérivés (`roman`, `guide`, `philosophie`, `recettes`, `gaiden`, `shinden`, `retsuden`, etc.) reçoivent un malus quand la requête vise un nom de licence nu comme `naruto`.
-
-Conséquence attendue : pour `naruto`, la série principale `Naruto` doit remonter avant `Philosophie de Naruto`, `Recettes cachées de Naruto Shippuden` ou d'autres ouvrages liés à l'univers.
-
 
 ## Ce que l'API ne fait pas
 
@@ -201,7 +193,8 @@ curl -H "Authorization: Bearer MON_TOKEN" \
 Ces comportements ne doivent plus être déduits au hasard :
 - `/search` et `/search/resolve` :
   - si `enrich` est absent, la valeur vient de `SEARCH_DEFAULT_ENRICH` ;
-  - si `include_editions` est absent, la valeur vient de `SEARCH_DEFAULT_INCLUDE_EDITIONS`.
+  - si `include_editions` est absent, la valeur vient de `SEARCH_DEFAULT_INCLUDE_EDITIONS` ;
+  - les items exposent aussi `source_type` (type Manga-News quand il est connu) et `media_kind` (classification métier comme `manga`, `manga_spinoff`, `novel`, `essay`, `cookbook`, etc.).
 - `/volume` :
   - si `include_parent_editions` est absent, la valeur vient de `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` ;
   - la recommandation d'exploitation reste `false` pour garder la route légère par défaut.
@@ -327,6 +320,8 @@ La configuration `.env.example` réexpose maintenant les réglages de tuning qui
 - `SEARCH_DEFAULT_ENRICH` : valeur par défaut de `enrich` sur `/search` et `/search/resolve` ;
 - `SEARCH_DEFAULT_INCLUDE_EDITIONS` : valeur par défaut de `include_editions` sur `/search` et `/search/resolve` ;
 - `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` : valeur par défaut de `include_parent_editions` sur `/volume` ; `false` garde `/volume` léger par défaut, `true` réactive l'hydratation automatique de `vf` / `vo`.
+
+Le ranking `/search` ne dépend plus uniquement du fuzzy score : il combine maintenant l'égalité exacte titre/slug, le type Manga-News (`source_type`), une classification métier (`media_kind`) et des heuristiques dérivées des séries liées pour faire remonter les mangas avant les romans/essais/livres d'univers quand c'est pertinent.
 
 Côté performance, l'API mutualise désormais un cache HTML brut pour les fiches série et volume. Les chemins légers (`search` enrichi, compteurs `vf` / `vo`, éditions) réutilisent ce HTML sans refetch réseau, puis les routes détaillées (`/series`, `/volume`) peuvent à leur tour repartir du même HTML déjà chaud.
 

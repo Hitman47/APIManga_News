@@ -171,7 +171,8 @@ async def test_search_uses_settings_defaults_for_optional_flags(tmp_path: Path):
         from app.models import SearchResult
         return [SearchResult(title='One Piece', url=url, kind='series', score=95, slug='One-piece-Edition-originale')]
 
-    async def fake_enrich(results, *, enrich: bool, include_editions: bool):
+    async def fake_enrich(results, *, query: str, enrich: bool, include_editions: bool):
+        called['query'] = query
         called['enrich'] = enrich
         called['include_editions'] = include_editions
         return results
@@ -181,7 +182,7 @@ async def test_search_uses_settings_defaults_for_optional_flags(tmp_path: Path):
 
     await service.search(query='one piece', kind='series', mode='all', limit=10)
 
-    assert called == {'enrich': True, 'include_editions': False}
+    assert called == {'query': 'one piece', 'enrich': True, 'include_editions': False}
 
 
 @pytest.mark.asyncio

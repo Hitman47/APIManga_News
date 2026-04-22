@@ -29,14 +29,14 @@ from app.utils import (
     clean_ws,
     ensure_absolute_url,
     extract_volume_number,
+    infer_media_kind,
     infer_volume_edition_label,
     infer_volume_flags,
     normalize_text,
     parse_french_date,
     parse_volume_number_int,
+    search_result_sort_key,
     score_match,
-    search_rank_score,
-    search_sort_key,
     slugify,
     unique_list,
 )
@@ -457,12 +457,22 @@ def parse_series_search_meta_page(html: str, page_url: str) -> SeriesSearchMetaD
     lines = _lines(soup)
     title_clean = _extract_page_title(soup, lines, kind='series')
     vf, vo, _, _ = _extract_vf_vo(soup, lines)
+    source_type = _extract_line_value(lines, VALUE_LABELS['type'])
+    related = _extract_related_links(soup, _base_url_from_page(page_url), page_url)
     return SeriesSearchMetaData(
         title=title_clean,
         title_vo=_extract_line_value(lines, VALUE_LABELS['title_vo']),
         translated_title=_extract_line_value(lines, VALUE_LABELS['translated_title']),
+        source_type=source_type,
+        media_kind=infer_media_kind(
+            title=title_clean,
+            source_type=source_type,
+            kind='series',
+            related_series_titles=[item.title for item in related.series],
+        ),
         vf=vf,
         vo=vo,
+        related=related,
         source_url=page_url,
     )
 
@@ -487,6 +497,13 @@ def parse_volume_search_meta_page(html: str, page_url: str) -> VolumeSearchMetaD
         is_one_shot=is_one_shot,
         title_vo=_extract_line_value(lines, VALUE_LABELS['title_vo']),
         translated_title=_extract_line_value(lines, VALUE_LABELS['translated_title']),
+        source_type=volume_type,
+        media_kind=infer_media_kind(
+            title=title_clean,
+            source_type=volume_type,
+            kind='volume',
+            is_special=is_special,
+        ),
         source_url=page_url,
     )
 
@@ -642,7 +659,7 @@ def parse_search_page(html: str, page_url: str, base_url: str, query: str, kind:
         if kind != 'all' and result_kind != kind:
             continue
 
-        score = search_rank_score(query, text, extra=absolute_url)
+        score = score_match(query, text, extra=absolute_url)
         if score < score_threshold:
             continue
         seen.add(absolute_url)
@@ -663,9 +680,14 @@ def parse_search_page(html: str, page_url: str, base_url: str, query: str, kind:
                 edition_label=edition_label,
                 is_special=is_special,
                 is_one_shot=is_one_shot,
+                media_kind=infer_media_kind(
+                    title=text,
+                    kind=result_kind,
+                    is_special=is_special,
+                ),
             )
         )
-    results.sort(key=lambda item: search_sort_key(query, item.title, item.url), reverse=True)
+    results.sort(key=lambda item: search_result_sort_key(query, item))
     return results[:limit]
 
 

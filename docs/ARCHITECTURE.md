@@ -80,7 +80,7 @@ flowchart TD
 - cache d'abord les **pages source de recherche** par URL, indépendamment de `mode` et `limit` ;
 - recharge ces pages source en parallèle, dans la limite de `SEARCH_SOURCE_CONCURRENCY` ;
 - déduplique les URLs ;
-- trie par score ;
+- applique un ranking métier avant et après enrichissement : match exact titre/slug, priorité série vs volume selon la requête, puis priorité `media_kind` pour faire remonter les mangas principaux avant les romans/essais/livres dérivés ;
 - enrichit ensuite les résultats retenus en mutualisant les fiches série / volume identiques, dans la limite de `SEARCH_ENRICHMENT_CONCURRENCY`.
 
 ### `/search/resolve`
@@ -103,11 +103,13 @@ C'est utile pour :
 
 ## Particularités utiles
 
-### Titres alternatifs
+### Titres alternatifs et typologie de recherche
 - `title_vo`
 - `translated_title`
+- `source_type`
+- `media_kind`
 
-Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit.
+Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit. `source_type` reflète le `Type` Manga-News. `media_kind` est une classification métier calculée par l'API pour distinguer manga principal, spin-off, roman, essai, guide, artbook, cookbook, etc.
 
 ### Normalisation volume
 Les parseurs produisent des champs standardisés pour les volumes :
@@ -172,9 +174,3 @@ Les knobs suivants sont à nouveau pilotés par l'environnement et appliqués pa
 - les pages série et volume disposent maintenant d'un cache HTML brut partagé ;
 - les parseurs légers `series-search-meta` et `volume-search-meta` relisent ce HTML pour hydrater rapidement `title_vo`, `translated_title`, `vf`, `vo`, `number`, `edition_label`, `is_special`, `is_one_shot` ;
 - les routes détaillées (`/series`, `/volume`) peuvent ensuite parser le même HTML déjà en cache sans nouveau fetch upstream.
-
-## Ranking métier de la recherche
-
-Le parseur de recherche calcule désormais un score métier ajusté, distinct du fuzzy score brut. Le pipeline donne la priorité aux égalités exactes de titre ou de slug, puis applique des malus sur les résultats qui ajoutent beaucoup de tokens ou qui ressemblent à des ouvrages dérivés (`roman`, `guide`, `philosophie`, `recettes`, `gaiden`, `shinden`, `retsuden`, etc.).
-
-Ce choix est volontaire : Manga-News remonte fréquemment des séries liées, des romans, des guides ou des livres thématiques autour d'une licence. Sans ce ranking secondaire, `mode=best` choisit trop facilement un faux positif simplement parce qu'il contient la chaîne recherchée.

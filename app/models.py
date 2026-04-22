@@ -57,6 +57,8 @@ class SearchResult(BaseModel):
     is_one_shot: bool | None = None
     title_vo: str | None = None
     translated_title: str | None = None
+    source_type: str | None = None
+    media_kind: str | None = None
     vf: 'EditionStatus | None' = None
     vo: 'EditionStatus | None' = None
 
@@ -80,6 +82,8 @@ class ResolveResult(BaseModel):
     is_one_shot: bool | None = None
     title_vo: str | None = None
     translated_title: str | None = None
+    source_type: str | None = None
+    media_kind: str | None = None
     vf: 'EditionStatus | None' = None
     vo: 'EditionStatus | None' = None
 
@@ -181,8 +185,11 @@ class SeriesSearchMetaData(BaseModel):
     title: str | None = None
     title_vo: str | None = None
     translated_title: str | None = None
+    source_type: str | None = None
+    media_kind: str | None = None
     vf: EditionStatus | None = None
     vo: EditionStatus | None = None
+    related: RelatedLinks | None = None
     source_url: str | None = None
 
 
@@ -195,6 +202,8 @@ class VolumeSearchMetaData(BaseModel):
     is_one_shot: bool | None = None
     title_vo: str | None = None
     translated_title: str | None = None
+    source_type: str | None = None
+    media_kind: str | None = None
     source_url: str | None = None
 
 
