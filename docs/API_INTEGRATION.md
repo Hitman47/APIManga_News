@@ -161,7 +161,8 @@ Résultat typique par item :
 Important :
 - `mode=best` retourne **une liste** contenant au mieux un seul item ;
 - par défaut, la recherche ne lit que la page de recherche ;
-- `enrich=true` déclenche la relecture des fiches détaillées utiles pour récupérer `title_vo`, `translated_title`, la normalisation volume et `vf` / `vo` ;
+- `include_editions=true` (par défaut) hydrate les compteurs `vf` / `vo` via la fiche série parente ;
+- `enrich=true` déclenche en plus la relecture des fiches détaillées utiles pour récupérer `title_vo`, `translated_title` et la normalisation volume ;
 - si l'enrichissement échoue, le résultat principal reste retourné.
 
 ---
@@ -482,7 +483,7 @@ Tu peux donner ces règles à un agent consommateur :
 
 - Le parsing dépend du HTML public de Manga News.
 - Certaines variables de config existent sans être branchées au runtime public actuel.
-- Les recherches restent légères par défaut ; activer `enrich=true` seulement quand les titres alternatifs, la normalisation volume ou `vf` / `vo` sont réellement utiles.
+- Les recherches gardent par défaut les compteurs `vf` / `vo` ; activer `enrich=true` seulement quand les titres alternatifs ou la normalisation volume sont réellement utiles, et passer `include_editions=false` seulement si la latence prime même sur les compteurs.
 - Les enrichissements sont désormais dédupliqués et exécutés avec une concurrence bornée.
 
 

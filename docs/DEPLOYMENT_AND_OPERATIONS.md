@@ -208,7 +208,8 @@ Les réponses `series`, `volume`, `search`, `search/resolve` et `series/{slug}/e
 
 ## Réglages de perf à surveiller
 
-- `SEARCH_DEFAULT_ENRICH=false` : garde `/search` et `/search/resolve` légers par défaut.
+- `SEARCH_DEFAULT_ENRICH=false` : évite l’enrichissement complet par défaut.
+- `SEARCH_DEFAULT_INCLUDE_EDITIONS=true` : conserve par défaut les compteurs `vf` / `vo` dans `/search` et `/search/resolve`.
 - `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` : évite le refetch série sur les fiches volume.
 - `SEARCH_FETCH_CONCURRENCY` : parallélisme des pages de recherche.
 - `SEARCH_ENRICH_CONCURRENCY` : parallélisme de l'enrichissement détaillé.

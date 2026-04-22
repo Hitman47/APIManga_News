@@ -31,12 +31,12 @@ Fonctions utiles déjà en place :
 - résolution du meilleur match ;
 - fiches détaillées série et volume ;
 - titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées ;
-- enrichissement **optionnel** des recherches via `enrich=true` pour remonter titres alternatifs, normalisation volume et compteurs `vf` / `vo` ;
+- les recherches hydratent par défaut les compteurs `vf` / `vo` via la fiche série parente ; `enrich=true` reste optionnel et ajoute surtout les titres alternatifs et la normalisation volume ;
 - compteurs d'éditions `vf` / `vo` sur les fiches série, et sur les fiches volume uniquement quand `include_parent_editions=true` ou qu'une projection demande explicitement `vf` / `vo` ;
 - normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning, les éditions de série, et les résultats de recherche enrichis ;
 - projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
 - cache SQLite persistant avec stale cache, negative cache, cache mémoire L1 et SQLite WAL ;
-- cache source dédié pour les pages de recherche, afin de réutiliser les mêmes candidats entre `mode=best`, `mode=all`, `enrich=true` et `enrich=false` ;
+- cache source dédié pour les pages de recherche, afin de réutiliser les mêmes candidats entre `mode=best`, `mode=all`, `enrich=true`, `enrich=false`, `include_editions=true` et `include_editions=false` ;
 - déduplication single-flight pour éviter les fetchs amont dupliqués sous charge concurrente ;
 - cache par bloc d'éditions (`vf` / `vo`) pour que `/series/{slug}/editions` réutilise les mêmes fetchs entre `edition=vf`, `edition=vo` et `edition=all` ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
@@ -118,7 +118,7 @@ curl http://localhost:8017/health
 
 ### Recherche de série
 
-Par défaut, `/search` est volontairement léger. Ajoute `enrich=true` seulement si tu as besoin des métadonnées enrichies.
+Par défaut, `/search` garde les compteurs `vf` / `vo` mais évite l’enrichissement complet. Ajoute `enrich=true` seulement si tu as besoin des titres alternatifs ou de la normalisation volume. Passe `include_editions=false` si tu veux supprimer aussi l’hydratation des compteurs pour viser la latence minimale.
 
 
 ```bash
@@ -131,7 +131,7 @@ curl --get "http://localhost:8017/search" \
 
 ### Résolution directe du meilleur résultat
 
-Même logique : `enrich=true` est utile pour un payload riche, mais coûte plus cher.
+Même logique : `enrich=true` est utile pour un payload riche, tandis que `include_editions=false` coupe même les compteurs `vf` / `vo` pour le chemin le plus rapide.
 
 ```bash
 curl --get "http://localhost:8017/search/resolve" \
@@ -290,7 +290,7 @@ Variables désormais actives côté runtime :
 Les compteurs `vf` / `vo` proviennent en priorité du bloc HTML `#numberblock` des fiches série Manga-News.
 
 Depuis l'optimisation perf :
-- `/search` et `/search/resolve` ne relisent plus les fiches détaillées tant que `enrich=true` n'est pas demandé ;
+- `/search` et `/search/resolve` relisent seulement la fiche série parente pour récupérer `vf` / `vo` tant que `include_editions=true` ; ils ne relisent pas les fiches détaillées volume tant que `enrich=true` n'est pas demandé ;
 - `/volume/...` ne relit plus automatiquement la série parente ; il faut `include_parent_editions=true` ou une projection explicite comme `fields=vf.volumes`.
 
 Après un changement de parseur, il faut redémarrer l'API. Les clés de cache métier intègrent désormais une version interne, ce qui évite de relire un ancien payload incompatible après mise à jour.
@@ -309,6 +309,7 @@ Les réglages les plus utiles pour cette version :
 - `CACHE_MEMORY_ENTRIES` pour activer un cache mémoire L1 au-dessus de SQLite ;
 - `SEARCH_FETCH_CONCURRENCY` pour le parallélisme des pages de recherche ;
 - `SEARCH_ENRICH_CONCURRENCY` pour le parallélisme de l'enrichissement détaillé ;
-- `SEARCH_DEFAULT_ENRICH=false` pour garder `/search` léger par défaut ;
+- `SEARCH_DEFAULT_ENRICH=false` pour éviter l’enrichissement complet par défaut ;
+- `SEARCH_DEFAULT_INCLUDE_EDITIONS=true` pour conserver par défaut les compteurs `vf` / `vo` dans `/search` et `/search/resolve` ;
 - `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` pour éviter le refetch automatique de la série parente sur les fiches volume ;
 - surveiller désormais `search_source_perf`, `search_perf`, `volume_perf` et `series_editions_perf` pour identifier la vraie étape coûteuse.

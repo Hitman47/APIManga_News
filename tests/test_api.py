@@ -110,6 +110,7 @@ def test_search_resolve_and_etag_304():
     class DummyService:
         async def resolve_search(self, **kwargs):
             assert kwargs['enrich'] is False
+            assert kwargs['include_editions'] is True
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
@@ -170,6 +171,7 @@ def test_search_endpoint_exposes_alternate_titles():
     class DummyService:
         async def search(self, **kwargs):
             assert kwargs['enrich'] is False
+            assert kwargs['include_editions'] is True
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,

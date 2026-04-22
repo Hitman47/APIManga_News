@@ -81,13 +81,13 @@ Points importants :
 - pas de routes admin publiques ;
 - authentification optionnelle via `Authorization: Bearer <API_TOKEN>` si `API_TOKEN` est défini ;
 - `ETag` / `If-None-Match` disponibles sur les réponses enveloppées ;
-- les réponses de recherche et de résolution restent légères par défaut ; activer `enrich=true` pour ajouter `title_vo`, `translated_title`, et, quand l'information existe, les compteurs `vf` / `vo` issus de la fiche série parente ;
+- les réponses de recherche et de résolution gardent par défaut les compteurs `vf` / `vo` via une hydratation parentale ciblée ; activer `enrich=true` pour ajouter en plus `title_vo`, `translated_title` et la normalisation volume, ou `include_editions=false` pour couper aussi les compteurs et viser la latence minimale ;
 - les fiches volume ne relisent plus automatiquement la série parente ; activer `include_parent_editions=true` ou demander explicitement `vf` / `vo` via `blocks` / `fields` pour récupérer ces compteurs ;
 - déduplication single-flight, cache mémoire L1 et SQLite WAL réduisent les fetchs amont et les accès disque redondants.
 
 Flux conseillé :
 1. utiliser `/search` ou `/search/resolve` pour obtenir un slug ou un couple `series_slug` / `volume_slug` ;
-2. activer `enrich=true` seulement quand les métadonnées enrichies sont réellement nécessaires ;
+2. garder le comportement par défaut si les compteurs `vf` / `vo` sont utiles, activer `enrich=true` seulement quand les métadonnées enrichies sont réellement nécessaires, ou passer `include_editions=false` pour le chemin le plus rapide ;
 3. consommer ensuite `/series/{slug}` ou `/volume/{series_slug}/{volume_slug}` ;
 4. réutiliser `ETag` et `If-None-Match` pour limiter les téléchargements inutiles.
 """.strip()
@@ -120,8 +120,8 @@ SEARCH_RESPONSE_EXAMPLE = {
             'is_one_shot': None,
             'title_vo': None,
             'translated_title': None,
-            'vf': None,
-            'vo': None,
+            'vf': {'volumes': 112, 'status': 'En cours'},
+            'vo': {'volumes': 114, 'status': 'En cours'},
         }
     ],
 }
@@ -157,8 +157,8 @@ RESOLVE_RESPONSE_EXAMPLE = {
             'is_one_shot': None,
             'title_vo': None,
             'translated_title': None,
-            'vf': None,
-            'vo': None,
+            'vf': {'volumes': 112, 'status': 'En cours'},
+            'vo': {'volumes': 114, 'status': 'En cours'},
         },
         'candidates': [],
     },
@@ -335,8 +335,9 @@ async def health():
     description=(
         'Recherche des séries et/ou volumes à partir d’une requête libre. '
         'Par défaut, la réponse reste légère et s’appuie uniquement sur la page de recherche. '
-        'Activer `enrich=true` pour relire les fiches détaillées utiles, récupérer `title_vo`, '
-        '`translated_title`, la normalisation volume, et, quand la série parente est accessible, les compteurs `vf` / `vo`.'
+        'Par défaut, la recherche hydrate déjà les compteurs `vf` / `vo` via la fiche série parente quand elle est accessible. '
+        'Activer `enrich=true` pour relire en plus les fiches détaillées utiles, récupérer `title_vo`, '
+        '`translated_title` et la normalisation volume. Passer `include_editions=false` pour couper aussi l’hydratation des compteurs et viser la latence minimale.'
     ),
     responses={200: {'description': 'Search results envelope.', 'content': {'application/json': {'example': SEARCH_RESPONSE_EXAMPLE}}}},
 )
@@ -346,10 +347,11 @@ async def search(
     kind: Literal['series', 'volume', 'all'] = Query(default='all', description='Limiter la recherche aux séries, aux volumes, ou aux deux.'),
     mode: Literal['best', 'all'] = Query(default='best', description='`best` garde les meilleurs candidats après tri ; `all` renvoie tous les candidats retenus.'),
     limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de résultats renvoyés.'),
-    enrich: bool = Query(default=False, description='Relire les fiches détaillées nécessaires pour enrichir les résultats avec titres alternatifs, normalisation volume et compteurs `vf` / `vo`. Plus coûteux côté latence.'),
+    enrich: bool = Query(default=False, description='Relire les fiches détaillées nécessaires pour enrichir les résultats avec titres alternatifs et normalisation volume. Les compteurs `vf` / `vo` restent hydratés par défaut même sans enrichissement complet.'),
+    include_editions: bool = Query(default=True, description='Hydrater les compteurs `vf` / `vo` via la fiche série parente. Désactiver (`false`) pour le chemin le plus rapide possible.'),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.search(query=q, kind=kind, mode=mode, limit=limit, enrich=enrich)
+    payload = await service.search(query=q, kind=kind, mode=mode, limit=limit, enrich=enrich, include_editions=include_editions)
     return _build_envelope_response(payload.model_dump(), request)
 
 
@@ -359,7 +361,7 @@ async def search(
     response_model=ResolveResponse,
     tags=['Search'],
     summary='Resolve the best search candidate',
-    description='Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`. Par défaut, la résolution reste légère ; activer `enrich=true` pour enrichir `best` et `candidates`.',
+    description='Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`. Par défaut, la résolution conserve déjà les compteurs `vf` / `vo` ; activer `enrich=true` pour enrichir aussi `best` et `candidates` avec les titres alternatifs et la normalisation volume.',
     responses={200: {'description': 'Resolved best candidate.', 'content': {'application/json': {'example': RESOLVE_RESPONSE_EXAMPLE}}}},
 )
 async def search_resolve(
@@ -368,9 +370,10 @@ async def search_resolve(
     kind: Literal['series', 'volume', 'all'] = Query(default='all', description='Type d’objet à résoudre.'),
     limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de candidats inspectés.'),
     enrich: bool = Query(default=False, description='Même logique que `/search?enrich=true`, appliquée au meilleur candidat et à la liste de candidats.'),
+    include_editions: bool = Query(default=True, description='Même logique que `/search?include_editions=true`, appliquée à `best` et à `candidates`.'),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.resolve_search(query=q, kind=kind, limit=limit, enrich=enrich)
+    payload = await service.resolve_search(query=q, kind=kind, limit=limit, enrich=enrich, include_editions=include_editions)
     return _build_envelope_response(payload.model_dump(), request)
 
 

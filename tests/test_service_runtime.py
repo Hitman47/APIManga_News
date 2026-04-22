@@ -137,6 +137,7 @@ async def test_search_reuses_cached_source_pages_across_modes_and_enrichment(tmp
     second = await service.search(query='one piece', kind='series', mode='best', limit=1, enrich=True)
 
     assert first.data[0]['title'] == 'One Piece'
+    assert first.data[0]['vf']['volumes'] == 112
     assert second.data[0]['title_vo'] == 'ワンピース'
     assert fetcher.calls.count(search_url_vf) == 1
     assert fetcher.calls.count(search_url_vo) == 1
@@ -171,3 +172,32 @@ async def test_series_editions_reuses_cached_series_and_edition_blocks(tmp_path:
     assert fetcher.calls.count(series_url) == 1
     assert fetcher.calls.count(vf_url) == 1
     assert fetcher.calls.count(vo_url) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_vf_vo_counters_without_full_enrichment(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    search_url_vf = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q=a couple of cuckoos'
+    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q=a couple of cuckoos'
+    series_url = f'{base_url}/index.php/serie/A-Couple-of-Cuckoos'
+
+    fetcher = MappingFetcher({
+        search_url_vf: f'<html><body><a href="{series_url}">A Couple of Cuckoos</a></body></html>',
+        search_url_vo: '<html><body></body></html>',
+        series_url: """<html><body><h1>A Couple of Cuckoos</h1><div>VF : 19 (En cours)</div><div>VO : 22 (En cours)</div></body></html>""",
+    })
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    response = await service.search(query='a couple of cuckoos', kind='series', mode='best', limit=1, enrich=False)
+
+    item = response.data[0]
+    assert item['title'] == 'A Couple of Cuckoos'
+    assert item['title_vo'] is None
+    assert item['translated_title'] is None
+    assert item['vf']['volumes'] == 19
+    assert item['vo']['volumes'] == 22
+    assert fetcher.calls.count(series_url) == 1

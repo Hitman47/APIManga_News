@@ -5,6 +5,12 @@
 - Les chargements d'éditions `vf` et `vo` peuvent maintenant être exécutés en parallèle lors d'un cache froid.
 - Ajout de logs `search_source_perf` et `series_editions_perf` pour distinguer le coût des pages sources du coût de l'enrichissement applicatif.
 
+## 2026-04-22 — correction de régression sur les compteurs VF/VO en recherche
+
+- `/search` et `/search/resolve` conservent à nouveau par défaut les compteurs `vf` / `vo`, même quand `enrich=false`.
+- Nouveau paramètre `include_editions` sur `/search` et `/search/resolve` : `true` par défaut pour préserver les compteurs, `false` pour couper aussi cette hydratation et viser la latence minimale.
+- `enrich=true` redevient strictement l’opt-in pour les titres alternatifs (`title_vo`, `translated_title`) et la normalisation volume, sans forcer les intégrateurs à perdre les compteurs d’éditions.
+
 ## 2026-04-22 — optimisation phase 1, search plus léger et volume opt-in
 
 - `/search` et `/search/resolve` restent désormais légers par défaut ; l'enrichissement détaillé devient opt-in via `enrich=true`.

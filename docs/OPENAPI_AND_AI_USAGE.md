@@ -29,6 +29,7 @@ Une IA consommatrice ne doit pas inventer :
 Elle peut supposer que :
 - les routes publiques décrites dans `/openapi.json` existent ;
 - la plupart des réponses métier utilisent une enveloppe stable ;
+- `vf` / `vo` peuvent apparaître dans les recherches même sans `enrich=true`, tant que `include_editions=true` ;
 - `title_vo` et `translated_title` peuvent apparaître dans les recherches **si** `enrich=true`, et sur les fiches détaillées ;
 - `vf` et `vo` peuvent apparaître sur les fiches série, sur les recherches enrichies, et sur les fiches volume si `include_parent_editions=true` ou si une projection explicite les demande ;
 - les champs peuvent être absents ou `null` ;
@@ -38,13 +39,13 @@ Elle peut supposer que :
 
 ### Cas A — trouver une série
 1. `GET /search/resolve?q=<titre>&kind=series`
-   - ajoute `&enrich=true` seulement si tu as besoin de `title_vo`, `translated_title` ou `vf` / `vo` dès cette étape
+   - garde le comportement par défaut si tu veux déjà `vf` / `vo` ; ajoute `&enrich=true` seulement si tu as aussi besoin de `title_vo` ou `translated_title` dès cette étape
 2. lire `data.best.slug`
 3. `GET /series/{slug}`
 
 ### Cas B — trouver un volume
 1. `GET /search/resolve?q=<titre>&kind=volume`
-   - ajoute `&enrich=true` seulement si tu as besoin de la normalisation volume ou des compteurs parentaux avant l'appel détail
+   - garde le comportement par défaut si tu veux déjà les compteurs parentaux ; ajoute `&enrich=true` seulement si tu as aussi besoin de la normalisation volume avant l'appel détail
 2. lire `series_slug` et `volume_slug`
 3. `GET /volume/{series_slug}/{volume_slug}`
    - ajoute `include_parent_editions=true` seulement si les compteurs `vf` / `vo` sont nécessaires

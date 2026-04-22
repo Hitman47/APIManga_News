@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     search_fetch_concurrency: int = Field(default=4, alias='SEARCH_FETCH_CONCURRENCY')
     search_enrich_concurrency: int = Field(default=4, alias='SEARCH_ENRICH_CONCURRENCY')
     search_default_enrich: bool = Field(default=False, alias='SEARCH_DEFAULT_ENRICH')
+    search_default_include_editions: bool = Field(default=True, alias='SEARCH_DEFAULT_INCLUDE_EDITIONS')
     volume_default_include_parent_editions: bool = Field(default=False, alias='VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS')
     cache_ttl_search_seconds: int = Field(default=24 * 3600, alias='CACHE_TTL_SEARCH_SECONDS')
     cache_ttl_series_seconds: int = Field(default=24 * 3600, alias='CACHE_TTL_SERIES_SECONDS')

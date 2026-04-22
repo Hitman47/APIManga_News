@@ -70,7 +70,8 @@ flowchart TD
 - interroge plusieurs pages de recherche Manga News selon `kind` ;
 - déduplique les URLs ;
 - trie par score ;
-- peut ensuite enrichir les résultats retenus, mais uniquement si `enrich=true` est demandé ;
+- hydrate par défaut les compteurs `vf` / `vo` en relisant uniquement la fiche série parente quand elle est nécessaire ;
+- peut ensuite enrichir davantage les résultats retenus, mais uniquement si `enrich=true` est demandé ;
 - déduplique les lectures détaillées par `series_slug` / `volume_slug` avant de lancer l'enrichissement.
 
 ### `/search/resolve`
@@ -97,7 +98,7 @@ C'est utile pour :
 - `title_vo`
 - `translated_title`
 
-Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand `enrich=true` est demandé et que l'enrichissement réussit.
+Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches par défaut tant que `include_editions=true`. `enrich=true` n'est plus nécessaire pour les seuls compteurs.
 
 ### Normalisation volume
 Les parseurs produisent des champs standardisés pour les volumes :
