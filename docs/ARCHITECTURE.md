@@ -70,7 +70,8 @@ flowchart TD
 - interroge plusieurs pages de recherche Manga News selon `kind` ;
 - déduplique les URLs ;
 - trie par score ;
-- enrichit ensuite chaque résultat retenu avec `title_vo` et `translated_title` si possible.
+- peut ensuite enrichir les résultats retenus, mais uniquement si `enrich=true` est demandé ;
+- déduplique les lectures détaillées par `series_slug` / `volume_slug` avant de lancer l'enrichissement.
 
 ### `/search/resolve`
 - s'appuie sur `/search` ;
@@ -96,7 +97,7 @@ C'est utile pour :
 - `title_vo`
 - `translated_title`
 
-Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit.
+Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand `enrich=true` est demandé et que l'enrichissement réussit.
 
 ### Normalisation volume
 Les parseurs produisent des champs standardisés pour les volumes :
@@ -137,6 +138,15 @@ Le documente comme tel est plus honnête que de faire semblant que tout est déj
 
 Pour certains résultats `/search`, le service relit une fiche détaillée avant de répondre :
 - résultat `series` -> relit la fiche série pour injecter `title_vo`, `translated_title`, `vf`, `vo` ;
-- résultat `volume` -> relit la fiche volume pour injecter les champs normalisés du volume, puis relit la fiche série parente pour injecter `vf` / `vo`.
+- résultat `volume` -> relit la fiche volume pour injecter les champs normalisés du volume, puis réutilise une lecture série dédupliquée pour injecter `vf` / `vo`.
+- toutes ces lectures sont bornées par sémaphore pour éviter un emballement de concurrence.
 
 Ce comportement rend les réponses plus utiles, mais explique aussi pourquoi une recherche peut déclencher plusieurs fetchs amont lors d'un cache froid.
+
+
+## Optimisations runtime ajoutées
+
+- cache mémoire L1 au-dessus de SQLite ;
+- SQLite en mode WAL avec connexion persistante et `busy_timeout` ;
+- mutualisation single-flight des fetchs concurrents vers une même clé de cache ;
+- logs `search_perf` et `volume_perf` pour rendre visibles les coûts de chaque opération.

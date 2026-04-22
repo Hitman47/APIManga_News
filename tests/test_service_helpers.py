@@ -81,7 +81,7 @@ async def test_search_enriches_alternate_titles_from_detail_pages(tmp_path: Path
     )
     service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
 
-    response = await service.search(query='one piece', kind='series', mode='all', limit=5)
+    response = await service.search(query='one piece', kind='series', mode='all', limit=5, enrich=True)
 
     assert response.data[0]['title'] == 'One Piece'
     assert response.data[0]['title_vo'] == 'ワンピース'
@@ -123,7 +123,7 @@ async def test_search_enriches_volume_results_with_series_counts(tmp_path: Path)
     )
     service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
 
-    response = await service.search(query='dogs bullets carnage', kind='volume', mode='all', limit=5)
+    response = await service.search(query='dogs bullets carnage', kind='volume', mode='all', limit=5, enrich=True)
 
     first = response.data[0]
     assert first['number'] == '1'
@@ -159,10 +159,42 @@ async def test_get_volume_enriches_with_parent_series_counts(tmp_path: Path):
     )
     service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
 
-    response = await service.get_volume(series_slug='One-Piece', volume_slug='vol-110')
+    response = await service.get_volume(series_slug='One-Piece', volume_slug='vol-110', include_parent_editions=True)
 
     assert response.data['vf']['volumes'] == 112
     assert response.data['vo']['volumes'] == 114
+
+
+@pytest.mark.asyncio
+async def test_get_volume_does_not_fetch_parent_series_by_default(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    volume_url = f'{base_url}/index.php/manga/One-Piece/vol-110'
+    series_url = f'{base_url}/index.php/serie/One-Piece'
+
+    fetcher = _FakeFetcher({
+        volume_url: Path('tests/fixtures/volume_one_piece_110.html').read_text(encoding='utf-8'),
+        series_url: '<html><body><h1>One Piece</h1></body></html>',
+    })
+    settings = SimpleNamespace(
+        manga_news_base_url=base_url,
+        cache_stale_grace_seconds=3600,
+        cache_ttl_search_seconds=3600,
+        cache_ttl_series_seconds=3600,
+        cache_ttl_volume_seconds=3600,
+        cache_ttl_news_global_seconds=3600,
+        cache_ttl_news_series_seconds=3600,
+        cache_ttl_planning_seconds=3600,
+        search_score_threshold=1,
+        max_limit=50,
+        negative_cache_enabled=True,
+        negative_cache_ttl_seconds=120,
+    )
+    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
+
+    response = await service.get_volume(series_slug='One-Piece', volume_slug='vol-110')
+
+    assert 'vf' not in response.data or response.data['vf'] is None
+    assert fetcher.calls == [volume_url]
 
 
 @pytest.mark.asyncio

@@ -160,7 +160,8 @@ Résultat typique par item :
 
 Important :
 - `mode=best` retourne **une liste** contenant au mieux un seul item ;
-- `title_vo` et `translated_title` sont enrichis en allant lire la fiche détaillée quand c'est possible ;
+- par défaut, la recherche ne lit que la page de recherche ;
+- `enrich=true` déclenche la relecture des fiches détaillées utiles pour récupérer `title_vo`, `translated_title`, la normalisation volume et `vf` / `vo` ;
 - si l'enrichissement échoue, le résultat principal reste retourné.
 
 ---
@@ -309,7 +310,7 @@ Chaque item d'édition expose notamment :
 ### 6.10 `GET /volume/{series_slug}/{volume_slug}`
 ### 6.11 `GET /volume/by-url`
 
-Usage : fiche détaillée d'un volume.
+Usage : fiche détaillée d'un volume. Par défaut, seule la fiche volume est lue. `include_parent_editions=true` ou une projection explicite sur `vf` / `vo` déclenche la lecture de la série parente.
 
 Paramètres communs :
 - `blocks`
@@ -481,9 +482,10 @@ Tu peux donner ces règles à un agent consommateur :
 
 - Le parsing dépend du HTML public de Manga News.
 - Certaines variables de config existent sans être branchées au runtime public actuel.
-- Les recherches enrichissent les titres alternatifs via des lectures de fiches détaillées ; c'est plus riche, mais aussi plus coûteux qu'un simple scraping de page de recherche.
+- Les recherches restent légères par défaut ; activer `enrich=true` seulement quand les titres alternatifs, la normalisation volume ou `vf` / `vo` sont réellement utiles.
+- Les enrichissements sont désormais dédupliqués et exécutés avec une concurrence bornée.
 
 
 ## Note de cache importante
 
-Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Le runtime ajoute maintenant un cache mémoire L1, SQLite WAL, un `busy_timeout`, et une déduplication single-flight pour éviter les fetchs et accès disque redondants. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.

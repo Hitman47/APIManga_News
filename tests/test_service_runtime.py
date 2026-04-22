@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -79,3 +80,27 @@ async def test_parse_error_can_dump_debug_html(tmp_path: Path):
     meta_files = list((tmp_path / 'debug-html').glob('*.json'))
     assert dump_files
     assert meta_files
+
+
+class SlowCountingFetcher(CountingFetcher):
+    async def get_text(self, url: str, params: dict | None = None):
+        await asyncio.sleep(0.05)
+        return await super().get_text(url, params=params)
+
+
+@pytest.mark.asyncio
+async def test_single_flight_prevents_duplicate_concurrent_fetches(tmp_path: Path):
+    fetcher = SlowCountingFetcher(Path('tests/fixtures/series_one_piece.html').read_text(encoding='utf-8'))
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    await asyncio.gather(
+        service.get_series(slug='One-piece-Edition-originale'),
+        service.get_series(slug='One-piece-Edition-originale'),
+        service.get_series(slug='One-piece-Edition-originale'),
+    )
+
+    assert fetcher.calls == 1

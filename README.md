@@ -30,11 +30,13 @@ Fonctions utiles déjà en place :
 - recherche série / volume ;
 - résolution du meilleur match ;
 - fiches détaillées série et volume ;
-- titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées **et** dans les résultats de recherche quand l'enrichissement réussit ;
-- compteurs d'éditions `vf` / `vo` sur les fiches série, sur les fiches volume enrichies depuis la série parente, et dans les résultats de recherche enrichis ;
+- titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées ;
+- enrichissement **optionnel** des recherches via `enrich=true` pour remonter titres alternatifs, normalisation volume et compteurs `vf` / `vo` ;
+- compteurs d'éditions `vf` / `vo` sur les fiches série, et sur les fiches volume uniquement quand `include_parent_editions=true` ou qu'une projection demande explicitement `vf` / `vo` ;
 - normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning, les éditions de série, et les résultats de recherche enrichis ;
 - projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
-- cache SQLite persistant avec stale cache et negative cache ;
+- cache SQLite persistant avec stale cache, negative cache, cache mémoire L1 et SQLite WAL ;
+- déduplication single-flight pour éviter les fetchs amont dupliqués sous charge concurrente ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
 - documentation OpenAPI native via `/docs`, `/redoc`, `/openapi.json` ;
 - exemples JSON versionnés dans `docs/examples/`.
@@ -114,6 +116,9 @@ curl http://localhost:8017/health
 
 ### Recherche de série
 
+Par défaut, `/search` est volontairement léger. Ajoute `enrich=true` seulement si tu as besoin des métadonnées enrichies.
+
+
 ```bash
 curl --get "http://localhost:8017/search" \
   --data-urlencode "q=one piece" \
@@ -124,11 +129,14 @@ curl --get "http://localhost:8017/search" \
 
 ### Résolution directe du meilleur résultat
 
+Même logique : `enrich=true` est utile pour un payload riche, mais coûte plus cher.
+
 ```bash
 curl --get "http://localhost:8017/search/resolve" \
   --data-urlencode "q=one piece tome 91" \
   --data-urlencode "kind=volume" \
-  --data-urlencode "limit=10"
+  --data-urlencode "limit=10" \
+  --data-urlencode "enrich=true"
 ```
 
 ### Fiche série
@@ -139,8 +147,11 @@ curl "http://localhost:8017/series/One-piece-Edition-originale"
 
 ### Fiche volume
 
+Par défaut, la route volume ne relit plus la série parente. Ajoute `include_parent_editions=true` seulement si tu veux `vf` / `vo`.
+
 ```bash
-curl "http://localhost:8017/volume/One-Piece/vol-91"
+curl --get "http://localhost:8017/volume/One-Piece/vol-91" \
+  --data-urlencode "include_parent_editions=true"
 ```
 
 ### Planning VF filtré
@@ -226,6 +237,13 @@ curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
   --data-urlencode "fields=cover_image"
 ```
 
+Exemple si tu veux aussi les compteurs parentaux :
+
+```bash
+curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
+  --data-urlencode "fields=title,vf.volumes,vo.volumes"
+```
+
 ## Exemples JSON fournis
 
 Voir [`docs/examples/README.md`](docs/examples/README.md).
@@ -249,20 +267,29 @@ pytest
 
 ## Notes honnêtes sur l'état actuel
 
-Quelques variables existent dans la config mais **ne pilotent pas encore les routes publiques actuelles** :
+Quelques variables existent dans la config mais restent **partiellement** ou **totalement** inutilisées par les routes publiques actuelles :
 - `ADMIN_TOKEN`
-- `REQUEST_MAX_RETRIES`
-- `REQUEST_BACKOFF_SECONDS`
 - `DEFAULT_LIMIT`
-- `LOG_FORMAT`
 - `RATE_LIMIT_*`
 
-Elles sont présentes parce que le projet a déjà préparé ces concepts, mais la doc n'en fait pas des features actives tant qu'elles ne sont pas réellement branchées au runtime.
+Variables désormais actives côté runtime :
+- `REQUEST_MAX_RETRIES`
+- `REQUEST_BACKOFF_SECONDS`
+- `LOG_FORMAT`
+- `SQLITE_BUSY_TIMEOUT_MS`
+- `CACHE_MEMORY_ENTRIES`
+- `SEARCH_FETCH_CONCURRENCY`
+- `SEARCH_ENRICH_CONCURRENCY`
+- `SEARCH_DEFAULT_ENRICH`
+- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`
 
 ## Note importante sur `vf` / `vo`
 
 Les compteurs `vf` / `vo` proviennent en priorité du bloc HTML `#numberblock` des fiches série Manga-News.
-Quand un résultat de recherche cible un **volume**, l'API relit aussi la fiche **série parente** pour injecter ces compteurs dans le résultat.
+
+Depuis l'optimisation perf :
+- `/search` et `/search/resolve` ne relisent plus les fiches détaillées tant que `enrich=true` n'est pas demandé ;
+- `/volume/...` ne relit plus automatiquement la série parente ; il faut `include_parent_editions=true` ou une projection explicite comme `fields=vf.volumes`.
 
 Après un changement de parseur, il faut redémarrer l'API. Les clés de cache métier intègrent désormais une version interne, ce qui évite de relire un ancien payload incompatible après mise à jour.
 
@@ -270,3 +297,15 @@ Après un changement de parseur, il faut redémarrer l'API. Les clés de cache m
 ## Note de cache importante
 
 Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+
+
+## Réglages performance utiles
+
+Les réglages les plus utiles pour cette version :
+- `REQUEST_MAX_RETRIES` et `REQUEST_BACKOFF_SECONDS` pour contrôler le comportement de retry amont ;
+- `SQLITE_BUSY_TIMEOUT_MS` pour limiter les erreurs SQLite sous concurrence ;
+- `CACHE_MEMORY_ENTRIES` pour activer un cache mémoire L1 au-dessus de SQLite ;
+- `SEARCH_FETCH_CONCURRENCY` pour le parallélisme des pages de recherche ;
+- `SEARCH_ENRICH_CONCURRENCY` pour le parallélisme de l'enrichissement détaillé ;
+- `SEARCH_DEFAULT_ENRICH=false` pour garder `/search` léger par défaut ;
+- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` pour éviter le refetch automatique de la série parente sur les fiches volume.

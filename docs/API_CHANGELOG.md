@@ -1,3 +1,13 @@
+## 2026-04-22 — optimisation phase 1, search plus léger et volume opt-in
+
+- `/search` et `/search/resolve` restent désormais légers par défaut ; l'enrichissement détaillé devient opt-in via `enrich=true`.
+- Les enrichissements de recherche sont dédupliqués par `series_slug` et `volume_slug`, puis exécutés avec concurrence bornée.
+- Les fetchs concurrents pour une même clé de cache sont désormais mutualisés via single-flight, ce qui évite les rafales identiques sous charge.
+- Le cache SQLite passe en WAL avec `busy_timeout`, conserve une connexion persistante, et ajoute un cache mémoire L1.
+- Les fiches volume ne relisent plus automatiquement la série parente ; `vf` / `vo` deviennent opt-in via `include_parent_editions=true` ou une projection explicite.
+- Le runtime branche enfin `REQUEST_MAX_RETRIES`, `REQUEST_BACKOFF_SECONDS` et `LOG_FORMAT` sur le fetcher HTTP.
+- Ajout de logs de perf `search_perf` et `volume_perf` pour rendre les coûts visibles dans les logs applicatifs.
+
 ## 2026-04-21 — robustesse vf/vo, enrichissement volume et cache
 
 - Lecture prioritaire des compteurs `vf` / `vo` dans le bloc HTML `#numberblock` des fiches série Manga-News.

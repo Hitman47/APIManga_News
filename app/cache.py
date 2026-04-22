@@ -57,15 +57,55 @@ class NegativeCacheEntry:
 
 
 class SQLiteCache:
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, *, busy_timeout_ms: int = 5000, memory_entries: int = 512):
         self.db_path = db_path
-        self._lock = threading.Lock()
+        self.busy_timeout_ms = max(0, int(busy_timeout_ms))
+        self.memory_entries = max(0, int(memory_entries))
+        self._lock = threading.RLock()
+        self._memory_cache: dict[str, CacheEntry] = {}
+        self._negative_memory_cache: dict[str, NegativeCacheEntry] = {}
+        self._conn = self._connect()
         self._init_db()
 
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(self.db_path, check_same_thread=False)
         connection.row_factory = sqlite3.Row
+        connection.execute('PRAGMA journal_mode=WAL')
+        connection.execute('PRAGMA synchronous=NORMAL')
+        connection.execute('PRAGMA temp_store=MEMORY')
+        connection.execute(f'PRAGMA busy_timeout={self.busy_timeout_ms}')
         return connection
+
+    def _evict_memory_if_needed(self) -> None:
+        if self.memory_entries <= 0:
+            self._memory_cache.clear()
+            self._negative_memory_cache.clear()
+            return
+        while len(self._memory_cache) > self.memory_entries:
+            oldest_key = next(iter(self._memory_cache))
+            self._memory_cache.pop(oldest_key, None)
+        while len(self._negative_memory_cache) > self.memory_entries:
+            oldest_key = next(iter(self._negative_memory_cache))
+            self._negative_memory_cache.pop(oldest_key, None)
+
+    def _remember_cache_entry(self, entry: CacheEntry) -> None:
+        if self.memory_entries <= 0:
+            return
+        self._memory_cache.pop(entry.key, None)
+        self._memory_cache[entry.key] = entry
+        self._evict_memory_if_needed()
+
+    def _remember_negative_entry(self, entry: NegativeCacheEntry) -> None:
+        if self.memory_entries <= 0:
+            return
+        self._negative_memory_cache.pop(entry.key, None)
+        self._negative_memory_cache[entry.key] = entry
+        self._evict_memory_if_needed()
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:
         existing_columns = {row['name'] for row in conn.execute(f'PRAGMA table_info({table})').fetchall()}
@@ -73,9 +113,8 @@ class SQLiteCache:
             conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {sql_type}')
 
     def _init_db(self) -> None:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 '''
                 CREATE TABLE IF NOT EXISTS cache_entries (
                     cache_key TEXT PRIMARY KEY,
@@ -86,9 +125,9 @@ class SQLiteCache:
                 )
                 '''
             )
-            self._ensure_column(conn, 'cache_entries', 'namespace', 'TEXT')
-            self._ensure_column(conn, 'cache_entries', 'resource_url', 'TEXT')
-            conn.execute(
+            self._ensure_column(self._conn, 'cache_entries', 'namespace', 'TEXT')
+            self._ensure_column(self._conn, 'cache_entries', 'resource_url', 'TEXT')
+            self._conn.execute(
                 '''
                 CREATE TABLE IF NOT EXISTS watch_snapshots (
                     watch_key TEXT PRIMARY KEY,
@@ -99,7 +138,7 @@ class SQLiteCache:
                 )
                 '''
             )
-            conn.execute(
+            self._conn.execute(
                 '''
                 CREATE TABLE IF NOT EXISTS negative_cache_entries (
                     cache_key TEXT PRIMARY KEY,
@@ -113,25 +152,35 @@ class SQLiteCache:
                 )
                 '''
             )
-            conn.commit()
+            self._conn.commit()
 
     def get(self, cache_key: str) -> CacheEntry | None:
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
+        with self._lock:
+            memory_entry = self._memory_cache.get(cache_key)
+            if memory_entry is not None:
+                if now_utc() <= memory_entry.stale_until:
+                    self._remember_cache_entry(memory_entry)
+                    return memory_entry
+                self._memory_cache.pop(cache_key, None)
+
+            row = self._conn.execute(
                 'SELECT cache_key, payload, fetched_at, expires_at, stale_until, namespace, resource_url FROM cache_entries WHERE cache_key = ?',
                 (cache_key,),
             ).fetchone()
-        if row is None:
-            return None
-        return CacheEntry(
-            key=row['cache_key'],
-            payload=json.loads(row['payload']),
-            fetched_at=datetime.fromisoformat(row['fetched_at']).astimezone(UTC),
-            expires_at=datetime.fromisoformat(row['expires_at']).astimezone(UTC),
-            stale_until=datetime.fromisoformat(row['stale_until']).astimezone(UTC),
-            namespace=row['namespace'],
-            resource_url=row['resource_url'],
-        )
+            if row is None:
+                return None
+            entry = CacheEntry(
+                key=row['cache_key'],
+                payload=json.loads(row['payload']),
+                fetched_at=datetime.fromisoformat(row['fetched_at']).astimezone(UTC),
+                expires_at=datetime.fromisoformat(row['expires_at']).astimezone(UTC),
+                stale_until=datetime.fromisoformat(row['stale_until']).astimezone(UTC),
+                namespace=row['namespace'],
+                resource_url=row['resource_url'],
+            )
+            if now_utc() <= entry.stale_until:
+                self._remember_cache_entry(entry)
+            return entry
 
     def set(
         self,
@@ -147,8 +196,8 @@ class SQLiteCache:
         expires_at = fetched_at.fromtimestamp(fetched_at.timestamp() + ttl_seconds, tz=UTC)
         stale_until = fetched_at.fromtimestamp(expires_at.timestamp() + stale_grace_seconds, tz=UTC)
         serialized = json.dumps(payload, ensure_ascii=False)
-        with self._lock, self._connect() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 '''
                 INSERT INTO cache_entries (cache_key, payload, fetched_at, expires_at, stale_until, namespace, resource_url)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -170,20 +219,29 @@ class SQLiteCache:
                     resource_url,
                 ),
             )
-            conn.commit()
-        return CacheEntry(
-            key=cache_key,
-            payload=payload,
-            fetched_at=fetched_at,
-            expires_at=expires_at,
-            stale_until=stale_until,
-            namespace=namespace,
-            resource_url=resource_url,
-        )
+            self._conn.commit()
+            entry = CacheEntry(
+                key=cache_key,
+                payload=payload,
+                fetched_at=fetched_at,
+                expires_at=expires_at,
+                stale_until=stale_until,
+                namespace=namespace,
+                resource_url=resource_url,
+            )
+            self._remember_cache_entry(entry)
+            return entry
 
     def get_negative(self, cache_key: str) -> NegativeCacheEntry | None:
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
+        with self._lock:
+            memory_entry = self._negative_memory_cache.get(cache_key)
+            if memory_entry is not None:
+                if memory_entry.is_fresh:
+                    self._remember_negative_entry(memory_entry)
+                    return memory_entry
+                self._negative_memory_cache.pop(cache_key, None)
+
+            row = self._conn.execute(
                 '''
                 SELECT cache_key, error_code, detail, created_at, expires_at, namespace, resource_url, debug_dump_path
                 FROM negative_cache_entries
@@ -191,18 +249,21 @@ class SQLiteCache:
                 ''',
                 (cache_key,),
             ).fetchone()
-        if row is None:
-            return None
-        return NegativeCacheEntry(
-            key=row['cache_key'],
-            error_code=row['error_code'],
-            detail=row['detail'],
-            created_at=datetime.fromisoformat(row['created_at']).astimezone(UTC),
-            expires_at=datetime.fromisoformat(row['expires_at']).astimezone(UTC),
-            namespace=row['namespace'],
-            resource_url=row['resource_url'],
-            debug_dump_path=row['debug_dump_path'],
-        )
+            if row is None:
+                return None
+            entry = NegativeCacheEntry(
+                key=row['cache_key'],
+                error_code=row['error_code'],
+                detail=row['detail'],
+                created_at=datetime.fromisoformat(row['created_at']).astimezone(UTC),
+                expires_at=datetime.fromisoformat(row['expires_at']).astimezone(UTC),
+                namespace=row['namespace'],
+                resource_url=row['resource_url'],
+                debug_dump_path=row['debug_dump_path'],
+            )
+            if entry.is_fresh:
+                self._remember_negative_entry(entry)
+            return entry
 
     def set_negative(
         self,
@@ -217,8 +278,8 @@ class SQLiteCache:
     ) -> NegativeCacheEntry:
         created_at = now_utc()
         expires_at = created_at.fromtimestamp(created_at.timestamp() + max(ttl_seconds, 1), tz=UTC)
-        with self._lock, self._connect() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 '''
                 INSERT INTO negative_cache_entries (
                     cache_key, error_code, detail, created_at, expires_at, namespace, resource_url, debug_dump_path
@@ -244,33 +305,36 @@ class SQLiteCache:
                     debug_dump_path,
                 ),
             )
-            conn.commit()
-        return NegativeCacheEntry(
-            key=cache_key,
-            error_code=error_code,
-            detail=detail,
-            created_at=created_at,
-            expires_at=expires_at,
-            namespace=namespace,
-            resource_url=resource_url,
-            debug_dump_path=debug_dump_path,
-        )
+            self._conn.commit()
+            entry = NegativeCacheEntry(
+                key=cache_key,
+                error_code=error_code,
+                detail=detail,
+                created_at=created_at,
+                expires_at=expires_at,
+                namespace=namespace,
+                resource_url=resource_url,
+                debug_dump_path=debug_dump_path,
+            )
+            self._remember_negative_entry(entry)
+            return entry
 
     def clear_negative(self, cache_key: str) -> None:
-        with self._lock, self._connect() as conn:
-            conn.execute('DELETE FROM negative_cache_entries WHERE cache_key = ?', (cache_key,))
-            conn.commit()
+        with self._lock:
+            self._negative_memory_cache.pop(cache_key, None)
+            self._conn.execute('DELETE FROM negative_cache_entries WHERE cache_key = ?', (cache_key,))
+            self._conn.commit()
 
     def stats(self) -> dict[str, Any]:
         now = now_utc()
-        with self._lock, self._connect() as conn:
-            rows = conn.execute(
+        with self._lock:
+            rows = self._conn.execute(
                 'SELECT cache_key, fetched_at, expires_at, stale_until, namespace, resource_url FROM cache_entries'
             ).fetchall()
-            negative_rows = conn.execute(
+            negative_rows = self._conn.execute(
                 'SELECT cache_key, error_code, created_at, expires_at, namespace, resource_url FROM negative_cache_entries'
             ).fetchall()
-            watch_rows = conn.execute('SELECT watch_key, updated_at FROM watch_snapshots').fetchall()
+            watch_rows = self._conn.execute('SELECT watch_key, updated_at FROM watch_snapshots').fetchall()
 
         by_namespace: dict[str, dict[str, int]] = {}
         totals = {'entries': 0, 'fresh': 0, 'stale_usable': 0, 'expired': 0}
@@ -324,6 +388,11 @@ class SQLiteCache:
             },
             'oldest_fetched_at': oldest_fetched_at,
             'newest_fetched_at': newest_fetched_at,
+            'memory_cache': {
+                'entries': len(self._memory_cache),
+                'negative_entries': len(self._negative_memory_cache),
+                'capacity': self.memory_entries,
+            },
         }
 
     def invalidate(
@@ -366,15 +435,25 @@ class SQLiteCache:
 
         entry_where_clause = _where_sql(entry_clauses)
         negative_where_clause = _where_sql(negative_clauses)
-        with self._lock, self._connect() as conn:
-            cursor = conn.execute(f'DELETE FROM cache_entries{entry_where_clause}', tuple(entry_params))
-            negative_cursor = conn.execute(f'DELETE FROM negative_cache_entries{negative_where_clause}', tuple(negative_params))
-            conn.commit()
+        with self._lock:
+            cursor = self._conn.execute(f'DELETE FROM cache_entries{entry_where_clause}', tuple(entry_params))
+            negative_cursor = self._conn.execute(f'DELETE FROM negative_cache_entries{negative_where_clause}', tuple(negative_params))
+            self._conn.commit()
+            if all_entries:
+                self._memory_cache.clear()
+                self._negative_memory_cache.clear()
+            else:
+                if cache_key:
+                    self._memory_cache.pop(cache_key, None)
+                    self._negative_memory_cache.pop(cache_key, None)
+                elif namespace or resource_url or expired_only:
+                    self._memory_cache.clear()
+                    self._negative_memory_cache.clear()
             return int((cursor.rowcount or 0) + (negative_cursor.rowcount or 0))
 
     def get_watch_snapshot(self, watch_key: str) -> WatchSnapshot | None:
-        with self._lock, self._connect() as conn:
-            row = conn.execute(
+        with self._lock:
+            row = self._conn.execute(
                 'SELECT watch_key, scope_hash, payload, fingerprint, updated_at FROM watch_snapshots WHERE watch_key = ?',
                 (watch_key,),
             ).fetchone()
@@ -390,8 +469,8 @@ class SQLiteCache:
 
     def upsert_watch_snapshot(self, watch_key: str, *, scope_hash: str, payload: dict[str, Any], fingerprint: str) -> WatchSnapshot:
         updated_at = now_utc()
-        with self._lock, self._connect() as conn:
-            conn.execute(
+        with self._lock:
+            self._conn.execute(
                 '''
                 INSERT INTO watch_snapshots (watch_key, scope_hash, payload, fingerprint, updated_at)
                 VALUES (?, ?, ?, ?, ?)
@@ -403,7 +482,7 @@ class SQLiteCache:
                 ''',
                 (watch_key, scope_hash, json.dumps(payload, ensure_ascii=False), fingerprint, updated_at.isoformat()),
             )
-            conn.commit()
+            self._conn.commit()
         return WatchSnapshot(
             watch_key=watch_key,
             scope_hash=scope_hash,

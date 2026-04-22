@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
@@ -163,6 +165,12 @@ class MangaNewsService:
         self.fetcher = fetcher
         self.cache = cache
         self.base_url = settings.manga_news_base_url.rstrip('/')
+        self._search_fetch_concurrency = max(1, int(getattr(settings, 'search_fetch_concurrency', 4)))
+        self._search_enrich_concurrency = max(1, int(getattr(settings, 'search_enrich_concurrency', 4)))
+        self._search_default_enrich = bool(getattr(settings, 'search_default_enrich', False))
+        self._volume_default_include_parent_editions = bool(getattr(settings, 'volume_default_include_parent_editions', False))
+        self._inflight_lock = asyncio.Lock()
+        self._inflight_loads: dict[str, asyncio.Future] = {}
 
     def _negative_cache_exception(self, entry):
         if entry.error_code == ResourceNotFound.code:
@@ -220,40 +228,64 @@ class MangaNewsService:
             if negative_entry and negative_entry.is_fresh:
                 raise self._negative_cache_exception(negative_entry)
 
+        leader = False
+        async with self._inflight_lock:
+            in_flight = self._inflight_loads.get(cache_key)
+            if in_flight is None:
+                in_flight = asyncio.get_running_loop().create_future()
+                self._inflight_loads[cache_key] = in_flight
+                leader = True
+
+        if not leader:
+            return await in_flight
+
         try:
-            payload, source_url = await loader()
-            self.cache.clear_negative(cache_key)
-            cached_entry = self.cache.set(
-                cache_key=cache_key,
-                payload={'_schema_version': CACHE_SCHEMA_VERSION, 'data': payload, 'source_url': source_url},
-                ttl_seconds=ttl_seconds,
-                stale_grace_seconds=self.settings.cache_stale_grace_seconds,
-                namespace=namespace,
-                resource_url=source_url or resource_url,
-            )
-            return cached_entry.payload, cached_entry, False, False, []
-        except (ParseError, ResourceNotFound) as exc:
-            if getattr(self.settings, 'negative_cache_enabled', True):
-                self.cache.set_negative(
+            try:
+                payload, source_url = await loader()
+                self.cache.clear_negative(cache_key)
+                cached_entry = self.cache.set(
                     cache_key=cache_key,
-                    error_code=exc.code,
-                    detail=str(exc),
-                    ttl_seconds=getattr(self.settings, 'negative_cache_ttl_seconds', 120),
+                    payload={'_schema_version': CACHE_SCHEMA_VERSION, 'data': payload, 'source_url': source_url},
+                    ttl_seconds=ttl_seconds,
+                    stale_grace_seconds=self.settings.cache_stale_grace_seconds,
                     namespace=namespace,
-                    resource_url=getattr(exc, 'resource_url', None) or resource_url,
-                    debug_dump_path=getattr(exc, 'debug_dump_path', None),
+                    resource_url=source_url or resource_url,
                 )
-            if entry and entry.is_stale_usable:
-                warning = f'Using stale cached data because the upstream fetch failed: {exc}'
-                logger.warning(warning)
-                return entry.payload, entry, True, True, [warning]
-            raise
+                result = (cached_entry.payload, cached_entry, False, False, [])
+            except (ParseError, ResourceNotFound) as exc:
+                if getattr(self.settings, 'negative_cache_enabled', True):
+                    self.cache.set_negative(
+                        cache_key=cache_key,
+                        error_code=exc.code,
+                        detail=str(exc),
+                        ttl_seconds=getattr(self.settings, 'negative_cache_ttl_seconds', 120),
+                        namespace=namespace,
+                        resource_url=getattr(exc, 'resource_url', None) or resource_url,
+                        debug_dump_path=getattr(exc, 'debug_dump_path', None),
+                    )
+                if entry and entry.is_stale_usable:
+                    warning = f'Using stale cached data because the upstream fetch failed: {exc}'
+                    logger.warning(warning)
+                    result = (entry.payload, entry, True, True, [warning])
+                else:
+                    raise
+            except Exception as exc:
+                if entry and entry.is_stale_usable:
+                    warning = f'Using stale cached data because the upstream fetch failed: {exc}'
+                    logger.warning(warning)
+                    result = (entry.payload, entry, True, True, [warning])
+                else:
+                    raise
+            in_flight.set_result(result)
+            return result
         except Exception as exc:
-            if entry and entry.is_stale_usable:
-                warning = f'Using stale cached data because the upstream fetch failed: {exc}'
-                logger.warning(warning)
-                return entry.payload, entry, True, True, [warning]
+            in_flight.set_exception(exc)
             raise
+        finally:
+            async with self._inflight_lock:
+                current = self._inflight_loads.get(cache_key)
+                if current is in_flight:
+                    self._inflight_loads.pop(cache_key, None)
 
     def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool | None = None) -> Envelope:
         data = payload.get('data')
@@ -274,39 +306,118 @@ class MangaNewsService:
             data=data,
         )
 
-    async def _enrich_search_results(self, results: list[Any]) -> list[SearchResult]:
-        enriched: list[SearchResult] = []
-        for item in results:
-            payload = item.model_dump() if hasattr(item, 'model_dump') else dict(item)
-            try:
-                if payload.get('kind') == 'series' and payload.get('slug'):
-                    series_payload, *_ = await self._get_series_payload(slug=payload['slug'])
-                    data = series_payload.get('data', {}) or {}
-                    payload['title_vo'] = data.get('title_vo')
-                    payload['translated_title'] = data.get('translated_title')
-                    payload['vf'] = data.get('vf')
-                    payload['vo'] = data.get('vo')
-                elif payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug'):
-                    volume_payload, *_ = await self._get_volume_payload(series_slug=payload['series_slug'], volume_slug=payload['volume_slug'])
-                    data = volume_payload.get('data', {}) or {}
-                    payload['title_vo'] = data.get('title_vo')
-                    payload['translated_title'] = data.get('translated_title')
-                    payload['number'] = data.get('number')
-                    payload['number_int'] = data.get('number_int')
-                    payload['edition_label'] = data.get('edition_label')
-                    payload['is_special'] = data.get('is_special')
-                    payload['is_one_shot'] = data.get('is_one_shot')
-                    series_payload, *_ = await self._get_series_payload(slug=payload['series_slug'])
-                    series_data = series_payload.get('data', {}) or {}
-                    payload['vf'] = series_data.get('vf')
-                    payload['vo'] = series_data.get('vo')
-            except Exception as exc:  # pragma: no cover - best-effort enrichment
-                logger.debug('Search result enrichment failed for %s: %s', payload.get('url'), exc)
-            enriched.append(SearchResult.model_validate(payload))
-        return enriched
 
-    async def resolve_search(self, query: str, kind: Literal['series', 'volume', 'all'], limit: int) -> Envelope:
-        search_response = await self.search(query=query, kind=kind, mode='all', limit=limit)
+    async def _run_with_limit(self, items: list[Any], worker, *, concurrency: int) -> list[Any]:
+        if not items:
+            return []
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+
+        async def _runner(item: Any):
+            async with semaphore:
+                return await worker(item)
+
+        return await asyncio.gather(*[_runner(item) for item in items])
+
+    def _projection_requests_parent_editions(self, *, blocks: str | None, fields: str | None) -> bool:
+        requested_blocks = {slugify_block_name(block) for block in _split_csv_param(blocks)}
+        if 'editions' in requested_blocks:
+            return True
+        for path in _split_csv_param(fields):
+            if path == 'vf' or path == 'vo' or path.startswith('vf.') or path.startswith('vo.'):
+                return True
+        return False
+
+    def _log_perf(self, event: str, **fields: Any) -> None:
+        logger.info('%s %s', event, ' '.join(f'{key}={value!r}' for key, value in sorted(fields.items())))
+
+    async def _enrich_search_results(self, results: list[Any]) -> tuple[list[SearchResult], dict[str, int]]:
+        perf = {
+            'input_results': len(results),
+            'unique_series_fetches': 0,
+            'unique_volume_fetches': 0,
+        }
+        if not results:
+            return [], perf
+
+        base_payloads = [item.model_dump() if hasattr(item, 'model_dump') else dict(item) for item in results]
+        unique_series_slugs = sorted({
+            payload.get('slug') for payload in base_payloads
+            if payload.get('kind') == 'series' and payload.get('slug')
+        } | {
+            payload.get('series_slug') for payload in base_payloads
+            if payload.get('kind') == 'volume' and payload.get('series_slug')
+        })
+        perf['unique_series_fetches'] = len(unique_series_slugs)
+
+        async def _fetch_series(slug: str):
+            try:
+                payload, *_ = await self._get_series_payload(slug=slug)
+                return slug, payload.get('data', {}) or {}
+            except Exception as exc:  # pragma: no cover - best-effort enrichment
+                logger.debug('Search series enrichment failed for %s: %s', slug, exc)
+                return slug, {}
+
+        series_data_map = {
+            slug: data
+            for slug, data in await self._run_with_limit(
+                unique_series_slugs,
+                _fetch_series,
+                concurrency=self._search_enrich_concurrency,
+            )
+        }
+
+        unique_volume_keys = sorted({
+            (payload.get('series_slug'), payload.get('volume_slug'))
+            for payload in base_payloads
+            if payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug')
+        })
+        perf['unique_volume_fetches'] = len(unique_volume_keys)
+
+        async def _fetch_volume(key: tuple[str, str]):
+            series_slug, volume_slug = key
+            try:
+                payload, *_ = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug)
+                return key, payload.get('data', {}) or {}
+            except Exception as exc:  # pragma: no cover - best-effort enrichment
+                logger.debug('Search volume enrichment failed for %s/%s: %s', series_slug, volume_slug, exc)
+                return key, {}
+
+        volume_data_map = {
+            key: data
+            for key, data in await self._run_with_limit(
+                unique_volume_keys,
+                _fetch_volume,
+                concurrency=self._search_enrich_concurrency,
+            )
+        }
+
+        enriched: list[SearchResult] = []
+        for payload in base_payloads:
+            current = deepcopy(payload)
+            if current.get('kind') == 'series' and current.get('slug'):
+                series_data = series_data_map.get(current['slug'], {})
+                current['title_vo'] = series_data.get('title_vo')
+                current['translated_title'] = series_data.get('translated_title')
+                current['vf'] = series_data.get('vf')
+                current['vo'] = series_data.get('vo')
+            elif current.get('kind') == 'volume' and current.get('series_slug') and current.get('volume_slug'):
+                key = (current['series_slug'], current['volume_slug'])
+                volume_data = volume_data_map.get(key, {})
+                current['title_vo'] = volume_data.get('title_vo')
+                current['translated_title'] = volume_data.get('translated_title')
+                current['number'] = volume_data.get('number')
+                current['number_int'] = volume_data.get('number_int')
+                current['edition_label'] = volume_data.get('edition_label')
+                current['is_special'] = volume_data.get('is_special')
+                current['is_one_shot'] = volume_data.get('is_one_shot')
+                series_data = series_data_map.get(current['series_slug'], {})
+                current['vf'] = series_data.get('vf')
+                current['vo'] = series_data.get('vo')
+            enriched.append(SearchResult.model_validate(current))
+        return enriched, perf
+
+    async def resolve_search(self, query: str, kind: Literal['series', 'volume', 'all'], limit: int, enrich: bool | None = None) -> Envelope:
+        search_response = await self.search(query=query, kind=kind, mode='all', limit=limit, enrich=enrich)
         candidates = [ResolveResult.model_validate(item) for item in (search_response.data or [])]
         best = candidates[0] if candidates else None
         if not best:
@@ -339,10 +450,11 @@ class MangaNewsService:
             data=data.model_dump(),
         )
 
-    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> Envelope:
+    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int, enrich: bool | None = None) -> Envelope:
         query = clean_ws(query)
         if not query:
             raise ParseError('The search query cannot be empty.')
+        enrich = self._search_default_enrich if enrich is None else enrich
         search_urls: list[str] = []
         if kind in {'series', 'all'}:
             search_urls.extend([
@@ -354,23 +466,30 @@ class MangaNewsService:
                 f'{self.base_url}/index.php/recherche/?cat=manga-volume-vf&q={query}',
                 f'{self.base_url}/index.php/recherche/?cat=manga-volume-vo&q={query}',
             ])
-        cache_key = versioned_cache_key('search', query, kind, mode, str(limit), *search_urls)
+        cache_key = versioned_cache_key('search', query, kind, mode, str(limit), str(bool(enrich)), *search_urls)
 
         async def loader():
-            aggregated = []
-            for url in search_urls:
+            started = time.perf_counter()
+
+            async def _fetch_search_page(url: str):
                 result = await self.fetcher.get_text(url)
-                aggregated.extend(
-                    parse_search_page(
-                        html=result.text,
-                        page_url=result.url,
-                        base_url=self.base_url,
-                        query=query,
-                        kind=kind,
-                        score_threshold=self.settings.search_score_threshold,
-                        limit=max(limit, self.settings.max_limit),
-                    )
+                parsed = parse_search_page(
+                    html=result.text,
+                    page_url=result.url,
+                    base_url=self.base_url,
+                    query=query,
+                    kind=kind,
+                    score_threshold=self.settings.search_score_threshold,
+                    limit=max(limit, self.settings.max_limit),
                 )
+                return result.url, parsed
+
+            fetched_pages = await self._run_with_limit(
+                search_urls,
+                _fetch_search_page,
+                concurrency=self._search_fetch_concurrency,
+            )
+            aggregated = [item for _, parsed in fetched_pages for item in parsed]
             deduped: dict[str, object] = {}
             for item in aggregated:
                 existing = deduped.get(item.url)
@@ -380,8 +499,28 @@ class MangaNewsService:
             if mode == 'best' and results:
                 results = [results[0]]
             results = results[:limit]
-            enriched = await self._enrich_search_results(results)
-            return [item.model_dump() for item in enriched], search_urls[0] if search_urls else self.base_url
+            enrichment_perf = {'input_results': len(results), 'unique_series_fetches': 0, 'unique_volume_fetches': 0}
+            final_results: list[SearchResult]
+            if enrich:
+                final_results, enrichment_perf = await self._enrich_search_results(results)
+            else:
+                final_results = [SearchResult.model_validate(item.model_dump() if hasattr(item, 'model_dump') else dict(item)) for item in results]
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            self._log_perf(
+                'search_perf',
+                query=query,
+                kind=kind,
+                mode=mode,
+                enrich=enrich,
+                search_pages=len(search_urls),
+                aggregated_hits=len(aggregated),
+                deduped_hits=len(deduped),
+                returned_hits=len(final_results),
+                unique_series_fetches=enrichment_perf['unique_series_fetches'],
+                unique_volume_fetches=enrichment_perf['unique_volume_fetches'],
+                duration_ms=duration_ms,
+            )
+            return [item.model_dump() for item in final_results], search_urls[0] if search_urls else self.base_url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
@@ -484,11 +623,16 @@ class MangaNewsService:
         blocks: str | None = None,
         fields: str | None = None,
         include_raw_sections: bool = False,
+        include_parent_editions: bool | None = None,
     ) -> Envelope:
         payload, entry, cached, partial, warnings = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug, url=url)
         data = deepcopy(payload.get('data', {}) or {})
+        should_include_parent_editions = self._volume_default_include_parent_editions if include_parent_editions is None else include_parent_editions
+        if not should_include_parent_editions:
+            should_include_parent_editions = self._projection_requests_parent_editions(blocks=blocks, fields=fields)
         target_series_slug = series_slug or self._extract_series_slug_from_volume_url(payload.get('source_url') or url or '')
-        if target_series_slug:
+        if should_include_parent_editions and target_series_slug:
+            started = time.perf_counter()
             try:
                 series_payload, *_ = await self._get_series_payload(slug=target_series_slug)
                 series_data = series_payload.get('data', {}) or {}
@@ -496,6 +640,13 @@ class MangaNewsService:
                 data['vo'] = series_data.get('vo')
             except Exception as exc:  # pragma: no cover - best-effort enrichment
                 logger.debug('Volume enrichment failed for %s: %s', payload.get('source_url'), exc)
+            finally:
+                self._log_perf(
+                    'volume_perf',
+                    source_url=payload.get('source_url'),
+                    include_parent_editions=should_include_parent_editions,
+                    duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                )
         projected = project_resource_payload(
             data,
             resource='volume',

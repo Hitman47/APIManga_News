@@ -109,6 +109,7 @@ def test_series_route_forwards_projection_params():
 def test_search_resolve_and_etag_304():
     class DummyService:
         async def resolve_search(self, **kwargs):
+            assert kwargs['enrich'] is False
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
@@ -168,6 +169,7 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
 def test_search_endpoint_exposes_alternate_titles():
     class DummyService:
         async def search(self, **kwargs):
+            assert kwargs['enrich'] is False
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
