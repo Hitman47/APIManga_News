@@ -45,6 +45,18 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices('SEARCH_DEFAULT_INCLUDE_EDITIONS'),
     )
+    search_default_prefer_main_series: bool = Field(
+        default=True,
+        validation_alias=AliasChoices('SEARCH_DEFAULT_PREFER_MAIN_SERIES'),
+    )
+    search_default_include_related: bool = Field(
+        default=True,
+        validation_alias=AliasChoices('SEARCH_DEFAULT_INCLUDE_RELATED'),
+    )
+    search_default_include_books: bool = Field(
+        default=True,
+        validation_alias=AliasChoices('SEARCH_DEFAULT_INCLUDE_BOOKS'),
+    )
     volume_default_include_parent_editions: bool = Field(
         default=False,
         validation_alias=AliasChoices('VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS'),

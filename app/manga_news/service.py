@@ -45,8 +45,11 @@ from app.utils import (
     clean_ws,
     fingerprint_data,
     infer_media_kind,
+    infer_relation_kind,
+    infer_root_series_slug,
     is_manga_news_url,
     make_cache_key,
+    media_kind_matches,
     normalize_text,
     now_utc,
     parse_french_date,
@@ -56,7 +59,7 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-04-22-search-ranking-media-1'
+CACHE_SCHEMA_VERSION = '2026-04-22-search-filters-franchise-1'
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
@@ -247,6 +250,71 @@ class MangaNewsService:
             if normalized in {'0', 'false', 'no', 'off'}:
                 return False
         return bool(value) if value is not None else default
+
+    def _parse_csv_values(self, value: str | None) -> set[str] | None:
+        if value is None:
+            return None
+        items = {clean_ws(part).lower() for part in value.split(',') if clean_ws(part)}
+        return items or None
+
+    def _apply_search_relation_metadata(
+        self,
+        payload: dict[str, Any],
+        *,
+        query: str,
+        related_series: list[dict[str, Any]] | None = None,
+    ) -> None:
+        related_series = related_series or []
+        related_titles = [item.get('title', '') for item in related_series if item.get('title')]
+        media_kind = payload.get('media_kind') or infer_media_kind(
+            title=payload.get('title'),
+            source_type=payload.get('source_type'),
+            kind=payload.get('kind'),
+            is_special=payload.get('is_special'),
+            related_series_titles=related_titles,
+            query=query,
+        )
+        relation_kind = payload.get('relation_kind') or infer_relation_kind(
+            title=payload.get('title'),
+            slug=payload.get('slug') or payload.get('series_slug'),
+            media_kind=media_kind,
+            related_series_titles=related_titles,
+            query=query,
+        )
+        root_series_slug = payload.get('root_series_slug') or infer_root_series_slug(
+            slug=payload.get('slug') or payload.get('series_slug'),
+            relation_kind=relation_kind,
+            related_series=related_series,
+            query=query,
+        )
+        payload['media_kind'] = media_kind
+        payload['relation_kind'] = relation_kind
+        payload['root_series_slug'] = root_series_slug
+
+    def _filter_search_results(
+        self,
+        results: list[SearchResult],
+        *,
+        include_related: bool,
+        include_books: bool,
+        allowed_media_kinds: set[str] | None,
+        excluded_media_kinds: set[str] | None,
+    ) -> list[SearchResult]:
+        filtered: list[SearchResult] = []
+        for item in results:
+            media_kind = item.media_kind
+            if not media_kind_matches(
+                media_kind,
+                include_books=include_books,
+                allowed_media_kinds=allowed_media_kinds,
+                excluded_media_kinds=excluded_media_kinds,
+            ):
+                continue
+            relation_kind = (item.relation_kind or '').lower()
+            if not include_related and relation_kind in {'related_manga', 'spinoff', 'related_book'}:
+                continue
+            filtered.append(item)
+        return filtered
 
     @property
     def cache_schema_version(self) -> str:
@@ -545,8 +613,6 @@ class MangaNewsService:
             return []
 
         payloads = [item.model_dump() if hasattr(item, 'model_dump') else dict(item) for item in results]
-        if not enrich and not include_editions:
-            return [SearchResult.model_validate(payload) for payload in payloads]
         series_slugs = {payload.get('slug') for payload in payloads if payload.get('kind') == 'series' and payload.get('slug')}
         series_slugs.update({payload.get('series_slug') for payload in payloads if payload.get('kind') == 'volume' and payload.get('series_slug')})
         series_slugs.discard(None)
@@ -587,6 +653,7 @@ class MangaNewsService:
 
         enriched: list[SearchResult] = []
         for payload in payloads:
+            related_series: list[dict[str, Any]] = []
             if payload.get('kind') == 'series' and payload.get('slug'):
                 series_data = series_data_map.get(payload['slug'], {})
                 if enrich:
@@ -596,16 +663,9 @@ class MangaNewsService:
                 if include_editions:
                     payload['vf'] = series_data.get('vf')
                     payload['vo'] = series_data.get('vo')
-                related_series_titles = [item.get('title', '') for item in (series_data.get('related', {}) or {}).get('series', [])]
-                payload['media_kind'] = infer_media_kind(
-                    title=payload.get('title'),
-                    source_type=payload.get('source_type') or series_data.get('source_type'),
-                    kind=payload.get('kind'),
-                    is_special=payload.get('is_special'),
-                    related_series_titles=related_series_titles,
-                    query=query,
-                )
+                related_series = (series_data.get('related', {}) or {}).get('series', []) or []
             elif payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug'):
+                series_data = series_data_map.get(payload['series_slug'], {})
                 if enrich:
                     volume_data = volume_data_map.get((payload['series_slug'], payload['volume_slug']), {})
                     payload['title_vo'] = volume_data.get('title_vo')
@@ -618,17 +678,11 @@ class MangaNewsService:
                     payload['source_type'] = volume_data.get('source_type')
                     payload['media_kind'] = volume_data.get('media_kind')
                 if include_editions:
-                    series_data = series_data_map.get(payload['series_slug'], {})
                     payload['vf'] = series_data.get('vf')
                     payload['vo'] = series_data.get('vo')
-                if not payload.get('media_kind'):
-                    payload['media_kind'] = infer_media_kind(
-                        title=payload.get('title'),
-                        source_type=payload.get('source_type'),
-                        kind=payload.get('kind'),
-                        is_special=payload.get('is_special'),
-                        query=query,
-                    )
+                related_series = (series_data.get('related', {}) or {}).get('series', []) or []
+
+            self._apply_search_relation_metadata(payload, query=query, related_series=related_series)
             enriched.append(SearchResult.model_validate(payload))
         return enriched
 
@@ -639,6 +693,11 @@ class MangaNewsService:
         limit: int,
         enrich: bool | None = None,
         include_editions: bool | None = None,
+        prefer_main_series: bool | None = None,
+        include_related: bool | None = None,
+        include_books: bool | None = None,
+        media_kinds: str | None = None,
+        exclude_media_kinds: str | None = None,
     ) -> Envelope:
         started = time.perf_counter()
         search_response = await self.search(
@@ -648,6 +707,11 @@ class MangaNewsService:
             limit=limit,
             enrich=enrich,
             include_editions=include_editions,
+            prefer_main_series=prefer_main_series,
+            include_related=include_related,
+            include_books=include_books,
+            media_kinds=media_kinds,
+            exclude_media_kinds=exclude_media_kinds,
         )
         candidates = [ResolveResult.model_validate(item) for item in (search_response.data or [])]
         best = candidates[0] if candidates else None
@@ -675,6 +739,11 @@ class MangaNewsService:
             limit=limit,
             enrich=enrich,
             include_editions=include_editions,
+            prefer_main_series=prefer_main_series,
+            include_related=include_related,
+            include_books=include_books,
+            media_kinds=media_kinds,
+            exclude_media_kinds=exclude_media_kinds,
             candidates=len(candidates),
             confidence=confidence,
             found=best is not None,
@@ -704,6 +773,11 @@ class MangaNewsService:
         limit: int,
         enrich: bool | None = None,
         include_editions: bool | None = None,
+        prefer_main_series: bool | None = None,
+        include_related: bool | None = None,
+        include_books: bool | None = None,
+        media_kinds: str | None = None,
+        exclude_media_kinds: str | None = None,
     ) -> Envelope:
         started = time.perf_counter()
         query = clean_ws(query)
@@ -715,6 +789,23 @@ class MangaNewsService:
             if include_editions is None
             else include_editions
         )
+        resolved_prefer_main_series = (
+            self._setting_bool('search_default_prefer_main_series', True)
+            if prefer_main_series is None
+            else prefer_main_series
+        )
+        resolved_include_related = (
+            self._setting_bool('search_default_include_related', True)
+            if include_related is None
+            else include_related
+        )
+        resolved_include_books = (
+            self._setting_bool('search_default_include_books', True)
+            if include_books is None
+            else include_books
+        )
+        allowed_media_kinds = self._parse_csv_values(media_kinds)
+        excluded_media_kinds = self._parse_csv_values(exclude_media_kinds)
         search_urls = self._search_urls(query, kind)
         cache_key = versioned_cache_key(
             'search',
@@ -724,6 +815,11 @@ class MangaNewsService:
             str(limit),
             str(int(resolved_enrich)),
             str(int(resolved_include_editions)),
+            str(int(resolved_prefer_main_series)),
+            str(int(resolved_include_related)),
+            str(int(resolved_include_books)),
+            ','.join(sorted(allowed_media_kinds or set())),
+            ','.join(sorted(excluded_media_kinds or set())),
             *search_urls,
         )
 
@@ -744,7 +840,10 @@ class MangaNewsService:
                 existing = deduped.get(item.url)
                 if existing is None or item.score > existing.score:
                     deduped[item.url] = item
-            results = sorted(deduped.values(), key=lambda item: search_result_sort_key(query, item))
+            results = sorted(
+                deduped.values(),
+                key=lambda item: search_result_sort_key(query, item, prefer_main_series=resolved_prefer_main_series),
+            )
             candidate_limit = limit if mode == 'all' else max(limit, 10)
             results = results[:candidate_limit]
             enrichment_started = time.perf_counter()
@@ -754,10 +853,20 @@ class MangaNewsService:
                 enrich=resolved_enrich,
                 include_editions=resolved_include_editions,
             )
-            enriched = sorted(enriched, key=lambda item: search_result_sort_key(query, item))
-            if mode == 'best' and enriched:
-                enriched = [enriched[0]]
-            enriched = enriched[:limit]
+            filtered = self._filter_search_results(
+                enriched,
+                include_related=resolved_include_related,
+                include_books=resolved_include_books,
+                allowed_media_kinds=allowed_media_kinds,
+                excluded_media_kinds=excluded_media_kinds,
+            )
+            filtered = sorted(
+                filtered,
+                key=lambda item: search_result_sort_key(query, item, prefer_main_series=resolved_prefer_main_series),
+            )
+            if mode == 'best' and filtered:
+                filtered = [filtered[0]]
+            filtered = filtered[:limit]
             enrichment_ms = round((time.perf_counter() - enrichment_started) * 1000, 2)
             self._record_perf(
                 scope='service.search.loader',
@@ -772,11 +881,17 @@ class MangaNewsService:
                 enrichment_ms=enrichment_ms,
                 candidates_before_limit=len(deduped),
                 candidates_before_enrichment=len(results),
-                candidates_after_limit=len(enriched),
+                candidates_after_filter=len(filtered),
+                candidates_after_limit=len(filtered),
                 enrich=resolved_enrich,
                 include_editions=resolved_include_editions,
+                prefer_main_series=resolved_prefer_main_series,
+                include_related=resolved_include_related,
+                include_books=resolved_include_books,
+                media_kinds=sorted(allowed_media_kinds or set()),
+                exclude_media_kinds=sorted(excluded_media_kinds or set()),
             )
-            return [item.model_dump() for item in enriched], search_urls[0] if search_urls else self.base_url
+            return [item.model_dump() for item in filtered], search_urls[0] if search_urls else self.base_url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
@@ -796,6 +911,11 @@ class MangaNewsService:
             limit=limit,
             enrich=resolved_enrich,
             include_editions=resolved_include_editions,
+            prefer_main_series=resolved_prefer_main_series,
+            include_related=resolved_include_related,
+            include_books=resolved_include_books,
+            media_kinds=sorted(allowed_media_kinds or set()),
+            exclude_media_kinds=sorted(excluded_media_kinds or set()),
             cached=cached,
             partial=partial,
             found=found,

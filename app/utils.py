@@ -76,6 +76,16 @@ MEDIA_KIND_PRIORITY = {
     'essay': 8,
     'misc': 9,
 }
+BOOK_MEDIA_KINDS = {'novel', 'guide', 'artbook', 'anime_comics', 'cookbook', 'essay'}
+RELATED_RELATION_KINDS = {'related_manga', 'spinoff', 'related_book'}
+RELATION_KIND_PRIORITY = {
+    'main': 0,
+    'related_manga': 1,
+    'spinoff': 2,
+    'standalone': 3,
+    'related_book': 4,
+    'unknown': 5,
+}
 
 
 def now_utc() -> datetime:
@@ -85,7 +95,7 @@ def now_utc() -> datetime:
 def clean_ws(value: str | None) -> str:
     if value is None:
         return ''
-    value = value.replace('\xa0', ' ')
+    value = value.replace(' ', ' ')
     value = re.sub(r'\s+', ' ', value)
     return value.strip()
 
@@ -203,7 +213,107 @@ def infer_media_kind(
 
 
 def media_kind_priority(media_kind: str | None) -> int:
-    return MEDIA_KIND_PRIORITY.get(media_kind or 'misc', MEDIA_KIND_PRIORITY['misc'])
+    return MEDIA_KIND_PRIORITY.get((media_kind or 'misc').lower(), MEDIA_KIND_PRIORITY['misc'])
+
+
+def relation_kind_priority(relation_kind: str | None) -> int:
+    return RELATION_KIND_PRIORITY.get((relation_kind or 'unknown').lower(), RELATION_KIND_PRIORITY['unknown'])
+
+
+def series_slug_from_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    parsed = urlparse(url)
+    parts = [part for part in parsed.path.split('/') if part]
+    if len(parts) >= 3 and parts[-2] == 'serie':
+        return parts[-1]
+    return None
+
+
+def is_book_media_kind(media_kind: str | None) -> bool:
+    return (media_kind or '').lower() in BOOK_MEDIA_KINDS
+
+
+def infer_relation_kind(
+    *,
+    title: str | None,
+    slug: str | None = None,
+    media_kind: str | None = None,
+    related_series_titles: Iterable[str] | None = None,
+    query: str | None = None,
+) -> str:
+    query_norm = normalize_title_for_ranking(query) if query else ''
+    title_norm = normalize_title_for_ranking(title)
+    slug_norm = normalize_title_for_ranking((slug or '').replace('-', ' '))
+    related_norms = {normalize_title_for_ranking(item) for item in related_series_titles or [] if clean_ws(item)}
+    media_kind = (media_kind or 'misc').lower()
+
+    if query_norm and (title_norm == query_norm or slug_norm == query_norm):
+        return 'main'
+    if media_kind == 'manga_spinoff' and query_norm:
+        if title_norm.startswith(query_norm) or slug_norm.startswith(query_norm):
+            return 'main'
+    if query_norm and query_norm in related_norms:
+        if media_kind == 'manga_spinoff':
+            return 'spinoff'
+        if is_book_media_kind(media_kind) or media_kind == 'misc':
+            return 'related_book'
+        if media_kind in {'manga', 'special'}:
+            return 'related_manga'
+    if media_kind == 'manga_spinoff':
+        return 'spinoff'
+    if query_norm and query_norm in title_norm:
+        if is_book_media_kind(media_kind):
+            return 'related_book'
+        if media_kind in {'manga', 'special'}:
+            return 'related_manga'
+    if media_kind in {'manga', 'special'}:
+        return 'standalone'
+    if is_book_media_kind(media_kind):
+        return 'related_book' if query_norm else 'standalone'
+    return 'standalone'
+
+
+def infer_root_series_slug(
+    *,
+    slug: str | None,
+    relation_kind: str | None,
+    related_series: Iterable[Any] | None = None,
+    query: str | None = None,
+) -> str | None:
+    relation_kind = (relation_kind or '').lower()
+    if relation_kind == 'main':
+        return slug
+    query_norm = normalize_title_for_ranking(query) if query else ''
+    if not query_norm or not related_series:
+        return None
+    for item in related_series:
+        if isinstance(item, dict):
+            title = item.get('title')
+            url = item.get('url')
+        else:
+            title = getattr(item, 'title', None)
+            url = getattr(item, 'url', None)
+        if normalize_title_for_ranking(title) == query_norm:
+            return series_slug_from_url(url)
+    return None
+
+
+def media_kind_matches(
+    media_kind: str | None,
+    *,
+    include_books: bool,
+    allowed_media_kinds: set[str] | None = None,
+    excluded_media_kinds: set[str] | None = None,
+) -> bool:
+    normalized = (media_kind or 'misc').lower()
+    if excluded_media_kinds and normalized in excluded_media_kinds:
+        return False
+    if allowed_media_kinds and normalized not in allowed_media_kinds:
+        return False
+    if not include_books and normalized in BOOK_MEDIA_KINDS:
+        return False
+    return True
 
 
 def _search_result_value(result: Any, key: str) -> Any:
@@ -212,7 +322,7 @@ def _search_result_value(result: Any, key: str) -> Any:
     return getattr(result, key, None)
 
 
-def search_result_sort_key(query: str, result: Any) -> tuple[Any, ...]:
+def search_result_sort_key(query: str, result: Any, *, prefer_main_series: bool = True) -> tuple[Any, ...]:
     query_norm = normalize_title_for_ranking(query)
     query_tokens = query_norm.split()
     query_volume_number = extract_volume_number(query)
@@ -223,12 +333,25 @@ def search_result_sort_key(query: str, result: Any) -> tuple[Any, ...]:
     source_type = _search_result_value(result, 'source_type')
     is_special = _search_result_value(result, 'is_special')
     media_kind = _search_result_value(result, 'media_kind')
+    related_series_titles = _search_result_value(result, 'related_series_titles') or []
     if not media_kind:
         media_kind = infer_media_kind(
             title=title,
             source_type=source_type,
             kind=kind,
             is_special=is_special,
+            related_series_titles=related_series_titles,
+            query=query,
+        )
+
+    relation_kind = _search_result_value(result, 'relation_kind')
+    if not relation_kind:
+        relation_kind = infer_relation_kind(
+            title=title,
+            slug=slug,
+            media_kind=media_kind,
+            related_series_titles=related_series_titles,
+            query=query,
         )
 
     title_norm = normalize_title_for_ranking(title)
@@ -250,11 +373,13 @@ def search_result_sort_key(query: str, result: Any) -> tuple[Any, ...]:
         kind_priority = 0 if kind == 'series' else 1
 
     special_priority = 1 if is_special else 0
+    relation_priority = relation_kind_priority(relation_kind) if prefer_main_series else RELATION_KIND_PRIORITY['unknown']
     score = int(_search_result_value(result, 'score') or 0)
 
     return (
         0 if exact_title else 1,
         0 if exact_slug else 1,
+        relation_priority,
         kind_priority,
         media_kind_priority(media_kind),
         0 if startswith_query else 1,
@@ -266,7 +391,6 @@ def search_result_sort_key(query: str, result: Any) -> tuple[Any, ...]:
         token_count,
         title_norm,
     )
-
 
 def unique_list(values: Iterable[str]) -> list[str]:
     seen: set[str] = set()

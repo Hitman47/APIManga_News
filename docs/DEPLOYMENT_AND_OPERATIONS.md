@@ -229,7 +229,7 @@ Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un c
   - les timings roulants par scope ;
   - les derniers événements de perf et les dernières requêtes si `include_recent=true` ;
   - l'état du cache SQLite/L1 ;
-  - les defaults effectivement appliqués pour `/search`, `/search/resolve` et `/volume`.
+  - les defaults effectivement appliqués pour `/search`, `/search/resolve` et `/volume`, y compris `prefer_main_series`, `include_related` et `include_books`.
 
 ### Exploitation conseillée
 - en `LOG_FORMAT=json`, filtre les événements avec `request_id` pour suivre un appel précis ;

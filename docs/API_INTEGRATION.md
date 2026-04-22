@@ -158,7 +158,12 @@ Paramètres :
 - `mode` : `best` ou `all` ;
 - `limit` : 1 à 50 ;
 - `enrich` : optionnel, sinon fallback sur `SEARCH_DEFAULT_ENRICH` ;
-- `include_editions` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_EDITIONS`.
+- `include_editions` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_EDITIONS` ;
+- `prefer_main_series` : optionnel, sinon fallback sur `SEARCH_DEFAULT_PREFER_MAIN_SERIES` ;
+- `include_related` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_RELATED` ;
+- `include_books` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_BOOKS` ;
+- `media_kinds` : CSV optionnel pour ne garder que certains `media_kind` ;
+- `exclude_media_kinds` : CSV optionnel pour exclure certains `media_kind`.
 
 Exemple :
 
@@ -182,11 +187,15 @@ Résultat typique par item :
 - `translated_title`
 - `source_type` : valeur du champ `Type` sur la fiche Manga-News quand elle est disponible
 - `media_kind` : classification métier (`manga`, `manga_spinoff`, `novel`, `essay`, `cookbook`, `guide`, etc.)
+- `relation_kind` : rattachement métier (`main`, `related_manga`, `spinoff`, `related_book`, `standalone`)
+- `root_series_slug` : slug de l’œuvre mère quand l’API a pu l’identifier depuis les séries liées
 
 Important :
 - `mode=best` retourne **une liste** contenant au mieux un seul item ;
 - `title_vo` et `translated_title` sont enrichis en allant lire la fiche détaillée quand c'est possible ;
 - le ranking ne repose plus sur le seul fuzzy score : la route priorise les mangas principaux avant les romans, essais, guides, artbooks ou livres dérivés quand la requête cible une licence nue ;
+- tu peux forcer un comportement plus strict avec `include_books=false` et/ou `media_kinds=manga,manga_spinoff` ;
+- `include_related=false` retire les spin-offs et autres résultats liés quand ils sont correctement reconnus ;
 - les fiches source de recherche sont mises en cache indépendamment du rendu final, donc changer `mode` ou `limit` sur une même requête ne force pas forcément un nouveau fetch upstream ;
 - si l'enrichissement échoue, le résultat principal reste retourné.
 
@@ -200,6 +209,7 @@ Paramètres :
 - `q`
 - `kind`
 - `limit`
+- mêmes filtres métier que `/search` : `enrich`, `include_editions`, `prefer_main_series`, `include_related`, `include_books`, `media_kinds`, `exclude_media_kinds`
 
 Exemple :
 
@@ -519,5 +529,5 @@ Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un c
 
 Quand ils sont omis, les endpoints utilisent les valeurs de configuration serveur :
 
-- `/search` et `/search/resolve` : `enrich` ← `SEARCH_DEFAULT_ENRICH`, `include_editions` ← `SEARCH_DEFAULT_INCLUDE_EDITIONS` ;
+- `/search` et `/search/resolve` : `enrich` ← `SEARCH_DEFAULT_ENRICH`, `include_editions` ← `SEARCH_DEFAULT_INCLUDE_EDITIONS`, `prefer_main_series` ← `SEARCH_DEFAULT_PREFER_MAIN_SERIES`, `include_related` ← `SEARCH_DEFAULT_INCLUDE_RELATED`, `include_books` ← `SEARCH_DEFAULT_INCLUDE_BOOKS` ;
 - `/volume` : `include_parent_editions` ← `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` ; la valeur d'exploitation recommandée est `false` pour garder la route légère par défaut.

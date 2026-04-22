@@ -80,7 +80,8 @@ flowchart TD
 - cache d'abord les **pages source de recherche** par URL, indépendamment de `mode` et `limit` ;
 - recharge ces pages source en parallèle, dans la limite de `SEARCH_SOURCE_CONCURRENCY` ;
 - déduplique les URLs ;
-- applique un ranking métier avant et après enrichissement : match exact titre/slug, priorité série vs volume selon la requête, puis priorité `media_kind` pour faire remonter les mangas principaux avant les romans/essais/livres dérivés ;
+- applique un ranking métier avant et après enrichissement : match exact titre/slug, priorité série vs volume selon la requête, priorité `relation_kind` / `root_series_slug` quand `prefer_main_series=true`, puis priorité `media_kind` pour faire remonter les mangas principaux avant les romans/essais/livres dérivés ;
+- peut aussi filtrer explicitement les résultats avec `include_related`, `include_books`, `media_kinds` et `exclude_media_kinds` ;
 - enrichit ensuite les résultats retenus en mutualisant les fiches série / volume identiques, dans la limite de `SEARCH_ENRICHMENT_CONCURRENCY`.
 
 ### `/search/resolve`
@@ -108,8 +109,10 @@ C'est utile pour :
 - `translated_title`
 - `source_type`
 - `media_kind`
+- `relation_kind`
+- `root_series_slug`
 
-Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit. `source_type` reflète le `Type` Manga-News. `media_kind` est une classification métier calculée par l'API pour distinguer manga principal, spin-off, roman, essai, guide, artbook, cookbook, etc.
+Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit. `source_type` reflète le `Type` Manga-News. `media_kind` est une classification métier calculée par l'API pour distinguer manga principal, spin-off, roman, essai, guide, artbook, cookbook, etc. `relation_kind` et `root_series_slug` servent à rattacher un résultat à une œuvre mère détectée via les séries liées.
 
 ### Normalisation volume
 Les parseurs produisent des champs standardisés pour les volumes :

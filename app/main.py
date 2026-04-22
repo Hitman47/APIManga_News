@@ -87,7 +87,8 @@ Points importants :
 - authentification optionnelle via `Authorization: Bearer <API_TOKEN>` si `API_TOKEN` est défini ;
 - `ETag` / `If-None-Match` disponibles sur les réponses enveloppées ;
 - `X-Request-Id` renvoyé sur toutes les réponses pour corréler les logs ;
-- les réponses de recherche et de résolution peuvent être enrichies avec `title_vo`, `translated_title`, et, quand l'information existe, les compteurs `vf` / `vo` issus de la fiche série parente ;
+- les réponses de recherche et de résolution peuvent être enrichies avec `title_vo`, `translated_title`, `source_type`, `media_kind`, `relation_kind`, `root_series_slug` et, quand l'information existe, les compteurs `vf` / `vo` issus de la fiche série parente ;
+- `/search` et `/search/resolve` exposent aussi des filtres métier (`prefer_main_series`, `include_related`, `include_books`, `media_kinds`, `exclude_media_kinds`) pour piloter explicitement le ranking et l'inclusion des œuvres liées ;
 - les réponses volume restent légères par défaut et n'hydratent `vf` / `vo` que si `include_parent_editions=true` ou si la configuration serveur l'active explicitement ;
 - une route technique `/health/runtime` expose les métriques agrégées, les derniers événements de perf et l'état du cache local.
 
@@ -125,6 +126,10 @@ SEARCH_RESPONSE_EXAMPLE = {
             'is_one_shot': False,
             'title_vo': 'Dogs: Bullets & Carnage',
             'translated_title': 'Dogs: Bullets & Carnage',
+            'source_type': 'Seinen',
+            'media_kind': 'manga',
+            'root_series_slug': 'Dogs:-Bullets-Carnage',
+            'relation_kind': 'main',
             'vf': {'volumes': 9, 'status': 'En cours'},
             'vo': {'volumes': 10, 'status': 'En pause'},
         }
@@ -162,6 +167,10 @@ RESOLVE_RESPONSE_EXAMPLE = {
             'is_one_shot': None,
             'title_vo': 'ワンピース',
             'translated_title': 'One Piece',
+            'source_type': 'Shonen',
+            'media_kind': 'manga',
+            'root_series_slug': 'One-piece-Edition-originale',
+            'relation_kind': 'main',
             'vf': {'volumes': 112, 'status': 'En cours'},
             'vo': {'volumes': 114, 'status': 'En cours'},
         },
@@ -394,6 +403,9 @@ async def health_runtime(
         'defaults': {
             'search_default_enrich': settings.search_default_enrich,
             'search_default_include_editions': settings.search_default_include_editions,
+            'search_default_prefer_main_series': settings.search_default_prefer_main_series,
+            'search_default_include_related': settings.search_default_include_related,
+            'search_default_include_books': settings.search_default_include_books,
             'volume_default_include_parent_editions': settings.volume_default_include_parent_editions,
             'search_source_concurrency': settings.search_source_concurrency,
             'search_enrichment_concurrency': settings.search_enrichment_concurrency,
@@ -417,9 +429,10 @@ async def health_runtime(
     summary='Search Manga-News public pages',
     description=(
         'Recherche des séries et/ou volumes à partir d’une requête libre. '
-        'Les résultats sont scorés après normalisation du texte. Quand `enrich` et `include_editions` sont absents, '
-        'la route applique respectivement `SEARCH_DEFAULT_ENRICH` et `SEARCH_DEFAULT_INCLUDE_EDITIONS`. '
-        "L'enrichissement peut ajouter `title_vo`, `translated_title` et, quand la série parente est accessible, les compteurs `vf` / `vo`."
+        'Les résultats sont scorés puis reclassés avec une logique métier qui sait distinguer mangas principaux, spin-offs et livres dérivés. '
+        'Quand `enrich`, `include_editions`, `prefer_main_series`, `include_related` ou `include_books` sont absents, '
+        'la route applique les defaults serveur correspondants. '
+        "L'enrichissement peut ajouter `title_vo`, `translated_title`, `source_type`, `media_kind`, `root_series_slug`, `relation_kind` et, quand la série parente est accessible, les compteurs `vf` / `vo`."
     ),
     responses={200: {'description': 'Search results envelope.', 'content': {'application/json': {'example': SEARCH_RESPONSE_EXAMPLE}}}},
 )
@@ -431,6 +444,11 @@ async def search(
     limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de résultats renvoyés.'),
     enrich: bool | None = Query(default=None, description='`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.'),
     include_editions: bool | None = Query(default=None, description='`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.'),
+    prefer_main_series: bool | None = Query(default=None, description='`true` pour favoriser l’œuvre mère et les mangas principaux ; `null` applique `SEARCH_DEFAULT_PREFER_MAIN_SERIES`.'),
+    include_related: bool | None = Query(default=None, description='`false` pour retirer les spin-offs et livres liés quand ils sont reconnus ; `null` applique `SEARCH_DEFAULT_INCLUDE_RELATED`.'),
+    include_books: bool | None = Query(default=None, description='`false` pour exclure romans, essais, guides, cookbooks et autres livres dérivés ; `null` applique `SEARCH_DEFAULT_INCLUDE_BOOKS`.'),
+    media_kinds: str | None = Query(default=None, description='CSV optionnel pour ne garder que certains `media_kind`, par exemple `manga,manga_spinoff`.'),
+    exclude_media_kinds: str | None = Query(default=None, description='CSV optionnel pour exclure certains `media_kind`, par exemple `novel,essay,cookbook`.'),
     service: MangaNewsService = Depends(get_service),
 ):
     payload = await service.search(
@@ -440,6 +458,11 @@ async def search(
         limit=limit,
         enrich=enrich,
         include_editions=include_editions,
+        prefer_main_series=prefer_main_series,
+        include_related=include_related,
+        include_books=include_books,
+        media_kinds=media_kinds,
+        exclude_media_kinds=exclude_media_kinds,
     )
     return _build_envelope_response(payload.model_dump(), request)
 
@@ -450,7 +473,7 @@ async def search(
     response_model=ResolveResponse,
     tags=['Search'],
     summary='Resolve the best search candidate',
-    description='Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`. Les flags `enrich` et `include_editions` suivent le même contrat par défaut que `/search`.',
+    description='Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`. Les flags `enrich`, `include_editions`, `prefer_main_series`, `include_related`, `include_books`, `media_kinds` et `exclude_media_kinds` suivent le même contrat que `/search`.',
     responses={200: {'description': 'Resolved best candidate.', 'content': {'application/json': {'example': RESOLVE_RESPONSE_EXAMPLE}}}},
 )
 async def search_resolve(
@@ -460,6 +483,11 @@ async def search_resolve(
     limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de candidats inspectés.'),
     enrich: bool | None = Query(default=None, description='`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.'),
     include_editions: bool | None = Query(default=None, description='`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.'),
+    prefer_main_series: bool | None = Query(default=None, description='`true` pour favoriser l’œuvre mère et les mangas principaux ; `null` applique `SEARCH_DEFAULT_PREFER_MAIN_SERIES`.'),
+    include_related: bool | None = Query(default=None, description='`false` pour retirer les spin-offs et livres liés quand ils sont reconnus ; `null` applique `SEARCH_DEFAULT_INCLUDE_RELATED`.'),
+    include_books: bool | None = Query(default=None, description='`false` pour exclure romans, essais, guides, cookbooks et autres livres dérivés ; `null` applique `SEARCH_DEFAULT_INCLUDE_BOOKS`.'),
+    media_kinds: str | None = Query(default=None, description='CSV optionnel pour ne garder que certains `media_kind`, par exemple `manga,manga_spinoff`.'),
+    exclude_media_kinds: str | None = Query(default=None, description='CSV optionnel pour exclure certains `media_kind`, par exemple `novel,essay,cookbook`.'),
     service: MangaNewsService = Depends(get_service),
 ):
     payload = await service.resolve_search(
@@ -468,6 +496,11 @@ async def search_resolve(
         limit=limit,
         enrich=enrich,
         include_editions=include_editions,
+        prefer_main_series=prefer_main_series,
+        include_related=include_related,
+        include_books=include_books,
+        media_kinds=media_kinds,
+        exclude_media_kinds=exclude_media_kinds,
     )
     return _build_envelope_response(payload.model_dump(), request)
 

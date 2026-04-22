@@ -109,6 +109,11 @@ def test_series_route_forwards_projection_params():
 def test_search_resolve_and_etag_304():
     class DummyService:
         async def resolve_search(self, **kwargs):
+            assert kwargs['prefer_main_series'] is None
+            assert kwargs['include_related'] is None
+            assert kwargs['include_books'] is None
+            assert kwargs['media_kinds'] is None
+            assert kwargs['exclude_media_kinds'] is None
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
@@ -170,6 +175,11 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
 def test_search_endpoint_exposes_alternate_titles():
     class DummyService:
         async def search(self, **kwargs):
+            assert kwargs['prefer_main_series'] is None
+            assert kwargs['include_related'] is None
+            assert kwargs['include_books'] is None
+            assert kwargs['media_kinds'] is None
+            assert kwargs['exclude_media_kinds'] is None
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
@@ -217,6 +227,9 @@ def test_openapi_exposes_search_and_volume_edition_counters():
     volume_data = schemas['VolumeData']['properties']
     assert 'vf' in search_result
     assert 'vo' in search_result
+    assert 'media_kind' in search_result
+    assert 'root_series_slug' in search_result
+    assert 'relation_kind' in search_result
     assert 'vf' in volume_data
     assert 'vo' in volume_data
     assert payload['info']['description']
@@ -232,6 +245,11 @@ def test_search_route_forwards_optional_perf_flags():
         async def search(self, **kwargs):
             assert kwargs['enrich'] is True
             assert kwargs['include_editions'] is False
+            assert kwargs['prefer_main_series'] is False
+            assert kwargs['include_related'] is False
+            assert kwargs['include_books'] is False
+            assert kwargs['media_kinds'] == 'manga,manga_spinoff'
+            assert kwargs['exclude_media_kinds'] == 'novel,essay'
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
@@ -249,7 +267,7 @@ def test_search_route_forwards_optional_perf_flags():
 
     with TestClient(app) as client:
         app.state.service = DummyService()
-        response = client.get('/search?q=one%20piece&kind=series&mode=all&enrich=true&include_editions=false')
+        response = client.get('/search?q=one%20piece&kind=series&mode=all&enrich=true&include_editions=false&prefer_main_series=false&include_related=false&include_books=false&media_kinds=manga,manga_spinoff&exclude_media_kinds=novel,essay')
     assert response.status_code == 200
 
 
@@ -298,6 +316,9 @@ def test_health_runtime_endpoint_exposes_metrics_and_defaults():
     assert 'defaults' in payload
     assert 'timings' in payload['metrics']
     assert payload['defaults']['search_default_enrich'] in {True, False}
+    assert payload['defaults']['search_default_prefer_main_series'] in {True, False}
+    assert payload['defaults']['search_default_include_related'] in {True, False}
+    assert payload['defaults']['search_default_include_books'] in {True, False}
     assert response.headers['X-Request-Id']
 
 
@@ -307,6 +328,11 @@ def test_search_route_preserves_none_when_optional_flags_omitted():
         async def search(self, **kwargs):
             assert kwargs['enrich'] is None
             assert kwargs['include_editions'] is None
+            assert kwargs['prefer_main_series'] is None
+            assert kwargs['include_related'] is None
+            assert kwargs['include_books'] is None
+            assert kwargs['media_kinds'] is None
+            assert kwargs['exclude_media_kinds'] is None
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,

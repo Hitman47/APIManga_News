@@ -1,4 +1,4 @@
-from app.utils import infer_media_kind, normalize_text, parse_french_date, project_dict_fields, score_match, search_result_sort_key
+from app.utils import infer_media_kind, infer_relation_kind, infer_root_series_slug, media_kind_matches, normalize_text, parse_french_date, project_dict_fields, score_match, search_result_sort_key
 
 
 def test_normalize_text_handles_accents_and_noise():
@@ -81,3 +81,29 @@ def test_search_result_sort_key_prioritizes_main_manga_over_books():
     assert ranked[0]['slug'] == 'Naruto'
     assert ranked[1]['slug'] == 'Naruto-Roman'
     assert ranked[2]['slug'] == 'Philosophie-de-Naruto-la'
+
+
+
+def test_infer_relation_kind_and_root_series_slug_for_spinoff():
+    related = [{'title': 'Naruto', 'url': 'https://www.manga-news.com/index.php/serie/Naruto'}]
+    relation_kind = infer_relation_kind(
+        title='Boruto - Naruto Next Generations (2016)',
+        slug='Boruto-Naruto-Next-Generations',
+        media_kind='manga_spinoff',
+        related_series_titles=[item['title'] for item in related],
+        query='naruto',
+    )
+    assert relation_kind == 'spinoff'
+    assert infer_root_series_slug(
+        slug='Boruto-Naruto-Next-Generations',
+        relation_kind=relation_kind,
+        related_series=related,
+        query='naruto',
+    ) == 'Naruto'
+
+
+def test_media_kind_matches_supports_books_and_explicit_filters():
+    assert media_kind_matches('manga', include_books=False) is True
+    assert media_kind_matches('novel', include_books=False) is False
+    assert media_kind_matches('manga_spinoff', include_books=True, allowed_media_kinds={'manga', 'manga_spinoff'}) is True
+    assert media_kind_matches('essay', include_books=True, excluded_media_kinds={'essay'}) is False
