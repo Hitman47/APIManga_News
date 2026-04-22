@@ -27,15 +27,16 @@ flowchart LR
    - calcule une clé de cache stable ;
    - consulte le cache positif ;
    - consulte le negative cache si activé ;
+   - mutualise les fetchs concurrents identiques via un mécanisme local de type single-flight ;
    - fetch l'upstream si nécessaire ;
    - parse la réponse ;
    - construit l'enveloppe finale.
 
 3. **Cache SQLite**
    - stocke les réponses positives ;
-   - stocke aussi le HTML brut des pages série / volume pour éviter de retélécharger la même page quand plusieurs parseurs internes en ont besoin ;
    - stocke aussi les erreurs négatives courtes (`negative_cache_entries`) ;
-   - garde une fenêtre stale pour servir une ancienne réponse si l'upstream échoue.
+   - garde une fenêtre stale pour servir une ancienne réponse si l'upstream échoue ;
+   - réutilise une connexion SQLite persistante avec `journal_mode=WAL`, `synchronous=NORMAL` et `busy_timeout`.
 
 4. **Fetcher HTTP**
    - envoie les requêtes vers Manga News ;
@@ -69,12 +70,11 @@ flowchart TD
 
 ### `/search`
 - interroge plusieurs pages de recherche Manga News selon `kind` ;
+- cache d'abord les **pages source de recherche** par URL, indépendamment de `mode` et `limit` ;
+- recharge ces pages source en parallèle, dans la limite de `SEARCH_SOURCE_CONCURRENCY` ;
 - déduplique les URLs ;
 - trie par score ;
-- hydrate par défaut les compteurs `vf` / `vo` via un cache léger `series-search-meta` branché sur le HTML brut de la fiche série parente quand elle est nécessaire ;
-- peut ensuite enrichir davantage les résultats retenus, mais uniquement si `enrich=true` est demandé ;
-- pour les résultats `volume`, l'enrichissement détaillé passe maintenant par un cache léger `volume-search-meta` au lieu d'un parse volume complet, tant qu'on ne demande pas la fiche volume détaillée ;
-- déduplique les lectures détaillées par `series_slug` / `volume_slug` avant de lancer l'enrichissement.
+- enrichit ensuite les résultats retenus en mutualisant les fiches série / volume identiques, dans la limite de `SEARCH_ENRICHMENT_CONCURRENCY`.
 
 ### `/search/resolve`
 - s'appuie sur `/search` ;
@@ -100,7 +100,7 @@ C'est utile pour :
 - `title_vo`
 - `translated_title`
 
-Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches par défaut tant que `include_editions=true`. `enrich=true` n'est plus nécessaire pour les seuls compteurs.
+Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit.
 
 ### Normalisation volume
 Les parseurs produisent des champs standardisés pour les volumes :
@@ -131,31 +131,19 @@ Debug HTML saved to /tmp/manga-news-debug-html/...
 
 Présent dans la config ou dans des modules, mais non exposé comme contrat public aujourd'hui :
 - admin API publique ;
-- rate limiting branché aux routes ;
-- format de logs JSON activé depuis la config runtime ;
-- retries/backoff pilotés par les variables `REQUEST_MAX_RETRIES` / `REQUEST_BACKOFF_SECONDS`.
+- rate limiting branché aux routes.
 
-Le documente comme tel est plus honnête que de faire semblant que tout est déjà actif.
+Les variables suivantes sont maintenant **actives** dans le runtime :
+- `LOG_FORMAT`
+- `REQUEST_MAX_RETRIES`
+- `REQUEST_BACKOFF_SECONDS`
+- `SEARCH_SOURCE_CONCURRENCY`
+- `SEARCH_ENRICHMENT_CONCURRENCY`
 
 ## Enrichissement des recherches
 
 Pour certains résultats `/search`, le service relit une fiche détaillée avant de répondre :
 - résultat `series` -> relit la fiche série pour injecter `title_vo`, `translated_title`, `vf`, `vo` ;
-- résultat `volume` -> relit la fiche volume pour injecter les champs normalisés du volume, puis réutilise une lecture série dédupliquée pour injecter `vf` / `vo`.
-- toutes ces lectures sont bornées par sémaphore pour éviter un emballement de concurrence.
+- résultat `volume` -> relit la fiche volume pour injecter les champs normalisés du volume, puis relit la fiche série parente pour injecter `vf` / `vo`.
 
 Ce comportement rend les réponses plus utiles, mais explique aussi pourquoi une recherche peut déclencher plusieurs fetchs amont lors d'un cache froid.
-
-
-## Optimisations runtime ajoutées
-
-- cache mémoire L1 au-dessus de SQLite ;
-- SQLite en mode WAL avec connexion persistante et `busy_timeout` ;
-- cache HTML brut des pages série / volume, réutilisable entre plusieurs parseurs ;
-- cache léger `series-search-meta` pour les chemins qui ont seulement besoin des titres alternatifs et des compteurs `vf` / `vo` ;
-- cache léger `volume-search-meta` pour les enrichissements volume de `/search` et `/search/resolve` ;
-- cache source dédié pour les candidats de recherche, réutilisé entre plusieurs variantes de `/search` et `/search/resolve` ;
-- cache source dédié pour les flux et pages news, réutilisé entre plusieurs variantes de `limit` ;
-- cache séparé des blocs d'éditions série `vf` / `vo`, ensuite recomposés pour `/series/{slug}/editions` ;
-- mutualisation single-flight des fetchs concurrents vers une même clé de cache ;
-- logs `search_source_perf`, `search_perf`, `volume_perf` et `series_editions_perf` pour rendre visibles les coûts de chaque opération.

@@ -59,6 +59,7 @@ Toutes les routes métier sauf `/health` renvoient une enveloppe standard :
 ### Sens des champs importants
 - `found=false` : la route a répondu correctement mais sans ressource exploitable ;
 - `cached=true` : la réponse vient du cache SQLite ;
+- le calcul interne peut aussi réutiliser des caches source de recherche et des enrichissements mutualisés, même quand l'enveloppe finale courante n'était pas encore en cache ;
 - `partial=true` : la réponse provient d'un cache stale utilisé après échec upstream ;
 - `warnings` : message explicatif, généralement lié à `partial=true` ;
 - `fingerprint` : hash métier stable servant d'ETag ;
@@ -160,9 +161,8 @@ Résultat typique par item :
 
 Important :
 - `mode=best` retourne **une liste** contenant au mieux un seul item ;
-- par défaut, la recherche ne lit que la page de recherche ;
-- `include_editions=true` (par défaut) hydrate les compteurs `vf` / `vo` via la fiche série parente ;
-- `enrich=true` déclenche en plus la relecture des fiches détaillées utiles pour récupérer `title_vo`, `translated_title` et la normalisation volume ;
+- `title_vo` et `translated_title` sont enrichis en allant lire la fiche détaillée quand c'est possible ;
+- les fiches source de recherche sont mises en cache indépendamment du rendu final, donc changer `mode` ou `limit` sur une même requête ne force pas forcément un nouveau fetch upstream ;
 - si l'enrichissement échoue, le résultat principal reste retourné.
 
 ---
@@ -311,7 +311,7 @@ Chaque item d'édition expose notamment :
 ### 6.10 `GET /volume/{series_slug}/{volume_slug}`
 ### 6.11 `GET /volume/by-url`
 
-Usage : fiche détaillée d'un volume. Par défaut, seule la fiche volume est lue. `include_parent_editions=true` ou une projection explicite sur `vf` / `vo` déclenche la lecture de la série parente.
+Usage : fiche détaillée d'un volume.
 
 Paramètres communs :
 - `blocks`
@@ -483,16 +483,9 @@ Tu peux donner ces règles à un agent consommateur :
 
 - Le parsing dépend du HTML public de Manga News.
 - Certaines variables de config existent sans être branchées au runtime public actuel.
-- Les recherches gardent par défaut les compteurs `vf` / `vo` ; activer `enrich=true` seulement quand les titres alternatifs ou la normalisation volume sont réellement utiles, et passer `include_editions=false` seulement si la latence prime même sur les compteurs.
-- Les enrichissements sont désormais dédupliqués et exécutés avec une concurrence bornée.
+- Les recherches enrichissent les titres alternatifs via des lectures de fiches détaillées ; c'est plus riche, mais aussi plus coûteux qu'un simple scraping de page de recherche.
 
 
 ## Note de cache importante
 
-Les réponses `series`, `volume`, `search`, `search/resolve` et `series/{slug}/editions` dépendent d'un cache SQLite local. Le runtime ajoute maintenant un cache mémoire L1, SQLite WAL, un `busy_timeout`, une déduplication single-flight pour éviter les fetchs et accès disque redondants, un cache source dédié pour les candidats de recherche, puis un cache séparé pour les blocs d'éditions série `vf` / `vo`. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
-
-
-- `enrich=true` sur `/search` et `/search/resolve` doit rester un choix explicite : c'est utile, mais plus coûteux qu'une recherche brute, même si les enrichissements volume passent désormais par un chemin léger dédié.
-- `include_editions=false` coupe aussi l’hydratation des compteurs `vf` / `vo` et reste donc le chemin le plus rapide possible quand ces compteurs sont inutiles.
-- `include_parent_editions=true` sur les fiches volume doit rester opt-in.
-- changer uniquement `limit` sur `/news/global`, `/news/series/...` ou `/news/volume/...` ne force plus un refetch upstream tant que la source news reste chaude en cache.
+Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.

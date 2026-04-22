@@ -30,22 +30,30 @@ Fonctions utiles déjà en place :
 - recherche série / volume ;
 - résolution du meilleur match ;
 - fiches détaillées série et volume ;
-- titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées ;
-- les recherches hydratent par défaut les compteurs `vf` / `vo` via la fiche série parente ; `enrich=true` reste optionnel et ajoute surtout les titres alternatifs et la normalisation volume ;
-- compteurs d'éditions `vf` / `vo` sur les fiches série, et sur les fiches volume uniquement quand `include_parent_editions=true` ou qu'une projection demande explicitement `vf` / `vo` ;
+- titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées **et** dans les résultats de recherche quand l'enrichissement réussit ;
+- compteurs d'éditions `vf` / `vo` sur les fiches série, sur les fiches volume enrichies depuis la série parente, et dans les résultats de recherche enrichis ;
 - normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning, les éditions de série, et les résultats de recherche enrichis ;
 - projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
-- cache SQLite persistant avec stale cache, negative cache, cache mémoire L1 et SQLite WAL ;
-- cache HTML brut des pages série / volume pour réutiliser un même téléchargement entre plusieurs parseurs métier sans refetch réseau ;
-- cache source dédié pour les pages de recherche, afin de réutiliser les mêmes candidats entre `mode=best`, `mode=all`, `enrich=true`, `enrich=false`, `include_editions=true` et `include_editions=false` ;
-- cache léger `series-search-meta` pour les besoins de recherche (`title`, `title_vo`, `translated_title`, `vf`, `vo`) sans repasser systématiquement par le parseur série complet ;
-- cache léger `volume-search-meta` pour enrichir les résultats de recherche volume (`number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`, `title_vo`, `translated_title`) sans lancer le parseur volume complet ;
-- cache source dédié pour les flux news et pages news, afin de réutiliser la même source entre plusieurs variantes de `limit` sans refetch ni reparsing complet ;
-- déduplication single-flight pour éviter les fetchs amont dupliqués sous charge concurrente ;
-- cache par bloc d'éditions (`vf` / `vo`) pour que `/series/{slug}/editions` réutilise les mêmes fetchs entre `edition=vf`, `edition=vo` et `edition=all` ;
+- cache SQLite persistant avec stale cache, negative cache, connexion réutilisée, mode WAL et `busy_timeout` ;
+- anti-stampede local (`single-flight`) pour éviter plusieurs fetchs identiques en parallèle sur une même clé ;
+- cache source des pages de recherche, réutilisé entre `mode=best` / `mode=all` et entre plusieurs limites pour une même requête ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
 - documentation OpenAPI native via `/docs`, `/redoc`, `/openapi.json` ;
 - exemples JSON versionnés dans `docs/examples/`.
+
+## Points performance déjà actifs
+
+Les optimisations suivantes sont maintenant réellement branchées dans le runtime :
+- retries HTTP et backoff via `REQUEST_MAX_RETRIES` et `REQUEST_BACKOFF_SECONDS` ;
+- logs texte **ou JSON** via `LOG_FORMAT=text|json` ;
+- cache SQLite réutilisant la même connexion, en mode WAL ;
+- déduplication des fetchs concurrents identiques côté service ;
+- enrichissement de recherche mutualisé : une même série parente n'est pas refetchée plusieurs fois dans la même recherche ;
+- pages de recherche source cachées indépendamment du rendu final, pour éviter de relire l'upstream quand seul `mode` ou `limit` change.
+
+Deux variables règlent la concurrence sur les parties les plus coûteuses :
+- `SEARCH_SOURCE_CONCURRENCY`
+- `SEARCH_ENRICHMENT_CONCURRENCY`
 
 ## Ce que l'API ne fait pas
 
@@ -122,11 +130,6 @@ curl http://localhost:8017/health
 
 ### Recherche de série
 
-Par défaut, `/search` garde les compteurs `vf` / `vo` mais évite l’enrichissement complet. Ajoute `enrich=true` seulement si tu as besoin des titres alternatifs ou de la normalisation volume. Passe `include_editions=false` si tu veux supprimer aussi l’hydratation des compteurs pour viser la latence minimale.
-
-En interne, les recherches et l'hydratation des compteurs réutilisent maintenant un cache HTML brut + des caches légers de méta série et volume. Le but est simple : garder `vf` / `vo` par défaut et enrichir les volumes utiles sans reparser inutilement une fiche détaillée complète ni refetch la même page juste après un `/search`.
-
-
 ```bash
 curl --get "http://localhost:8017/search" \
   --data-urlencode "q=one piece" \
@@ -137,14 +140,11 @@ curl --get "http://localhost:8017/search" \
 
 ### Résolution directe du meilleur résultat
 
-Même logique : `enrich=true` est utile pour un payload riche, tandis que `include_editions=false` coupe même les compteurs `vf` / `vo` pour le chemin le plus rapide.
-
 ```bash
 curl --get "http://localhost:8017/search/resolve" \
   --data-urlencode "q=one piece tome 91" \
   --data-urlencode "kind=volume" \
-  --data-urlencode "limit=10" \
-  --data-urlencode "enrich=true"
+  --data-urlencode "limit=10"
 ```
 
 ### Fiche série
@@ -155,11 +155,8 @@ curl "http://localhost:8017/series/One-piece-Edition-originale"
 
 ### Fiche volume
 
-Par défaut, la route volume ne relit plus la série parente. Ajoute `include_parent_editions=true` seulement si tu veux `vf` / `vo`.
-
 ```bash
-curl --get "http://localhost:8017/volume/One-Piece/vol-91" \
-  --data-urlencode "include_parent_editions=true"
+curl "http://localhost:8017/volume/One-Piece/vol-91"
 ```
 
 ### Planning VF filtré
@@ -245,13 +242,6 @@ curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
   --data-urlencode "fields=cover_image"
 ```
 
-Exemple si tu veux aussi les compteurs parentaux :
-
-```bash
-curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
-  --data-urlencode "fields=title,vf.volumes,vo.volumes"
-```
-
 ## Exemples JSON fournis
 
 Voir [`docs/examples/README.md`](docs/examples/README.md).
@@ -275,47 +265,24 @@ pytest
 
 ## Notes honnêtes sur l'état actuel
 
-Quelques variables existent dans la config mais restent **partiellement** ou **totalement** inutilisées par les routes publiques actuelles :
+Quelques variables existent dans la config mais **ne pilotent pas encore les routes publiques actuelles** :
 - `ADMIN_TOKEN`
-- `DEFAULT_LIMIT`
-- `RATE_LIMIT_*`
-
-Variables désormais actives côté runtime :
 - `REQUEST_MAX_RETRIES`
 - `REQUEST_BACKOFF_SECONDS`
+- `DEFAULT_LIMIT`
 - `LOG_FORMAT`
-- `SQLITE_BUSY_TIMEOUT_MS`
-- `CACHE_MEMORY_ENTRIES`
-- `SEARCH_FETCH_CONCURRENCY`
-- `SEARCH_ENRICH_CONCURRENCY`
-- `SEARCH_DEFAULT_ENRICH`
-- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`
+- `RATE_LIMIT_*`
+
+Elles sont présentes parce que le projet a déjà préparé ces concepts, mais la doc n'en fait pas des features actives tant qu'elles ne sont pas réellement branchées au runtime.
 
 ## Note importante sur `vf` / `vo`
 
 Les compteurs `vf` / `vo` proviennent en priorité du bloc HTML `#numberblock` des fiches série Manga-News.
-
-Depuis l'optimisation perf :
-- `/search` et `/search/resolve` relisent seulement la fiche série parente pour récupérer `vf` / `vo` tant que `include_editions=true` ; ils ne relisent pas les fiches détaillées volume tant que `enrich=true` n'est pas demandé ;
-- `/volume/...` ne relit plus automatiquement la série parente ; il faut `include_parent_editions=true` ou une projection explicite comme `fields=vf.volumes`.
+Quand un résultat de recherche cible un **volume**, l'API relit aussi la fiche **série parente** pour injecter ces compteurs dans le résultat.
 
 Après un changement de parseur, il faut redémarrer l'API. Les clés de cache métier intègrent désormais une version interne, ce qui évite de relire un ancien payload incompatible après mise à jour.
 
 
 ## Note de cache importante
 
-Les réponses `series`, `volume`, `search`, `search/resolve` et `series/{slug}/editions` dépendent d'un cache SQLite local. Le runtime sépare maintenant le cache des candidats de recherche du cache des réponses finales, ce qui évite de refetch les pages Manga-News quand seul `mode`, `limit` ou `enrich` change. Les blocs d'éditions série `vf` / `vo` sont eux aussi mis en cache individuellement, puis réutilisés pour `edition=all`. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
-
-
-## Réglages performance utiles
-
-Les réglages les plus utiles pour cette version :
-- `REQUEST_MAX_RETRIES` et `REQUEST_BACKOFF_SECONDS` pour contrôler le comportement de retry amont ;
-- `SQLITE_BUSY_TIMEOUT_MS` pour limiter les erreurs SQLite sous concurrence ;
-- `CACHE_MEMORY_ENTRIES` pour activer un cache mémoire L1 au-dessus de SQLite ;
-- `SEARCH_FETCH_CONCURRENCY` pour le parallélisme des pages de recherche ;
-- `SEARCH_ENRICH_CONCURRENCY` pour le parallélisme de l'enrichissement détaillé ;
-- `SEARCH_DEFAULT_ENRICH=false` pour éviter l’enrichissement complet par défaut ;
-- `SEARCH_DEFAULT_INCLUDE_EDITIONS=true` pour conserver par défaut les compteurs `vf` / `vo` dans `/search` et `/search/resolve` ;
-- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` pour éviter le refetch automatique de la série parente sur les fiches volume ;
-- surveiller désormais `search_source_perf`, `search_perf`, `volume_perf` et `series_editions_perf` pour identifier la vraie étape coûteuse.
+Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.

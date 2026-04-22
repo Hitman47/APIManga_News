@@ -15,6 +15,7 @@ import feedparser
 from app.cache import SQLiteCache
 from app.config import Settings
 from app.exceptions import ParseError, ResourceNotFound
+from app.logging_utils import log_event
 from app.http import AsyncFetcher
 from app.models import (
     Envelope,
@@ -33,15 +34,13 @@ from app.manga_news.parsers import (
     parse_search_page,
     parse_series_editions_page,
     parse_series_page,
-    parse_series_search_meta_page,
     parse_volume_page,
-    parse_volume_search_meta_page,
 )
 from app.utils import clean_ws, fingerprint_data, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-04-22-search-meta-rawhtml-1'
+CACHE_SCHEMA_VERSION = '2026-04-22-perf-1'
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
@@ -167,13 +166,8 @@ class MangaNewsService:
         self.fetcher = fetcher
         self.cache = cache
         self.base_url = settings.manga_news_base_url.rstrip('/')
-        self._search_fetch_concurrency = max(1, int(getattr(settings, 'search_fetch_concurrency', 4)))
-        self._search_enrich_concurrency = max(1, int(getattr(settings, 'search_enrich_concurrency', 4)))
-        self._search_default_enrich = bool(getattr(settings, 'search_default_enrich', False))
-        self._search_default_include_editions = bool(getattr(settings, 'search_default_include_editions', True))
-        self._volume_default_include_parent_editions = bool(getattr(settings, 'volume_default_include_parent_editions', False))
+        self._inflight: dict[str, asyncio.Task] = {}
         self._inflight_lock = asyncio.Lock()
-        self._inflight_loads: dict[str, asyncio.Future] = {}
 
     def _negative_cache_exception(self, entry):
         if entry.error_code == ResourceNotFound.code:
@@ -219,6 +213,57 @@ class MangaNewsService:
     def _is_compatible_cache_payload(self, payload: dict[str, Any]) -> bool:
         return payload.get('_schema_version') == CACHE_SCHEMA_VERSION
 
+    def _setting_int(self, name: str, default: int) -> int:
+        try:
+            return max(1, int(getattr(self.settings, name, default)))
+        except (TypeError, ValueError):
+            return max(1, default)
+
+    async def _compute_and_cache_payload(self, *, cache_key: str, ttl_seconds: int, loader, namespace: str | None = None, resource_url: str | None = None):
+        entry = self.cache.get(cache_key)
+        if entry and not self._is_compatible_cache_payload(entry.payload):
+            entry = None
+
+        if getattr(self.settings, 'negative_cache_enabled', True):
+            negative_entry = self.cache.get_negative(cache_key)
+            if negative_entry and negative_entry.is_fresh:
+                raise self._negative_cache_exception(negative_entry)
+
+        try:
+            payload, source_url = await loader()
+            self.cache.clear_negative(cache_key)
+            cached_entry = self.cache.set(
+                cache_key=cache_key,
+                payload={'_schema_version': CACHE_SCHEMA_VERSION, 'data': payload, 'source_url': source_url},
+                ttl_seconds=ttl_seconds,
+                stale_grace_seconds=self.settings.cache_stale_grace_seconds,
+                namespace=namespace,
+                resource_url=source_url or resource_url,
+            )
+            return cached_entry.payload, cached_entry, False, False, []
+        except (ParseError, ResourceNotFound) as exc:
+            if getattr(self.settings, 'negative_cache_enabled', True):
+                self.cache.set_negative(
+                    cache_key=cache_key,
+                    error_code=exc.code,
+                    detail=str(exc),
+                    ttl_seconds=getattr(self.settings, 'negative_cache_ttl_seconds', 120),
+                    namespace=namespace,
+                    resource_url=getattr(exc, 'resource_url', None) or resource_url,
+                    debug_dump_path=getattr(exc, 'debug_dump_path', None),
+                )
+            if entry and entry.is_stale_usable:
+                warning = f'Using stale cached data because the upstream fetch failed: {exc}'
+                logger.warning(warning)
+                return entry.payload, entry, True, True, [warning]
+            raise
+        except Exception as exc:
+            if entry and entry.is_stale_usable:
+                warning = f'Using stale cached data because the upstream fetch failed: {exc}'
+                logger.warning(warning)
+                return entry.payload, entry, True, True, [warning]
+            raise
+
     async def _cached_payload(self, *, cache_key: str, ttl_seconds: int, loader, namespace: str | None = None, resource_url: str | None = None):
         entry = self.cache.get(cache_key)
         if entry and not self._is_compatible_cache_payload(entry.payload):
@@ -226,69 +271,95 @@ class MangaNewsService:
         if entry and entry.is_fresh:
             return entry.payload, entry, True, False, []
 
-        if getattr(self.settings, 'negative_cache_enabled', True):
-            negative_entry = self.cache.get_negative(cache_key)
-            if negative_entry and negative_entry.is_fresh:
-                raise self._negative_cache_exception(negative_entry)
-
-        leader = False
         async with self._inflight_lock:
-            in_flight = self._inflight_loads.get(cache_key)
-            if in_flight is None:
-                in_flight = asyncio.get_running_loop().create_future()
-                self._inflight_loads[cache_key] = in_flight
-                leader = True
-
-        if not leader:
-            return await in_flight
+            task = self._inflight.get(cache_key)
+            created = False
+            if task is None:
+                task = asyncio.create_task(
+                    self._compute_and_cache_payload(
+                        cache_key=cache_key,
+                        ttl_seconds=ttl_seconds,
+                        loader=loader,
+                        namespace=namespace,
+                        resource_url=resource_url,
+                    )
+                )
+                self._inflight[cache_key] = task
+                created = True
 
         try:
-            try:
-                payload, source_url = await loader()
-                self.cache.clear_negative(cache_key)
-                cached_entry = self.cache.set(
-                    cache_key=cache_key,
-                    payload={'_schema_version': CACHE_SCHEMA_VERSION, 'data': payload, 'source_url': source_url},
-                    ttl_seconds=ttl_seconds,
-                    stale_grace_seconds=self.settings.cache_stale_grace_seconds,
-                    namespace=namespace,
-                    resource_url=source_url or resource_url,
-                )
-                result = (cached_entry.payload, cached_entry, False, False, [])
-            except (ParseError, ResourceNotFound) as exc:
-                if getattr(self.settings, 'negative_cache_enabled', True):
-                    self.cache.set_negative(
-                        cache_key=cache_key,
-                        error_code=exc.code,
-                        detail=str(exc),
-                        ttl_seconds=getattr(self.settings, 'negative_cache_ttl_seconds', 120),
-                        namespace=namespace,
-                        resource_url=getattr(exc, 'resource_url', None) or resource_url,
-                        debug_dump_path=getattr(exc, 'debug_dump_path', None),
-                    )
-                if entry and entry.is_stale_usable:
-                    warning = f'Using stale cached data because the upstream fetch failed: {exc}'
-                    logger.warning(warning)
-                    result = (entry.payload, entry, True, True, [warning])
-                else:
-                    raise
-            except Exception as exc:
-                if entry and entry.is_stale_usable:
-                    warning = f'Using stale cached data because the upstream fetch failed: {exc}'
-                    logger.warning(warning)
-                    result = (entry.payload, entry, True, True, [warning])
-                else:
-                    raise
-            in_flight.set_result(result)
-            return result
-        except Exception as exc:
-            in_flight.set_exception(exc)
-            raise
+            return await task
         finally:
-            async with self._inflight_lock:
-                current = self._inflight_loads.get(cache_key)
-                if current is in_flight:
-                    self._inflight_loads.pop(cache_key, None)
+            if created:
+                async with self._inflight_lock:
+                    current = self._inflight.get(cache_key)
+                    if current is task:
+                        self._inflight.pop(cache_key, None)
+
+    def _search_urls(self, query: str, kind: Literal['series', 'volume', 'all']) -> list[str]:
+        search_urls: list[str] = []
+        if kind in {'series', 'all'}:
+            search_urls.extend([
+                f'{self.base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}',
+                f'{self.base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}',
+            ])
+        if kind in {'volume', 'all'}:
+            search_urls.extend([
+                f'{self.base_url}/index.php/recherche/?cat=manga-volume-vf&q={query}',
+                f'{self.base_url}/index.php/recherche/?cat=manga-volume-vo&q={query}',
+            ])
+        return search_urls
+
+    def _search_kind_from_url(self, url: str) -> Literal['series', 'volume']:
+        return 'volume' if 'manga-volume' in url else 'series'
+
+    async def _get_search_source_results(self, *, url: str, query: str) -> list[SearchResult]:
+        cache_key = versioned_cache_key('search-source', url)
+        page_kind = self._search_kind_from_url(url)
+
+        async def loader():
+            result = await self.fetcher.get_text(url)
+            parsed = parse_search_page(
+                html=result.text,
+                page_url=result.url,
+                base_url=self.base_url,
+                query=query,
+                kind=page_kind,
+                score_threshold=0,
+                limit=max(self.settings.max_limit, 1),
+            )
+            return [item.model_dump() for item in parsed], result.url
+
+        payload, *_ = await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_search_seconds,
+            loader=loader,
+            namespace='search-source',
+            resource_url=url,
+        )
+        return [SearchResult.model_validate(item) for item in (payload.get('data', []) or [])]
+
+    async def _get_series_editions_block(self, *, series_slug: str, edition: Literal['vf', 'vo']) -> SeriesEditionsBlock:
+        current_url = f'{self.base_url}/index.php/serie/{"editionsVo" if edition == "vo" else "editions"}/{series_slug}'
+        cache_key = versioned_cache_key('series-editions-block', series_slug, edition)
+
+        async def loader():
+            try:
+                result = await self.fetcher.get_text(current_url)
+                parsed = parse_series_editions_page(result.text, result.url, self.base_url, edition)
+            except ResourceNotFound:
+                parsed = SeriesEditionsBlock(edition=edition, source_url=current_url, total=0, items=[])
+                return parsed.model_dump(), current_url
+            return parsed.model_dump(), result.url
+
+        payload, *_ = await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_series_seconds,
+            loader=loader,
+            namespace='series-editions-block',
+            resource_url=current_url,
+        )
+        return SeriesEditionsBlock.model_validate(payload.get('data', {}) or {})
 
     def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool | None = None) -> Envelope:
         data = payload.get('data')
@@ -309,227 +380,70 @@ class MangaNewsService:
             data=data,
         )
 
-
-    async def _run_with_limit(self, items: list[Any], worker, *, concurrency: int) -> list[Any]:
-        if not items:
+    async def _enrich_search_results(self, results: list[Any]) -> list[SearchResult]:
+        if not results:
             return []
-        semaphore = asyncio.Semaphore(max(1, concurrency))
 
-        async def _runner(item: Any):
-            async with semaphore:
-                return await worker(item)
+        payloads = [item.model_dump() if hasattr(item, 'model_dump') else dict(item) for item in results]
+        series_slugs = {payload.get('slug') for payload in payloads if payload.get('kind') == 'series' and payload.get('slug')}
+        series_slugs.update({payload.get('series_slug') for payload in payloads if payload.get('kind') == 'volume' and payload.get('series_slug')})
+        series_slugs.discard(None)
+        volume_keys = {
+            (payload.get('series_slug'), payload.get('volume_slug'))
+            for payload in payloads
+            if payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug')
+        }
 
-        return await asyncio.gather(*[_runner(item) for item in items])
+        series_data_map: dict[str, dict[str, Any]] = {}
+        volume_data_map: dict[tuple[str, str], dict[str, Any]] = {}
+        semaphore = asyncio.Semaphore(self._setting_int('search_enrichment_concurrency', 4))
 
-    def _projection_requests_parent_editions(self, *, blocks: str | None, fields: str | None) -> bool:
-        requested_blocks = {slugify_block_name(block) for block in _split_csv_param(blocks)}
-        if 'editions' in requested_blocks:
-            return True
-        for path in _split_csv_param(fields):
-            if path == 'vf' or path == 'vo' or path.startswith('vf.') or path.startswith('vo.'):
-                return True
-        return False
-
-    def _log_perf(self, event: str, **fields: Any) -> None:
-        logger.info('%s %s', event, ' '.join(f'{key}={value!r}' for key, value in sorted(fields.items())))
-
-    def _build_search_urls(self, *, query: str, kind: Literal['series', 'volume', 'all']) -> list[str]:
-        search_urls: list[str] = []
-        if kind in {'series', 'all'}:
-            search_urls.extend([
-                f'{self.base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}',
-                f'{self.base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}',
-            ])
-        if kind in {'volume', 'all'}:
-            search_urls.extend([
-                f'{self.base_url}/index.php/recherche/?cat=manga-volume-vf&q={query}',
-                f'{self.base_url}/index.php/recherche/?cat=manga-volume-vo&q={query}',
-            ])
-        return search_urls
-
-    async def _get_search_candidates_payload(self, *, query: str, kind: Literal['series', 'volume', 'all']):
-        search_urls = self._build_search_urls(query=query, kind=kind)
-        raw_limit = max(1, int(self.settings.max_limit))
-        cache_key = versioned_cache_key(
-            'search-source',
-            query,
-            kind,
-            str(raw_limit),
-            str(self.settings.search_score_threshold),
-            *search_urls,
-        )
-
-        async def loader():
-            started = time.perf_counter()
-
-            async def _fetch_search_page(url: str):
-                result = await self.fetcher.get_text(url)
-                parsed = parse_search_page(
-                    html=result.text,
-                    page_url=result.url,
-                    base_url=self.base_url,
-                    query=query,
-                    kind=kind,
-                    score_threshold=self.settings.search_score_threshold,
-                    limit=raw_limit,
-                )
-                return result.url, parsed
-
-            fetched_pages = await self._run_with_limit(
-                search_urls,
-                _fetch_search_page,
-                concurrency=self._search_fetch_concurrency,
-            )
-            aggregated = [item for _, parsed in fetched_pages for item in parsed]
-            deduped: dict[str, object] = {}
-            for item in aggregated:
-                existing = deduped.get(item.url)
-                if existing is None or item.score > existing.score:
-                    deduped[item.url] = item
-            results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)[:raw_limit]
-            duration_ms = round((time.perf_counter() - started) * 1000, 2)
-            self._log_perf(
-                'search_source_perf',
-                query=query,
-                kind=kind,
-                search_pages=len(search_urls),
-                aggregated_hits=len(aggregated),
-                deduped_hits=len(deduped),
-                cached_candidates=len(results),
-                duration_ms=duration_ms,
-            )
-            return [item.model_dump() for item in results], search_urls[0] if search_urls else self.base_url
-
-        return await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_search_seconds,
-            loader=loader,
-            namespace='search-source',
-            resource_url=search_urls[0] if search_urls else self.base_url,
-        )
-
-    async def _fetch_search_series_data_map(self, base_payloads: list[dict[str, Any]], *, include_volume_parents: bool) -> tuple[dict[str, dict[str, Any]], int]:
-        unique_series_slugs = sorted({
-            payload.get('slug') for payload in base_payloads
-            if payload.get('kind') == 'series' and payload.get('slug')
-        } | ({
-            payload.get('series_slug') for payload in base_payloads
-            if payload.get('kind') == 'volume' and payload.get('series_slug')
-        } if include_volume_parents else set()))
-
-        async def _fetch_series(slug: str):
+        async def load_series(slug: str) -> None:
             try:
-                payload, *_ = await self._get_series_search_meta_payload(slug=slug)
-                return slug, payload.get('data', {}) or {}
+                async with semaphore:
+                    series_payload, *_ = await self._get_series_payload(slug=slug)
+                series_data_map[slug] = series_payload.get('data', {}) or {}
             except Exception as exc:  # pragma: no cover - best-effort enrichment
                 logger.debug('Search series enrichment failed for %s: %s', slug, exc)
-                return slug, {}
 
-        series_data_map = {
-            slug: data
-            for slug, data in await self._run_with_limit(
-                unique_series_slugs,
-                _fetch_series,
-                concurrency=self._search_enrich_concurrency,
-            )
-        }
-        return series_data_map, len(unique_series_slugs)
-
-    async def _attach_search_edition_counters(self, results: list[Any]) -> tuple[list[SearchResult], dict[str, int]]:
-        perf = {
-            'input_results': len(results),
-            'unique_series_fetches': 0,
-            'unique_volume_fetches': 0,
-        }
-        if not results:
-            return [], perf
-
-        base_payloads = [item.model_dump() if hasattr(item, 'model_dump') else dict(item) for item in results]
-        series_data_map, perf['unique_series_fetches'] = await self._fetch_search_series_data_map(
-            base_payloads,
-            include_volume_parents=True,
-        )
-
-        enriched: list[SearchResult] = []
-        for payload in base_payloads:
-            current = deepcopy(payload)
-            series_key = current.get('slug') if current.get('kind') == 'series' else current.get('series_slug')
-            if series_key:
-                series_data = series_data_map.get(series_key, {})
-                current['vf'] = series_data.get('vf')
-                current['vo'] = series_data.get('vo')
-            enriched.append(SearchResult.model_validate(current))
-        return enriched, perf
-
-    async def _enrich_search_results(self, results: list[Any], *, include_editions: bool) -> tuple[list[SearchResult], dict[str, int]]:
-        perf = {
-            'input_results': len(results),
-            'unique_series_fetches': 0,
-            'unique_volume_fetches': 0,
-        }
-        if not results:
-            return [], perf
-
-        base_payloads = [item.model_dump() if hasattr(item, 'model_dump') else dict(item) for item in results]
-        series_data_map, perf['unique_series_fetches'] = await self._fetch_search_series_data_map(
-            base_payloads,
-            include_volume_parents=include_editions,
-        )
-
-        unique_volume_keys = sorted({
-            (payload.get('series_slug'), payload.get('volume_slug'))
-            for payload in base_payloads
-            if payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug')
-        })
-        perf['unique_volume_fetches'] = len(unique_volume_keys)
-
-        async def _fetch_volume(key: tuple[str, str]):
-            series_slug, volume_slug = key
+        async def load_volume(series_slug: str, volume_slug: str) -> None:
             try:
-                payload, *_ = await self._get_volume_search_meta_payload(series_slug=series_slug, volume_slug=volume_slug)
-                return key, payload.get('data', {}) or {}
+                async with semaphore:
+                    volume_payload, *_ = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug)
+                volume_data_map[(series_slug, volume_slug)] = volume_payload.get('data', {}) or {}
             except Exception as exc:  # pragma: no cover - best-effort enrichment
                 logger.debug('Search volume enrichment failed for %s/%s: %s', series_slug, volume_slug, exc)
-                return key, {}
 
-        volume_data_map = {
-            key: data
-            for key, data in await self._run_with_limit(
-                unique_volume_keys,
-                _fetch_volume,
-                concurrency=self._search_enrich_concurrency,
-            )
-        }
+        tasks = [load_series(slug) for slug in sorted(series_slugs)]
+        tasks.extend(load_volume(series_slug, volume_slug) for series_slug, volume_slug in sorted(volume_keys))
+        if tasks:
+            await asyncio.gather(*tasks)
 
         enriched: list[SearchResult] = []
-        for payload in base_payloads:
-            current = deepcopy(payload)
-            if current.get('kind') == 'series' and current.get('slug'):
-                series_data = series_data_map.get(current['slug'], {})
-                current['title_vo'] = series_data.get('title_vo')
-                current['translated_title'] = series_data.get('translated_title')
-                if include_editions:
-                    current['vf'] = series_data.get('vf')
-                    current['vo'] = series_data.get('vo')
-            elif current.get('kind') == 'volume' and current.get('series_slug') and current.get('volume_slug'):
-                key = (current['series_slug'], current['volume_slug'])
-                volume_data = volume_data_map.get(key, {})
-                current['title_vo'] = volume_data.get('title_vo')
-                current['translated_title'] = volume_data.get('translated_title')
-                current['number'] = volume_data.get('number')
-                current['number_int'] = volume_data.get('number_int')
-                current['edition_label'] = volume_data.get('edition_label')
-                current['is_special'] = volume_data.get('is_special')
-                current['is_one_shot'] = volume_data.get('is_one_shot')
-                if include_editions:
-                    series_data = series_data_map.get(current['series_slug'], {})
-                    current['vf'] = series_data.get('vf')
-                    current['vo'] = series_data.get('vo')
-            enriched.append(SearchResult.model_validate(current))
-        return enriched, perf
+        for payload in payloads:
+            if payload.get('kind') == 'series' and payload.get('slug'):
+                series_data = series_data_map.get(payload['slug'], {})
+                payload['title_vo'] = series_data.get('title_vo')
+                payload['translated_title'] = series_data.get('translated_title')
+                payload['vf'] = series_data.get('vf')
+                payload['vo'] = series_data.get('vo')
+            elif payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug'):
+                volume_data = volume_data_map.get((payload['series_slug'], payload['volume_slug']), {})
+                payload['title_vo'] = volume_data.get('title_vo')
+                payload['translated_title'] = volume_data.get('translated_title')
+                payload['number'] = volume_data.get('number')
+                payload['number_int'] = volume_data.get('number_int')
+                payload['edition_label'] = volume_data.get('edition_label')
+                payload['is_special'] = volume_data.get('is_special')
+                payload['is_one_shot'] = volume_data.get('is_one_shot')
+                series_data = series_data_map.get(payload['series_slug'], {})
+                payload['vf'] = series_data.get('vf')
+                payload['vo'] = series_data.get('vo')
+            enriched.append(SearchResult.model_validate(payload))
+        return enriched
 
-    async def resolve_search(self, query: str, kind: Literal['series', 'volume', 'all'], limit: int, enrich: bool | None = None, include_editions: bool | None = None) -> Envelope:
-        search_response = await self.search(query=query, kind=kind, mode='all', limit=limit, enrich=enrich, include_editions=include_editions)
+    async def resolve_search(self, query: str, kind: Literal['series', 'volume', 'all'], limit: int) -> Envelope:
+        search_response = await self.search(query=query, kind=kind, mode='all', limit=limit)
         candidates = [ResolveResult.model_validate(item) for item in (search_response.data or [])]
         best = candidates[0] if candidates else None
         if not best:
@@ -562,62 +476,49 @@ class MangaNewsService:
             data=data.model_dump(),
         )
 
-    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int, enrich: bool | None = None, include_editions: bool | None = None) -> Envelope:
+    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> Envelope:
         query = clean_ws(query)
         if not query:
             raise ParseError('The search query cannot be empty.')
-        enrich = self._search_default_enrich if enrich is None else enrich
-        include_editions = self._search_default_include_editions if include_editions is None else include_editions
-        search_urls = self._build_search_urls(query=query, kind=kind)
-        cache_key = versioned_cache_key(
-            'search',
-            query,
-            kind,
-            mode,
-            str(limit),
-            str(bool(enrich)),
-            str(bool(include_editions)),
-            str(self.settings.max_limit),
-            str(self.settings.search_score_threshold),
-        )
+        search_urls = self._search_urls(query, kind)
+        cache_key = versioned_cache_key('search', query, kind, mode, str(limit), *search_urls)
 
         async def loader():
             started = time.perf_counter()
-            source_payload, *_ = await self._get_search_candidates_payload(query=query, kind=kind)
-            source_results = [
-                SearchResult.model_validate(item)
-                for item in (source_payload.get('data', []) or [])
-            ]
-            results: list[SearchResult] = source_results
+            semaphore = asyncio.Semaphore(self._setting_int('search_source_concurrency', 4))
+
+            async def load_source(url: str) -> list[SearchResult]:
+                async with semaphore:
+                    return await self._get_search_source_results(url=url, query=query)
+
+            aggregated_lists = await asyncio.gather(*(load_source(url) for url in search_urls))
+            aggregated = [item for batch in aggregated_lists for item in batch if item.score >= self.settings.search_score_threshold]
+            deduped: dict[str, SearchResult] = {}
+            for item in aggregated:
+                existing = deduped.get(item.url)
+                if existing is None or item.score > existing.score:
+                    deduped[item.url] = item
+            results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)
             if mode == 'best' and results:
                 results = [results[0]]
             results = results[:limit]
-            enrichment_perf = {'input_results': len(results), 'unique_series_fetches': 0, 'unique_volume_fetches': 0}
-            final_results: list[SearchResult]
-            if enrich:
-                final_results, enrichment_perf = await self._enrich_search_results(results, include_editions=include_editions)
-            elif include_editions:
-                final_results, enrichment_perf = await self._attach_search_edition_counters(results)
-            else:
-                final_results = [
-                    SearchResult.model_validate(item.model_dump() if hasattr(item, 'model_dump') else dict(item))
-                    for item in results
-                ]
+            enriched = await self._enrich_search_results(results)
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
-            self._log_perf(
+            log_event(
+                logger,
+                logging.INFO,
                 'search_perf',
+                json_mode=getattr(self.settings, 'log_format', 'text') == 'json',
                 query=query,
                 kind=kind,
                 mode=mode,
-                enrich=enrich,
-                include_editions=include_editions,
-                source_candidates=len(source_results),
-                returned_hits=len(final_results),
-                unique_series_fetches=enrichment_perf['unique_series_fetches'],
-                unique_volume_fetches=enrichment_perf['unique_volume_fetches'],
+                limit=limit,
+                search_urls=len(search_urls),
+                candidates_before_limit=len(deduped),
+                candidates_after_limit=len(enriched),
                 duration_ms=duration_ms,
             )
-            return [item.model_dump() for item in final_results], search_urls[0] if search_urls else self.base_url
+            return [item.model_dump() for item in enriched], search_urls[0] if search_urls else self.base_url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
@@ -647,24 +548,18 @@ class MangaNewsService:
         cache_key = versioned_cache_key('series', target_url)
 
         async def loader():
-            html_payload, *_ = await self._get_raw_html_payload(
-                target_url=target_url,
-                ttl_seconds=self.settings.cache_ttl_series_seconds,
-                resource_kind='series',
-            )
-            html = html_payload.get('data', {}).get('html', '')
-            source_url = html_payload.get('source_url') or target_url
+            result = await self.fetcher.get_text(target_url)
             try:
-                parsed = parse_series_page(html, source_url)
+                parsed = parse_series_page(result.text, result.url)
             except ParseError as exc:
                 raise self._with_debug_dump(
                     error=exc,
-                    html=html,
-                    source_url=source_url,
+                    html=result.text,
+                    source_url=result.url,
                     cache_key=cache_key,
                     resource_kind='series',
                 ) from exc
-            return parsed.model_dump(), source_url
+            return parsed.model_dump(), result.url
 
         return await self._cached_payload(
             cache_key=cache_key,
@@ -674,114 +569,29 @@ class MangaNewsService:
             resource_url=target_url,
         )
 
-    async def _get_series_search_meta_payload(self, *, slug: str | None = None, url: str | None = None):
-        target_url = self._resolve_series_url(slug=slug, url=url)
-        cache_key = versioned_cache_key('series-search-meta', target_url)
-
-        async def loader():
-            html_payload, *_ = await self._get_raw_html_payload(
-                target_url=target_url,
-                ttl_seconds=self.settings.cache_ttl_series_seconds,
-                resource_kind='series',
-            )
-            html = html_payload.get('data', {}).get('html', '')
-            source_url = html_payload.get('source_url') or target_url
-            try:
-                parsed = parse_series_search_meta_page(html, source_url)
-            except ParseError as exc:
-                raise self._with_debug_dump(
-                    error=exc,
-                    html=html,
-                    source_url=source_url,
-                    cache_key=cache_key,
-                    resource_kind='series-search-meta',
-                ) from exc
-            return parsed.model_dump(), source_url
-
-        return await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_series_seconds,
-            loader=loader,
-            namespace='series-search-meta',
-            resource_url=target_url,
-        )
-
     async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
         cache_key = versioned_cache_key('volume', target_url)
 
         async def loader():
-            html_payload, *_ = await self._get_raw_html_payload(
-                target_url=target_url,
-                ttl_seconds=self.settings.cache_ttl_volume_seconds,
-                resource_kind='volume',
-            )
-            html = html_payload.get('data', {}).get('html', '')
-            source_url = html_payload.get('source_url') or target_url
+            result = await self.fetcher.get_text(target_url)
             try:
-                parsed = parse_volume_page(html, source_url)
+                parsed = parse_volume_page(result.text, result.url)
             except ParseError as exc:
                 raise self._with_debug_dump(
                     error=exc,
-                    html=html,
-                    source_url=source_url,
+                    html=result.text,
+                    source_url=result.url,
                     cache_key=cache_key,
                     resource_kind='volume',
                 ) from exc
-            return parsed.model_dump(), source_url
+            return parsed.model_dump(), result.url
 
         return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_volume_seconds,
             loader=loader,
             namespace='volume',
-            resource_url=target_url,
-        )
-
-    async def _get_volume_search_meta_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
-        target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        cache_key = versioned_cache_key('volume-search-meta', target_url)
-
-        async def loader():
-            html_payload, *_ = await self._get_raw_html_payload(
-                target_url=target_url,
-                ttl_seconds=self.settings.cache_ttl_volume_seconds,
-                resource_kind='volume',
-            )
-            html = html_payload.get('data', {}).get('html', '')
-            source_url = html_payload.get('source_url') or target_url
-            try:
-                parsed = parse_volume_search_meta_page(html, source_url)
-            except ParseError as exc:
-                raise self._with_debug_dump(
-                    error=exc,
-                    html=html,
-                    source_url=source_url,
-                    cache_key=cache_key,
-                    resource_kind='volume-search-meta',
-                ) from exc
-            return parsed.model_dump(), source_url
-
-        return await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_volume_seconds,
-            loader=loader,
-            namespace='volume-search-meta',
-            resource_url=target_url,
-        )
-
-    async def _get_raw_html_payload(self, *, target_url: str, ttl_seconds: int, resource_kind: Literal['series', 'volume']):
-        cache_key = versioned_cache_key('raw-html', resource_kind, target_url)
-
-        async def loader():
-            result = await self.fetcher.get_text(target_url)
-            return {'html': result.text}, result.url
-
-        return await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=ttl_seconds,
-            loader=loader,
-            namespace=f'raw-html-{resource_kind}',
             resource_url=target_url,
         )
 
@@ -813,30 +623,18 @@ class MangaNewsService:
         blocks: str | None = None,
         fields: str | None = None,
         include_raw_sections: bool = False,
-        include_parent_editions: bool | None = None,
     ) -> Envelope:
         payload, entry, cached, partial, warnings = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug, url=url)
         data = deepcopy(payload.get('data', {}) or {})
-        should_include_parent_editions = self._volume_default_include_parent_editions if include_parent_editions is None else include_parent_editions
-        if not should_include_parent_editions:
-            should_include_parent_editions = self._projection_requests_parent_editions(blocks=blocks, fields=fields)
         target_series_slug = series_slug or self._extract_series_slug_from_volume_url(payload.get('source_url') or url or '')
-        if should_include_parent_editions and target_series_slug:
-            started = time.perf_counter()
+        if target_series_slug:
             try:
-                series_payload, *_ = await self._get_series_search_meta_payload(slug=target_series_slug)
+                series_payload, *_ = await self._get_series_payload(slug=target_series_slug)
                 series_data = series_payload.get('data', {}) or {}
                 data['vf'] = series_data.get('vf')
                 data['vo'] = series_data.get('vo')
             except Exception as exc:  # pragma: no cover - best-effort enrichment
                 logger.debug('Volume enrichment failed for %s: %s', payload.get('source_url'), exc)
-            finally:
-                self._log_perf(
-                    'volume_perf',
-                    source_url=payload.get('source_url'),
-                    include_parent_editions=should_include_parent_editions,
-                    duration_ms=round((time.perf_counter() - started) * 1000, 2),
-                )
         projected = project_resource_payload(
             data,
             resource='volume',
@@ -856,27 +654,6 @@ class MangaNewsService:
         )
         return self._envelope({'data': related_data.model_dump(), 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
-    async def _get_series_editions_block_payload(self, *, slug: str, edition: Literal['vf', 'vo']):
-        target_url = f'{self.base_url}/index.php/serie/{"editionsVo" if edition == "vo" else "editions"}/{slug}'
-        cache_key = versioned_cache_key('series-editions-block', target_url, edition)
-
-        async def loader():
-            try:
-                result = await self.fetcher.get_text(target_url)
-                parsed = parse_series_editions_page(result.text, result.url, self.base_url, edition)
-                return parsed.model_dump(), result.url
-            except ResourceNotFound:
-                parsed = SeriesEditionsBlock(edition=edition, source_url=target_url, total=0, items=[])
-                return parsed.model_dump(), target_url
-
-        return await self._cached_payload(
-            cache_key=cache_key,
-            ttl_seconds=self.settings.cache_ttl_series_seconds,
-            loader=loader,
-            namespace='series-editions-block',
-            resource_url=target_url,
-        )
-
     async def get_series_editions(self, *, slug: str | None = None, url: str | None = None, edition: Literal['all', 'vf', 'vo'] = 'all') -> Envelope:
         target_url = self._resolve_series_url(slug=slug, url=url)
         target_slug = self._extract_series_slug(target_url)
@@ -884,34 +661,27 @@ class MangaNewsService:
 
         async def loader():
             started = time.perf_counter()
-            series_payload, *_ = await self._get_series_search_meta_payload(slug=target_slug)
+            series_payload, *_ = await self._get_series_payload(slug=target_slug if slug or not url else None, url=target_url if url else None)
             series_data = series_payload.get('data', {}) or {}
             data = SeriesEditionsData(title=series_data.get('title'), series_slug=target_slug, source_url=series_payload.get('source_url'))
             editions_to_fetch = ['vf', 'vo'] if edition == 'all' else [edition]
-
-            async def _load_block(current: Literal['vf', 'vo']):
-                block_payload, *_ = await self._get_series_editions_block_payload(slug=target_slug, edition=current)
-                block_data = block_payload.get('data', {}) or {}
-                return current, SeriesEditionsBlock.model_validate(block_data)
-
-            for current, block in await self._run_with_limit(
-                editions_to_fetch,
-                _load_block,
-                concurrency=min(len(editions_to_fetch), 2),
-            ):
-                if current == 'vf':
+            blocks = await asyncio.gather(*(self._get_series_editions_block(series_slug=target_slug, edition=current) for current in editions_to_fetch))
+            for block in blocks:
+                if block.edition == 'vf':
                     data.vf = block
                 else:
                     data.vo = block
-
-            self._log_perf(
+            log_event(
+                logger,
+                logging.INFO,
                 'series_editions_perf',
-                slug=target_slug,
+                json_mode=getattr(self.settings, 'log_format', 'text') == 'json',
+                series_slug=target_slug,
                 edition=edition,
-                blocks=len(editions_to_fetch),
+                fetched_blocks=len(blocks),
                 duration_ms=round((time.perf_counter() - started) * 1000, 2),
             )
-            return data.model_dump(), series_payload.get('source_url')
+            return data.model_dump(), series_payload.get('source_url') or target_url
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
@@ -922,16 +692,15 @@ class MangaNewsService:
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
-    async def _get_global_news_items_payload(self):
+    async def get_global_news(self, *, limit: int) -> Envelope:
         rss_url = f'{self.base_url}/index.php/feed/news'
-        cache_key = versioned_cache_key('news-global-source', rss_url, str(self.settings.max_limit))
+        cache_key = versioned_cache_key('news-global', rss_url, str(limit))
 
         async def loader():
-            started = time.perf_counter()
             result = await self.fetcher.get_text(rss_url)
             feed = feedparser.parse(result.text)
             items: list[NewsItem] = []
-            for entry in feed.entries[: self.settings.max_limit]:
+            for entry in feed.entries[:limit]:
                 items.append(
                     NewsItem(
                         title=clean_ws(entry.get('title')),
@@ -941,27 +710,16 @@ class MangaNewsService:
                         category=clean_ws(entry.tags[0].term) if getattr(entry, 'tags', None) else None,
                     )
                 )
-            self._log_perf(
-                'news_source_perf',
-                target_url=result.url,
-                namespace='news-global',
-                items=len(items),
-                duration_ms=round((time.perf_counter() - started) * 1000, 2),
-            )
             return [item.model_dump() for item in items], result.url
 
-        return await self._cached_payload(
+        payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_news_global_seconds,
             loader=loader,
-            namespace='news-global-source',
+            namespace='news-global',
             resource_url=rss_url,
         )
-
-    async def get_global_news(self, *, limit: int) -> Envelope:
-        payload, entry, cached, partial, warnings = await self._get_global_news_items_payload()
-        sliced = list((payload.get('data', []) or [])[:limit])
-        return self._envelope({'data': sliced, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
+        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
     async def get_series_news(self, *, slug: str, limit: int) -> Envelope:
         target_url = f'{self.base_url}/index.php/serie/news/{slug}'
@@ -1109,38 +867,22 @@ class MangaNewsService:
         except ValueError as exc:
             raise ParseError(f'{field_name} must be a valid date.') from exc
 
-    async def _get_news_page_items_payload(self, *, target_url: str, cache_namespace: str, ttl: int):
-        cache_key = versioned_cache_key(f'{cache_namespace}-source', target_url, str(self.settings.max_limit))
+    async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> Envelope:
+        cache_key = versioned_cache_key(cache_namespace, target_url, str(limit))
 
         async def loader():
-            started = time.perf_counter()
             result = await self.fetcher.get_text(target_url)
-            parsed = parse_news_page(result.text, result.url, self.base_url, limit=self.settings.max_limit)
-            self._log_perf(
-                'news_source_perf',
-                target_url=result.url,
-                namespace=cache_namespace,
-                items=len(parsed),
-                duration_ms=round((time.perf_counter() - started) * 1000, 2),
-            )
+            parsed = parse_news_page(result.text, result.url, self.base_url, limit=limit)
             return [item.model_dump() for item in parsed], result.url
 
-        return await self._cached_payload(
+        payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=ttl,
             loader=loader,
-            namespace=f'{cache_namespace}-source',
+            namespace=cache_namespace,
             resource_url=target_url,
         )
-
-    async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> Envelope:
-        payload, entry, cached, partial, warnings = await self._get_news_page_items_payload(
-            target_url=target_url,
-            cache_namespace=cache_namespace,
-            ttl=ttl,
-        )
-        sliced = list((payload.get('data', []) or [])[:limit])
-        return self._envelope({'data': sliced, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
+        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
     def _resolve_series_url(self, *, slug: str | None, url: str | None) -> str:
         if url:

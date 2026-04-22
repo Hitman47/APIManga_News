@@ -13,7 +13,6 @@ from app.cache import SQLiteCache
 from app.config import Settings, get_settings
 from app.exceptions import ParseError, ResourceNotFound, UpstreamError
 from app.http import AsyncFetcher
-from app.metrics import MetricsStore
 from app.manga_news.service import MangaNewsService
 from app.models import (
     HealthResponse,
@@ -39,29 +38,21 @@ def configure_logging(settings: Settings) -> None:
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings)
-    metrics = MetricsStore()
-    cache = SQLiteCache(
-        settings.db_path,
-        busy_timeout_ms=settings.sqlite_busy_timeout_ms,
-        memory_entries=settings.cache_memory_entries,
-    )
+    cache = SQLiteCache(settings.db_path)
     fetcher = AsyncFetcher(
         settings.user_agent,
         settings.request_timeout_seconds,
         max_retries=settings.request_max_retries,
         backoff_seconds=settings.request_backoff_seconds,
-        log_json=settings.log_format.lower() == 'json',
-        metrics=metrics,
+        log_json=settings.log_format == 'json',
     )
     service = MangaNewsService(settings=settings, fetcher=fetcher, cache=cache)
     app.state.settings = settings
-    app.state.metrics = metrics
     app.state.service = service
     try:
         yield
     finally:
         await fetcher.close()
-        cache.close()
 
 
 TAGS_METADATA = [
@@ -81,15 +72,12 @@ Points importants :
 - pas de routes admin publiques ;
 - authentification optionnelle via `Authorization: Bearer <API_TOKEN>` si `API_TOKEN` est défini ;
 - `ETag` / `If-None-Match` disponibles sur les réponses enveloppées ;
-- les réponses de recherche et de résolution gardent par défaut les compteurs `vf` / `vo` via une hydratation parentale ciblée ; activer `enrich=true` pour ajouter en plus `title_vo`, `translated_title` et la normalisation volume, ou `include_editions=false` pour couper aussi les compteurs et viser la latence minimale ;
-- les fiches volume ne relisent plus automatiquement la série parente ; activer `include_parent_editions=true` ou demander explicitement `vf` / `vo` via `blocks` / `fields` pour récupérer ces compteurs ;
-- déduplication single-flight, cache mémoire L1 et SQLite WAL réduisent les fetchs amont et les accès disque redondants.
+- les réponses de recherche et de résolution peuvent être enrichies avec `title_vo`, `translated_title`, et, quand l'information existe, les compteurs `vf` / `vo` issus de la fiche série parente.
 
 Flux conseillé :
 1. utiliser `/search` ou `/search/resolve` pour obtenir un slug ou un couple `series_slug` / `volume_slug` ;
-2. garder le comportement par défaut si les compteurs `vf` / `vo` sont utiles, activer `enrich=true` seulement quand les métadonnées enrichies sont réellement nécessaires, ou passer `include_editions=false` pour le chemin le plus rapide ;
-3. consommer ensuite `/series/{slug}` ou `/volume/{series_slug}/{volume_slug}` ;
-4. réutiliser `ETag` et `If-None-Match` pour limiter les téléchargements inutiles.
+2. consommer ensuite `/series/{slug}` ou `/volume/{series_slug}/{volume_slug}` ;
+3. réutiliser `ETag` et `If-None-Match` pour limiter les téléchargements inutiles.
 """.strip()
 
 SEARCH_RESPONSE_EXAMPLE = {
@@ -113,15 +101,15 @@ SEARCH_RESPONSE_EXAMPLE = {
             'slug': None,
             'series_slug': 'Dogs:-Bullets-Carnage',
             'volume_slug': 'vol-1',
-            'number': None,
-            'number_int': None,
+            'number': '1',
+            'number_int': 1,
             'edition_label': None,
-            'is_special': None,
-            'is_one_shot': None,
-            'title_vo': None,
-            'translated_title': None,
-            'vf': {'volumes': 112, 'status': 'En cours'},
-            'vo': {'volumes': 114, 'status': 'En cours'},
+            'is_special': False,
+            'is_one_shot': False,
+            'title_vo': 'Dogs: Bullets & Carnage',
+            'translated_title': 'Dogs: Bullets & Carnage',
+            'vf': {'volumes': 9, 'status': 'En cours'},
+            'vo': {'volumes': 10, 'status': 'En pause'},
         }
     ],
 }
@@ -155,8 +143,8 @@ RESOLVE_RESPONSE_EXAMPLE = {
             'edition_label': None,
             'is_special': None,
             'is_one_shot': None,
-            'title_vo': None,
-            'translated_title': None,
+            'title_vo': 'ワンピース',
+            'translated_title': 'One Piece',
             'vf': {'volumes': 112, 'status': 'En cours'},
             'vo': {'volumes': 114, 'status': 'En cours'},
         },
@@ -262,7 +250,7 @@ PLANNING_RESPONSE_EXAMPLE = {
 
 app = FastAPI(
     title='Manga News Private API',
-    version='0.3.0',
+    version='0.2.0',
     description=APP_DESCRIPTION,
     openapi_tags=TAGS_METADATA,
     docs_url=get_settings().docs_url,
@@ -334,10 +322,8 @@ async def health():
     summary='Search Manga-News public pages',
     description=(
         'Recherche des séries et/ou volumes à partir d’une requête libre. '
-        'Par défaut, la réponse reste légère et s’appuie uniquement sur la page de recherche. '
-        'Par défaut, la recherche hydrate déjà les compteurs `vf` / `vo` via la fiche série parente quand elle est accessible. '
-        'Activer `enrich=true` pour relire en plus les fiches détaillées utiles, récupérer `title_vo`, '
-        '`translated_title` et la normalisation volume. Passer `include_editions=false` pour couper aussi l’hydratation des compteurs et viser la latence minimale.'
+        'Les résultats sont scorés après normalisation du texte et peuvent être enrichis avec '
+        '`title_vo`, `translated_title` et, quand la série parente est accessible, les compteurs `vf` / `vo`.'
     ),
     responses={200: {'description': 'Search results envelope.', 'content': {'application/json': {'example': SEARCH_RESPONSE_EXAMPLE}}}},
 )
@@ -347,11 +333,9 @@ async def search(
     kind: Literal['series', 'volume', 'all'] = Query(default='all', description='Limiter la recherche aux séries, aux volumes, ou aux deux.'),
     mode: Literal['best', 'all'] = Query(default='best', description='`best` garde les meilleurs candidats après tri ; `all` renvoie tous les candidats retenus.'),
     limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de résultats renvoyés.'),
-    enrich: bool = Query(default=False, description='Relire les fiches détaillées nécessaires pour enrichir les résultats avec titres alternatifs et normalisation volume. Les compteurs `vf` / `vo` restent hydratés par défaut même sans enrichissement complet.'),
-    include_editions: bool = Query(default=True, description='Hydrater les compteurs `vf` / `vo` via la fiche série parente. Désactiver (`false`) pour le chemin le plus rapide possible.'),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.search(query=q, kind=kind, mode=mode, limit=limit, enrich=enrich, include_editions=include_editions)
+    payload = await service.search(query=q, kind=kind, mode=mode, limit=limit)
     return _build_envelope_response(payload.model_dump(), request)
 
 
@@ -361,7 +345,7 @@ async def search(
     response_model=ResolveResponse,
     tags=['Search'],
     summary='Resolve the best search candidate',
-    description='Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`. Par défaut, la résolution conserve déjà les compteurs `vf` / `vo` ; activer `enrich=true` pour enrichir aussi `best` et `candidates` avec les titres alternatifs et la normalisation volume.',
+    description='Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`.',
     responses={200: {'description': 'Resolved best candidate.', 'content': {'application/json': {'example': RESOLVE_RESPONSE_EXAMPLE}}}},
 )
 async def search_resolve(
@@ -369,11 +353,9 @@ async def search_resolve(
     q: str = Query(..., min_length=1, description='Requête libre à résoudre.'),
     kind: Literal['series', 'volume', 'all'] = Query(default='all', description='Type d’objet à résoudre.'),
     limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de candidats inspectés.'),
-    enrich: bool = Query(default=False, description='Même logique que `/search?enrich=true`, appliquée au meilleur candidat et à la liste de candidats.'),
-    include_editions: bool = Query(default=True, description='Même logique que `/search?include_editions=true`, appliquée à `best` et à `candidates`.'),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.resolve_search(query=q, kind=kind, limit=limit, enrich=enrich, include_editions=include_editions)
+    payload = await service.resolve_search(query=q, kind=kind, limit=limit)
     return _build_envelope_response(payload.model_dump(), request)
 
 
@@ -451,7 +433,7 @@ async def get_series_editions_by_url(
     response_model=VolumeResponse,
     tags=['Volume'],
     summary='Get a detailed volume payload',
-    description='Lit une fiche volume Manga-News. Par défaut, seule la fiche volume est lue. Activer `include_parent_editions=true` ou demander explicitement `vf` / `vo` via `blocks` / `fields` pour relire la série parente et récupérer ces compteurs.',
+    description='Lit une fiche volume Manga-News. Le payload est enrichi avec les compteurs `vf` / `vo` de la série parente quand cette fiche est accessible.',
     responses={200: {'description': 'Volume envelope.', 'content': {'application/json': {'example': VOLUME_RESPONSE_EXAMPLE}}}},
 )
 async def get_volume(
@@ -461,10 +443,9 @@ async def get_volume(
     blocks: str | None = Query(default=None, description='Liste de blocs séparés par des virgules, par exemple `release,scores`.'),
     fields: str | None = Query(default=None, description='Liste de chemins de champs séparés par des virgules, par exemple `publication_date,isbn_ean`.'),
     include_raw_sections: bool = Query(default=False, description='Inclure les sections brutes extraites de la page HTML.'),
-    include_parent_editions: bool = Query(default=False, description='Relire la fiche série parente pour injecter `vf` / `vo`. Inutile si ces compteurs ne sont pas consommés.'),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.get_volume(series_slug=series_slug, volume_slug=volume_slug, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections, include_parent_editions=include_parent_editions)
+    payload = await service.get_volume(series_slug=series_slug, volume_slug=volume_slug, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
     return _build_envelope_response(payload.model_dump(), request)
 
 
@@ -475,10 +456,9 @@ async def get_volume_by_url(
     blocks: str | None = Query(default=None),
     fields: str | None = Query(default=None),
     include_raw_sections: bool = Query(default=False),
-    include_parent_editions: bool = Query(default=False),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.get_volume(url=url, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections, include_parent_editions=include_parent_editions)
+    payload = await service.get_volume(url=url, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
     return _build_envelope_response(payload.model_dump(), request)
 
 

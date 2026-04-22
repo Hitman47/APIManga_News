@@ -35,6 +35,7 @@ Les variables ci-dessous ont un effet concret sur le runtime public actuel.
 - `DB_PATH`
 - `ENABLE_DOCS`
 - `LOG_LEVEL`
+- `LOG_FORMAT`
 
 ### Cache et fraîcheur
 - `CACHE_STALE_GRACE_SECONDS`
@@ -48,6 +49,8 @@ Les variables ci-dessous ont un effet concret sur le runtime public actuel.
 ### Recherche
 - `SEARCH_SCORE_THRESHOLD`
 - `MAX_LIMIT`
+- `SEARCH_SOURCE_CONCURRENCY`
+- `SEARCH_ENRICHMENT_CONCURRENCY`
 
 ### Debug et robustesse de parsing
 - `DEBUG_CAPTURE_HTML_ON_ERROR`
@@ -59,10 +62,7 @@ Les variables ci-dessous ont un effet concret sur le runtime public actuel.
 
 Ces variables existent dans `Settings`, mais la version actuelle de l'application ne les exploite pas réellement dans les routes publiques :
 - `ADMIN_TOKEN`
-- `REQUEST_MAX_RETRIES`
-- `REQUEST_BACKOFF_SECONDS`
 - `DEFAULT_LIMIT`
-- `LOG_FORMAT`
 - `RATE_LIMIT_ENABLED`
 - `RATE_LIMIT_REQUESTS`
 - `RATE_LIMIT_WINDOW_SECONDS`
@@ -70,9 +70,12 @@ Ces variables existent dans `Settings`, mais la version actuelle de l'applicatio
 - `RATE_LIMIT_INCLUDE_ADMIN`
 - `RATE_LIMIT_EXEMPT_PATHS`
 
-Conclusion pratique :
-- tu peux les laisser dans `.env.example` ;
-- mais ne construis pas ton exploitation en supposant qu'elles modifient déjà le comportement public actuel.
+Variables maintenant réellement branchées :
+- `REQUEST_MAX_RETRIES`
+- `REQUEST_BACKOFF_SECONDS`
+- `LOG_FORMAT`
+- `SEARCH_SOURCE_CONCURRENCY`
+- `SEARCH_ENRICHMENT_CONCURRENCY`
 
 ## 4. Configuration minimale recommandée
 
@@ -203,17 +206,4 @@ En cas de doute lors d'un déploiement, tu peux aussi supprimer le fichier SQLit
 
 ## Note de cache importante
 
-Les réponses `series`, `volume`, `search`, `search/resolve` et `series/{slug}/editions` dépendent d'un cache SQLite local. Le runtime ajoute désormais SQLite WAL, une connexion persistante, un `busy_timeout`, un cache mémoire L1, une mutualisation single-flight des fetchs concurrents, un cache source dédié pour les candidats de recherche et un cache séparé pour les blocs d'éditions `vf` / `vo`. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
-
-
-## Réglages de perf à surveiller
-
-- `SEARCH_DEFAULT_ENRICH=false` : évite l’enrichissement complet par défaut.
-- `SEARCH_DEFAULT_INCLUDE_EDITIONS=true` : conserve par défaut les compteurs `vf` / `vo` dans `/search` et `/search/resolve`.
-- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` : évite le refetch série sur les fiches volume.
-- `SEARCH_FETCH_CONCURRENCY` : parallélisme des pages de recherche.
-- `SEARCH_ENRICH_CONCURRENCY` : parallélisme de l'enrichissement détaillé.
-- `CACHE_MEMORY_ENTRIES` : taille du cache mémoire L1.
-- `SQLITE_BUSY_TIMEOUT_MS` : délai d'attente SQLite avant erreur de verrouillage.
-- `REQUEST_MAX_RETRIES` / `REQUEST_BACKOFF_SECONDS` : retries HTTP amont.
-- Surveille les logs `search_source_perf`, `search_perf`, `volume_perf` et `series_editions_perf` pour voir si le coût vient des pages sources, de l'enrichissement détaillé, ou des lectures d'éditions.
+Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.

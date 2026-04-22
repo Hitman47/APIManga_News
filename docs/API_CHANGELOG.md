@@ -1,39 +1,10 @@
-## 2026-04-22 — optimisation phase 5, méta volume légère et news source-cache
+## 2026-04-22 — optimisation structurelle de la recherche et du cache
 
-- Ajout d'un cache léger `volume-search-meta` pour les résultats de recherche volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`, `title_vo` et `translated_title` sont maintenant récupérés sans passer par le parseur volume complet.
-- Conséquence : `enrich=true` sur `/search` et `/search/resolve` reste utile, mais coûte moins cher sur les résultats volume.
-- Les routes news (`/news/global`, `/news/series/...`, `/news/volume/...`) mettent maintenant en cache leur source normalisée indépendamment de `limit`, ce qui évite de refetch et reparser la même page quand seul le nombre d'items demandés change.
-- Ajout de logs `news_source_perf` pour distinguer le coût de chargement initial du simple slicing de réponse.
-
-## 2026-04-22 — optimisation phase 4, cache HTML brut et méta série légère
-
-- Les pages HTML série / volume sont maintenant mises en cache séparément du payload JSON final, ce qui permet de réutiliser un même téléchargement entre plusieurs parseurs sans nouveau fetch réseau.
-- Ajout d'un cache léger `series-search-meta` pour les chemins qui ont seulement besoin de `title`, `title_vo`, `translated_title`, `vf` et `vo`.
-- `/search`, `/search/resolve`, `/volume?...include_parent_editions=true` et `/series/{slug}/editions` réutilisent ce chemin léger au lieu de dépendre systématiquement du parseur série complet.
-- Conséquence importante : un `/search` qui hydrate les compteurs `vf` / `vo` peut maintenant être suivi d'un `/series/{slug}` sans refetch réseau supplémentaire de la même page série tant que le HTML brut est encore chaud.
-
-## 2026-04-22 — optimisation phase 2, cache source de recherche et éditions réutilisables
-
-- Les pages sources de `/search` sont désormais mises en cache séparément des réponses finales. Changer `mode`, `limit` ou `enrich` ne refetch donc plus automatiquement les pages de recherche Manga-News si les candidats bruts sont déjà chauds.
-- `/series/{slug}/editions` réutilise maintenant la fiche série cachée et met en cache séparément les blocs `vf` et `vo`, ce qui évite de relire inutilement les mêmes pages entre `edition=vf`, `edition=vo` et `edition=all`.
-- Les chargements d'éditions `vf` et `vo` peuvent maintenant être exécutés en parallèle lors d'un cache froid.
-- Ajout de logs `search_source_perf` et `series_editions_perf` pour distinguer le coût des pages sources du coût de l'enrichissement applicatif.
-
-## 2026-04-22 — correction de régression sur les compteurs VF/VO en recherche
-
-- `/search` et `/search/resolve` conservent à nouveau par défaut les compteurs `vf` / `vo`, même quand `enrich=false`.
-- Nouveau paramètre `include_editions` sur `/search` et `/search/resolve` : `true` par défaut pour préserver les compteurs, `false` pour couper aussi cette hydratation et viser la latence minimale.
-- `enrich=true` redevient strictement l’opt-in pour les titres alternatifs (`title_vo`, `translated_title`) et la normalisation volume, sans forcer les intégrateurs à perdre les compteurs d’éditions.
-
-## 2026-04-22 — optimisation phase 1, search plus léger et volume opt-in
-
-- `/search` et `/search/resolve` restent désormais légers par défaut ; l'enrichissement détaillé devient opt-in via `enrich=true`.
-- Les enrichissements de recherche sont dédupliqués par `series_slug` et `volume_slug`, puis exécutés avec concurrence bornée.
-- Les fetchs concurrents pour une même clé de cache sont désormais mutualisés via single-flight, ce qui évite les rafales identiques sous charge.
-- Le cache SQLite passe en WAL avec `busy_timeout`, conserve une connexion persistante, et ajoute un cache mémoire L1.
-- Les fiches volume ne relisent plus automatiquement la série parente ; `vf` / `vo` deviennent opt-in via `include_parent_editions=true` ou une projection explicite.
-- Le runtime branche enfin `REQUEST_MAX_RETRIES`, `REQUEST_BACKOFF_SECONDS` et `LOG_FORMAT` sur le fetcher HTTP.
-- Ajout de logs de perf `search_perf` et `volume_perf` pour rendre les coûts visibles dans les logs applicatifs.
+- Les pages source de `/search` sont maintenant cachées indépendamment du rendu final, ce qui évite de relire l'upstream quand seul `mode` ou `limit` change.
+- Les enrichissements de recherche sont mutualisés : une même fiche série ou volume n'est plus relue plusieurs fois dans la même requête.
+- Les fetchs concurrents identiques partagent désormais une même exécution locale au lieu de taper plusieurs fois l'upstream en parallèle.
+- Le cache SQLite passe sur une connexion réutilisée avec `journal_mode=WAL` et `busy_timeout`, ce qui réduit le coût I/O et la contention locale.
+- `/series/{slug}/editions` réutilise maintenant la fiche série déjà cachée pour le titre, et met en cache séparément les blocs VF / VO.
 
 ## 2026-04-21 — robustesse vf/vo, enrichissement volume et cache
 
