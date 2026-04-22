@@ -152,6 +152,12 @@ curl "http://localhost:8017/health/runtime?include_recent=true"
 
 Usage : rechercher des séries ou des volumes à partir d'un texte libre.
 
+Comportement de tri important :
+- les égalités exactes sur le titre ou le slug sont prioritaires ;
+- les titres qui commencent par la requête passent avant les titres qui la contiennent plus loin ;
+- les titres très longs ou manifestement dérivés (`roman`, `guide`, `philosophie`, `recettes`, `gaiden`, etc.) sont déclassés quand la requête cible un nom de licence brut.
+
+
 Paramètres :
 - `q` : texte libre, obligatoire ;
 - `kind` : `series`, `volume`, `all` ;

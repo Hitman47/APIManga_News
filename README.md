@@ -29,6 +29,7 @@ Routes publiques actuellement disponibles :
 
 Fonctions utiles déjà en place :
 - recherche série / volume ;
+- classement métier de la recherche : égalité exacte titre/slug priorisée, séries principales avant ouvrages dérivés quand la requête cible un nom de licence brut ;
 - résolution du meilleur match ;
 - fiches détaillées série et volume ;
 - titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées **et** dans les résultats de recherche quand l'enrichissement réussit ;
@@ -57,6 +58,13 @@ Les optimisations suivantes sont maintenant réellement branchées dans le runti
 Deux variables règlent la concurrence sur les parties les plus coûteuses :
 - `SEARCH_SOURCE_CONCURRENCY`
 - `SEARCH_ENRICHMENT_CONCURRENCY`
+
+## Logique de ranking de la recherche
+
+La recherche n'utilise plus uniquement un fuzzy score brut. Le tri favorise maintenant, dans cet ordre, les égalités exactes de titre/slug, puis les titres qui commencent par la requête, puis les résultats contenant la requête avec peu de mots additionnels. Les titres manifestement dérivés (`roman`, `guide`, `philosophie`, `recettes`, `gaiden`, `shinden`, `retsuden`, etc.) reçoivent un malus quand la requête vise un nom de licence nu comme `naruto`.
+
+Conséquence attendue : pour `naruto`, la série principale `Naruto` doit remonter avant `Philosophie de Naruto`, `Recettes cachées de Naruto Shippuden` ou d'autres ouvrages liés à l'univers.
+
 
 ## Ce que l'API ne fait pas
 

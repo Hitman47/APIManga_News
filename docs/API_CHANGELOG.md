@@ -1,3 +1,10 @@
+## 2026-04-22 — correction du ranking métier de la recherche
+
+- Le tri de `/search` et `/search/resolve` ne dépend plus uniquement d'un fuzzy score brut.
+- Les égalités exactes titre/slug sont maintenant priorisées devant les titres plus longs contenant simplement la licence.
+- Les résultats dérivés ou annexes (`roman`, `guide`, `philosophie`, `recettes`, `gaiden`, `shinden`, `retsuden`, etc.) reçoivent un malus quand la requête cible un nom de série brut.
+- `mode=best` devient plus fiable pour les grosses licences ambiguës comme `Naruto`, où la série principale doit passer avant les ouvrages périphériques.
+
 ## 2026-04-22 — verrouillage du contrat par défaut et observabilité runtime
 
 - Ajout de `GET /health/runtime` pour exposer les métriques agrégées, les timings roulants, les événements récents et l'état du cache.

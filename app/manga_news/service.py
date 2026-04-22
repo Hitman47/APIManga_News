@@ -41,11 +41,11 @@ from app.manga_news.parsers import (
     parse_volume_page,
     parse_volume_search_meta_page,
 )
-from app.utils import clean_ws, fingerprint_data, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
+from app.utils import clean_ws, fingerprint_data, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match, search_sort_key
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-04-22-perf-2'
+CACHE_SCHEMA_VERSION = '2026-04-22-search-rank-1'
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
@@ -712,7 +712,7 @@ class MangaNewsService:
                 existing = deduped.get(item.url)
                 if existing is None or item.score > existing.score:
                     deduped[item.url] = item
-            results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)
+            results = sorted(deduped.values(), key=lambda item: search_sort_key(query, item.title, item.url), reverse=True)
             if mode == 'best' and results:
                 results = [results[0]]
             results = results[:limit]

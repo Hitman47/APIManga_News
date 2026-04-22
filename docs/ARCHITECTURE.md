@@ -172,3 +172,9 @@ Les knobs suivants sont à nouveau pilotés par l'environnement et appliqués pa
 - les pages série et volume disposent maintenant d'un cache HTML brut partagé ;
 - les parseurs légers `series-search-meta` et `volume-search-meta` relisent ce HTML pour hydrater rapidement `title_vo`, `translated_title`, `vf`, `vo`, `number`, `edition_label`, `is_special`, `is_one_shot` ;
 - les routes détaillées (`/series`, `/volume`) peuvent ensuite parser le même HTML déjà en cache sans nouveau fetch upstream.
+
+## Ranking métier de la recherche
+
+Le parseur de recherche calcule désormais un score métier ajusté, distinct du fuzzy score brut. Le pipeline donne la priorité aux égalités exactes de titre ou de slug, puis applique des malus sur les résultats qui ajoutent beaucoup de tokens ou qui ressemblent à des ouvrages dérivés (`roman`, `guide`, `philosophie`, `recettes`, `gaiden`, `shinden`, `retsuden`, etc.).
+
+Ce choix est volontaire : Manga-News remonte fréquemment des séries liées, des romans, des guides ou des livres thématiques autour d'une licence. Sans ce ranking secondaire, `mode=best` choisit trop facilement un faux positif simplement parce qu'il contient la chaîne recherchée.

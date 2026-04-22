@@ -244,3 +244,49 @@ async def test_get_series_ignores_incompatible_cached_payload_and_refetches(tmp_
     assert response.data['vf']['volumes'] == 112
     assert response.data['vo']['volumes'] == 114
     assert fetcher.calls == [series_url]
+
+
+@pytest.mark.asyncio
+async def test_search_best_prefers_exact_main_series_over_related_titles(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    query = 'naruto'
+    search_url = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}'
+    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}'
+
+    search_html = """
+    <html>
+      <body>
+        <a href="https://www.manga-news.com/index.php/serie/Philosophie-de-Naruto-la">Philosophie de Naruto (la) (2021)</a>
+        <a href="https://www.manga-news.com/index.php/serie/Recettes-cachees-de-Naruto-Shippuden-le">Recettes cachées de Naruto Shippuden (les) (2022)</a>
+        <a href="https://www.manga-news.com/index.php/serie/Naruto">Naruto (1999) Masashi KISHIMOTO</a>
+        <a href="https://www.manga-news.com/index.php/serie/Naruto-Gaiden-Boruto">Naruto Gaiden (2015) Masashi KISHIMOTO</a>
+      </body>
+    </html>
+    """
+
+    fetcher = _FakeFetcher({
+        search_url: search_html,
+        search_url_vo: '<html><body></body></html>',
+    })
+    settings = SimpleNamespace(
+        manga_news_base_url=base_url,
+        cache_stale_grace_seconds=3600,
+        cache_ttl_search_seconds=3600,
+        cache_ttl_series_seconds=3600,
+        cache_ttl_volume_seconds=3600,
+        cache_ttl_news_global_seconds=3600,
+        cache_ttl_news_series_seconds=3600,
+        cache_ttl_planning_seconds=3600,
+        search_score_threshold=1,
+        max_limit=50,
+        negative_cache_enabled=True,
+        negative_cache_ttl_seconds=120,
+    )
+    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
+
+    best_response = await service.search(query=query, kind='series', mode='best', limit=10, enrich=False, include_editions=False)
+    all_response = await service.search(query=query, kind='series', mode='all', limit=10, enrich=False, include_editions=False)
+
+    assert best_response.data[0]['slug'] == 'Naruto'
+    assert all_response.data[0]['slug'] == 'Naruto'
+    assert [item['slug'] for item in all_response.data].index('Naruto') < [item['slug'] for item in all_response.data].index('Philosophie-de-Naruto-la')

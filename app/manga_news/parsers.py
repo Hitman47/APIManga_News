@@ -35,6 +35,8 @@ from app.utils import (
     parse_french_date,
     parse_volume_number_int,
     score_match,
+    search_rank_score,
+    search_sort_key,
     slugify,
     unique_list,
 )
@@ -640,7 +642,7 @@ def parse_search_page(html: str, page_url: str, base_url: str, query: str, kind:
         if kind != 'all' and result_kind != kind:
             continue
 
-        score = score_match(query, text, extra=absolute_url)
+        score = search_rank_score(query, text, extra=absolute_url)
         if score < score_threshold:
             continue
         seen.add(absolute_url)
@@ -663,7 +665,7 @@ def parse_search_page(html: str, page_url: str, base_url: str, query: str, kind:
                 is_one_shot=is_one_shot,
             )
         )
-    results.sort(key=lambda item: item.score, reverse=True)
+    results.sort(key=lambda item: search_sort_key(query, item.title, item.url), reverse=True)
     return results[:limit]
 
 

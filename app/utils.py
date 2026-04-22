@@ -43,6 +43,18 @@ EDITION_NOISE_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 LEADING_ARTICLES_PATTERN = re.compile(r'^(le|la|les|un|une|des|the)\s+', flags=re.IGNORECASE)
+SEARCH_METADATA_SUFFIX_PATTERN = re.compile(r'\s*\(\d{4}\).*$')
+SEARCH_DERIVATIVE_PHRASES = (
+    'agir et penser comme',
+    'philosophie de',
+    'recettes cachees',
+    'recettes cachées',
+    'les arcanes de',
+)
+SEARCH_DERIVATIVE_TOKENS = {
+    'roman', 'novel', 'guide', 'artbook', 'fanbook', 'databook', 'cookbook',
+    'recettes', 'philosophie', 'gaiden', 'shinden', 'retsuden', 'kizuna', 'arcanes',
+}
 
 
 def now_utc() -> datetime:
@@ -104,6 +116,102 @@ def score_match(query: str, candidate: str, extra: str | None = None) -> int:
         normalized_extra = normalize_text(extra)
         base = max(base, fuzz.WRatio(normalized_query, normalized_extra), fuzz.partial_ratio(normalized_query, normalized_extra))
     return int(base)
+
+
+def _search_title_base(candidate: str) -> str:
+    stripped = SEARCH_METADATA_SUFFIX_PATTERN.sub('', clean_ws(candidate))
+    return normalize_text(stripped)
+
+
+def _search_slug_base(extra: str | None) -> str:
+    if not extra:
+        return ''
+    parsed = urlparse(extra)
+    path_parts = [part for part in parsed.path.split('/') if part]
+    if not path_parts:
+        return ''
+    return normalize_text(path_parts[-1])
+
+
+def _search_rank_data(query: str, candidate: str, extra: str | None = None) -> dict[str, int | bool]:
+    normalized_query = normalize_text(query)
+    title_base = _search_title_base(candidate)
+    slug_base = _search_slug_base(extra)
+    raw_score = score_match(query, candidate, extra=extra)
+
+    query_tokens = normalized_query.split()
+    title_tokens = title_base.split()
+    query_token_count = len(query_tokens)
+    title_token_count = len(title_tokens)
+    extra_tokens = max(0, title_token_count - query_token_count)
+
+    exact_title = bool(normalized_query and title_base == normalized_query)
+    exact_slug = bool(normalized_query and slug_base == normalized_query)
+    startswith_title = bool(normalized_query and title_base.startswith(normalized_query + ' '))
+    contains_title = bool(normalized_query and f' {normalized_query} ' in f' {title_base} ')
+
+    derivative_penalty = 0
+    if not exact_title and not exact_slug:
+        lowered_candidate = clean_ws(candidate).lower()
+        lowered_title_base = title_base.lower()
+        for phrase in SEARCH_DERIVATIVE_PHRASES:
+            if phrase in lowered_candidate or phrase in lowered_title_base:
+                derivative_penalty += 12
+        derivative_penalty += 8 * sum(1 for token in title_tokens if token in SEARCH_DERIVATIVE_TOKENS)
+
+    rank_score = raw_score
+    if exact_title:
+        rank_score = max(rank_score, 100)
+    elif exact_slug:
+        rank_score = max(rank_score, 99)
+    else:
+        if startswith_title:
+            rank_score += 8
+        elif contains_title:
+            rank_score += 4
+        else:
+            rank_score -= 6
+        rank_score -= min(extra_tokens * 4, 24)
+        rank_score -= derivative_penalty
+        if query_token_count == 1 and query_tokens and query_tokens[0] in title_tokens and title_tokens and title_tokens[0] != query_tokens[0]:
+            rank_score -= 6
+
+    rank_score = max(0, min(100, int(rank_score)))
+    slug_similarity = fuzz.ratio(normalized_query, slug_base) if slug_base else 0
+    title_similarity = fuzz.ratio(normalized_query, title_base) if title_base else 0
+    return {
+        'score': rank_score,
+        'raw_score': raw_score,
+        'exact_title': exact_title,
+        'exact_slug': exact_slug,
+        'startswith_title': startswith_title,
+        'contains_title': contains_title,
+        'derivative_penalty': derivative_penalty,
+        'extra_tokens': extra_tokens,
+        'title_similarity': int(title_similarity),
+        'slug_similarity': int(slug_similarity),
+        'title_length': len(title_base),
+    }
+
+
+def search_rank_score(query: str, candidate: str, extra: str | None = None) -> int:
+    return int(_search_rank_data(query, candidate, extra=extra)['score'])
+
+
+def search_sort_key(query: str, candidate: str, extra: str | None = None) -> tuple[int, int, int, int, int, int, int, int, int, int]:
+    data = _search_rank_data(query, candidate, extra=extra)
+    return (
+        int(data['score']),
+        int(bool(data['exact_title'])),
+        int(bool(data['exact_slug'])),
+        int(bool(data['startswith_title'])),
+        int(bool(data['contains_title'])),
+        -int(data['derivative_penalty']),
+        -int(data['extra_tokens']),
+        int(data['title_similarity']),
+        int(data['slug_similarity']),
+        -int(data['title_length']),
+    )
 
 
 def unique_list(values: Iterable[str]) -> list[str]:
