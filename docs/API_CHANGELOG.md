@@ -1,31 +1,8 @@
-## 2026-04-22 — filtres de recherche pilotables et logique franchise renforcée
+## 2026-04-22 — clarification documentaire de la recherche
 
-- `/search` et `/search/resolve` acceptent désormais `prefer_main_series`, `include_related`, `include_books`, `media_kinds` et `exclude_media_kinds`.
-- Les résultats de recherche exposent `relation_kind` et `root_series_slug` en plus de `source_type` et `media_kind`.
-- La recherche peut maintenant rattacher plus solidement un spin-off manga ou un livre dérivé à sa série mère, même quand les séries liées Manga-News sont incomplètes, grâce à un post-traitement qui croise query, résultats pairs et liens `Manga en relation`.
-- Le chargement des métadonnées de recherche détaillées reste conditionnel : il ne s'active que quand l'enrichissement, les compteurs ou les nouveaux filtres métier le nécessitent, pour limiter le coût perf sur les recherches simples.
-
-## 2026-04-22 — ranking métier de `/search`
-
-- `/search` et `/search/resolve` exposent désormais `source_type` et `media_kind` sur les résultats.
-- Le ranking ne repose plus uniquement sur le fuzzy score : l'API priorise désormais la série manga principale avant les romans, essais, guides, cookbooks ou livres dérivés quand la requête cible une licence nue.
-- Les spin-offs manga peuvent être reclassés devant les ouvrages annexes grâce aux séries liées détectées sur la fiche détaillée.
-
-## 2026-04-22 — verrouillage du contrat par défaut et observabilité runtime
-
-- Ajout de `GET /health/runtime` pour exposer les métriques agrégées, les timings roulants, les événements récents et l'état du cache.
-- Toutes les réponses HTTP renvoient désormais `X-Request-Id`, réutilisé tel quel si le client le fournit.
-- Le runtime enregistre des timings dédiés pour `search`, `resolve_search`, `get_series`, `get_volume` et `get_series_editions`.
-- Les compteurs `cache_hits`, `cache_misses`, `cache_stale_fallbacks`, `negative_cache_hits` et `singleflight_*` sont maintenant remontés dans les métriques runtime.
-- Documentation clarifiée sur les defaults serveur de `enrich`, `include_editions` et `include_parent_editions` afin d'éviter les régressions de contrat.
-
-## 2026-04-22 — optimisation structurelle de la recherche et du cache
-
-- Les pages source de `/search` sont maintenant cachées indépendamment du rendu final, ce qui évite de relire l'upstream quand seul `mode` ou `limit` change.
-- Les enrichissements de recherche sont mutualisés : une même fiche série ou volume n'est plus relue plusieurs fois dans la même requête.
-- Les fetchs concurrents identiques partagent désormais une même exécution locale au lieu de taper plusieurs fois l'upstream en parallèle.
-- Le cache SQLite passe sur une connexion réutilisée avec `journal_mode=WAL` et `busy_timeout`, ce qui réduit le coût I/O et la contention locale.
-- `/series/{slug}/editions` réutilise maintenant la fiche série déjà cachée pour le titre, et met en cache séparément les blocs VF / VO.
+- Documentation détaillée de la sémantique réelle de `/search` et `/search/resolve` : pages source interrogées, enrichissement détaillé, coût relatif et cas d'usage.
+- Ajout d'une recette explicite pour répondre vite à la question "cette série a-t-elle des tomes VF ?" avec `GET /search?kind=series&mode=best&limit=1`.
+- Clarification de la différence entre la requête la plus rapide (`/search ... mode=best`) et la vérification plus fiable (`/series/{slug}?fields=title,vf.volumes,vf.status`).
 
 ## 2026-04-21 — robustesse vf/vo, enrichissement volume et cache
 
@@ -74,9 +51,3 @@ Recommandation pour les consommateurs :
 
 
 - 2026-04-21: invalidation automatique des anciennes entrées de cache incompatibles pour `series`, `volume`, `search` et `search/resolve`, afin d'éviter de conserver des payloads sans `vf` / `vo` après une mise à jour du parseur.
-
-## 2026-04-22 - Config de tuning restaurée
-
-- Réintroduction de `SQLITE_BUSY_TIMEOUT_MS`, `CACHE_MEMORY_ENTRIES`, `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` dans `Settings` et `.env.example`.
-- Ajout d'un vrai cache mémoire L1 paramétrable au-dessus de SQLite.
-- Compatibilité conservée pour les anciens noms d'environnement `SEARCH_FETCH_CONCURRENCY` et `SEARCH_ENRICH_CONCURRENCY`.

@@ -19,7 +19,6 @@ Règle simple :
 Une IA consommatrice ne doit pas inventer :
 - de préfixe `/v1` ;
 - des routes admin ;
-- l'absence de `/health/runtime` dans le schéma si le code l'expose ;
 - une pagination normalisée absente ;
 - des champs non décrits dans les modèles ;
 - une recherche dédiée par `title_vo=` ou `translated_title=` ;
@@ -33,9 +32,7 @@ Elle peut supposer que :
 - `title_vo` et `translated_title` peuvent apparaître dans les recherches **et** les fiches détaillées ;
 - `vf` et `vo` peuvent apparaître sur les fiches série, les fiches volume enrichies, et les recherches enrichies ;
 - les champs peuvent être absents ou `null` ;
-- `ETag` et `X-Data-Fingerprint` sont présents sur les réponses enveloppées avec fingerprint ;
-- `X-Request-Id` est présent sur toutes les réponses HTTP ;
-- `/health/runtime` est une route technique utile pour comprendre les timings et l'état du cache.
+- `ETag` et `X-Data-Fingerprint` sont présents sur les réponses enveloppées avec fingerprint.
 
 ## 4. Mode opératoire conseillé pour une IA
 
@@ -43,6 +40,11 @@ Elle peut supposer que :
 1. `GET /search/resolve?q=<titre>&kind=series`
 2. lire `data.best.slug`
 3. `GET /series/{slug}`
+
+### Cas A bis — savoir vite si une série a des tomes VF
+1. `GET /search?q=<titre>&kind=series&mode=best&limit=1`
+2. lire `data[0].vf.volumes` et `data[0].vf.status`
+3. si `vf` est absent, ne pas halluciner : dire que la réponse ne confirme pas l'existence d'une VF et proposer ensuite `GET /series/{slug}?fields=title,vf.volumes,vf.status`
 
 ### Cas B — trouver un volume
 1. `GET /search/resolve?q=<titre>&kind=volume`
@@ -106,9 +108,3 @@ Cette validation vérifie :
 - que les routes clés existent ;
 - que les liens Markdown locaux sont valides ;
 - que les exemples JSON canoniques correspondent aux modèles Pydantic.
-
-## Defaults serveur et query params
-
-L'OpenAPI expose `enrich`, `include_editions`, `prefer_main_series`, `include_related`, `include_books`, `media_kinds`, `exclude_media_kinds` et `include_parent_editions`. Quand ces query params sont absents, le comportement tombe sur les variables serveur documentées dans `.env.example`. `/health/runtime` permet ensuite de vérifier les defaults effectivement actifs sur l'instance.
-
-Les résultats `/search` et `/search/resolve` exposent aussi `source_type`, `media_kind`, `relation_kind` et `root_series_slug`. `source_type` correspond au champ `Type` de la fiche Manga-News quand il est disponible. `media_kind` différencie manga principal, spin-off, roman, essai, guide, artbook, cookbook, etc. `relation_kind` et `root_series_slug` explicitent la logique franchise appliquée par l'API quand elle peut déterminer la série mère d'un spin-off ou d'un livre dérivé.

@@ -10,7 +10,6 @@ Le projet est pensé pour deux usages :
 
 Routes publiques actuellement disponibles :
 - `GET /health`
-- `GET /health/runtime`
 - `GET /search`
 - `GET /search/resolve`
 - `GET /series/{slug}`
@@ -35,28 +34,10 @@ Fonctions utiles déjà en place :
 - compteurs d'éditions `vf` / `vo` sur les fiches série, sur les fiches volume enrichies depuis la série parente, et dans les résultats de recherche enrichis ;
 - normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning, les éditions de série, et les résultats de recherche enrichis ;
 - projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
-- cache SQLite persistant avec stale cache, negative cache, connexion réutilisée, mode WAL et `busy_timeout` ;
-- anti-stampede local (`single-flight`) pour éviter plusieurs fetchs identiques en parallèle sur une même clé ;
-- cache source des pages de recherche, réutilisé entre `mode=best` / `mode=all` et entre plusieurs limites pour une même requête ;
+- cache SQLite persistant avec stale cache et negative cache ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
-- corrélation des logs via `X-Request-Id` sur toutes les réponses ;
-- observabilité runtime via `GET /health/runtime` (métriques agrégées, événements récents, état du cache) ;
 - documentation OpenAPI native via `/docs`, `/redoc`, `/openapi.json` ;
 - exemples JSON versionnés dans `docs/examples/`.
-
-## Points performance déjà actifs
-
-Les optimisations suivantes sont maintenant réellement branchées dans le runtime :
-- retries HTTP et backoff via `REQUEST_MAX_RETRIES` et `REQUEST_BACKOFF_SECONDS` ;
-- logs texte **ou JSON** via `LOG_FORMAT=text|json` ;
-- cache SQLite réutilisant la même connexion, en mode WAL ;
-- déduplication des fetchs concurrents identiques côté service ;
-- enrichissement de recherche mutualisé : une même série parente n'est pas refetchée plusieurs fois dans la même recherche ;
-- pages de recherche source cachées indépendamment du rendu final, pour éviter de relire l'upstream quand seul `mode` ou `limit` change.
-
-Deux variables règlent la concurrence sur les parties les plus coûteuses :
-- `SEARCH_SOURCE_CONCURRENCY`
-- `SEARCH_ENRICHMENT_CONCURRENCY`
 
 ## Ce que l'API ne fait pas
 
@@ -131,12 +112,6 @@ Oui, ce format 401 n'est pas identique aux 404/502. La doc le documente tel qu'i
 curl http://localhost:8017/health
 ```
 
-### Observabilité runtime
-
-```bash
-curl http://localhost:8017/health/runtime
-```
-
 ### Recherche de série
 
 ```bash
@@ -145,6 +120,35 @@ curl --get "http://localhost:8017/search" \
   --data-urlencode "kind=series" \
   --data-urlencode "mode=all" \
   --data-urlencode "limit=5"
+```
+
+### Search rapide pour savoir si une série a des tomes VF
+
+Requête la plus légère utile pour ce besoin :
+
+```bash
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=best" \
+  --data-urlencode "limit=1"
+```
+
+Pourquoi cette forme est la plus rapide parmi les routes de recherche publiques :
+- `kind=series` évite d'interroger aussi les pages de recherche volume ;
+- `mode=best` coupe le résultat final à un seul candidat ;
+- `limit=1` empêche de conserver plusieurs candidats côté réponse ;
+- l'API n'enrichit alors qu'un seul résultat retenu, au lieu d'une liste complète.
+
+À lire dans la réponse :
+- `data[0].vf.volumes` > 0 : la série a bien des tomes VF connus ;
+- `data[0].vf` absent ou `null` : soit la série n'a pas d'édition VF exposée, soit l'enrichissement détaillé n'a pas pu la lire.
+
+Pour une vérification plus fiable après identification du slug, utilise ensuite une fiche série légère :
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,vf.volumes,vf.status"
 ```
 
 ### Résolution directe du meilleur résultat
@@ -187,23 +191,6 @@ curl -H "Authorization: Bearer MON_TOKEN" \
   "http://localhost:8017/search?q=one%20piece"
 ```
 
-
-## Contrat par défaut verrouillé
-
-Ces comportements ne doivent plus être déduits au hasard :
-- `/search` et `/search/resolve` :
-  - si `enrich` est absent, la valeur vient de `SEARCH_DEFAULT_ENRICH` ;
-  - si `include_editions` est absent, la valeur vient de `SEARCH_DEFAULT_INCLUDE_EDITIONS` ;
-  - si `prefer_main_series` est absent, la valeur vient de `SEARCH_DEFAULT_PREFER_MAIN_SERIES` ;
-  - si `include_related` est absent, la valeur vient de `SEARCH_DEFAULT_INCLUDE_RELATED` ;
-  - si `include_books` est absent, la valeur vient de `SEARCH_DEFAULT_INCLUDE_BOOKS` ;
-  - les items exposent aussi `source_type`, `media_kind`, `relation_kind` et `root_series_slug` pour expliquer pourquoi un résultat est vu comme série mère, spin-off manga, livre dérivé ou résultat standalone.
-- `/volume` :
-  - si `include_parent_editions` est absent, la valeur vient de `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` ;
-  - la recommandation d'exploitation reste `false` pour garder la route légère par défaut.
-- toutes les réponses HTTP renvoient `X-Request-Id` pour recouper un appel client avec les logs du serveur.
-- `GET /health/runtime` expose l'état courant du cache, les compteurs agrégés, les timings roulants et les derniers événements de performance.
-
 ## Contrat HTTP commun
 
 La plupart des routes renvoient une enveloppe comme celle-ci :
@@ -237,7 +224,6 @@ Les champs importants :
 Sur les routes enveloppées, l'API peut renvoyer :
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
-- `X-Request-Id: <uuid-ou-valeur-fournie-par-le-client>`
 
 Tu peux ensuite rejouer la requête avec :
 
@@ -313,32 +299,3 @@ Après un changement de parseur, il faut redémarrer l'API. Les clés de cache m
 ## Note de cache importante
 
 Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
-
-## Réglages de configuration restaurés
-
-La configuration `.env.example` réexpose maintenant les réglages de tuning qui avaient disparu :
-
-- `SQLITE_BUSY_TIMEOUT_MS` : pilote le `PRAGMA busy_timeout` réellement appliqué à SQLite ;
-- `CACHE_MEMORY_ENTRIES` : pilote le cache mémoire L1 au-dessus de SQLite ;
-- `SEARCH_DEFAULT_ENRICH` : valeur par défaut de `enrich` sur `/search` et `/search/resolve` ;
-- `SEARCH_DEFAULT_INCLUDE_EDITIONS` : valeur par défaut de `include_editions` sur `/search` et `/search/resolve` ;
-- `SEARCH_DEFAULT_PREFER_MAIN_SERIES` : renforce par défaut la priorité donnée à la série mère ;
-- `SEARCH_DEFAULT_INCLUDE_RELATED` : garde ou retire par défaut les spin-offs / séries liées ;
-- `SEARCH_DEFAULT_INCLUDE_BOOKS` : garde ou retire par défaut les romans, essais, guides, artbooks, cookbooks et autres livres dérivés ;
-- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` : valeur par défaut de `include_parent_editions` sur `/volume` ; `false` garde `/volume` léger par défaut, `true` réactive l'hydratation automatique de `vf` / `vo`.
-
-Le ranking `/search` ne dépend plus uniquement du fuzzy score : il combine maintenant l'égalité exacte titre/slug, le type Manga-News (`source_type`), une classification métier (`media_kind`) et une logique franchise (`relation_kind`, `root_series_slug`) pour faire remonter la série mère avant les spin-offs manga, puis avant les romans/essais/livres d'univers quand c'est pertinent.
-
-Quand tu veux piloter explicitement la recherche au lieu de dépendre uniquement du ranking interne, tu peux utiliser :
-- `prefer_main_series=true` pour renforcer la priorité donnée à la série mère ;
-- `include_related=false` pour retirer les spin-offs / séries liées détectées ;
-- `include_books=false` pour retirer les romans, essais, guides, artbooks, cookbooks et autres livres dérivés ;
-- `media_kinds=manga,manga_spinoff` pour une whitelist explicite ;
-- `exclude_media_kinds=novel,essay,cookbook` pour une blacklist explicite.
-
-Côté performance, l'API mutualise désormais un cache HTML brut pour les fiches série et volume. Les chemins légers (`search` enrichi, compteurs `vf` / `vo`, éditions) réutilisent ce HTML sans refetch réseau, puis les routes détaillées (`/series`, `/volume`) peuvent à leur tour repartir du même HTML déjà chaud.
-
-Compatibilité conservée :
-
-- `SEARCH_FETCH_CONCURRENCY` reste accepté comme alias de `SEARCH_SOURCE_CONCURRENCY` ;
-- `SEARCH_ENRICH_CONCURRENCY` reste accepté comme alias de `SEARCH_ENRICHMENT_CONCURRENCY`.

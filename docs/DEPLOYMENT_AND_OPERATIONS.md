@@ -35,7 +35,6 @@ Les variables ci-dessous ont un effet concret sur le runtime public actuel.
 - `DB_PATH`
 - `ENABLE_DOCS`
 - `LOG_LEVEL`
-- `LOG_FORMAT`
 
 ### Cache et fraîcheur
 - `CACHE_STALE_GRACE_SECONDS`
@@ -49,8 +48,6 @@ Les variables ci-dessous ont un effet concret sur le runtime public actuel.
 ### Recherche
 - `SEARCH_SCORE_THRESHOLD`
 - `MAX_LIMIT`
-- `SEARCH_SOURCE_CONCURRENCY`
-- `SEARCH_ENRICHMENT_CONCURRENCY`
 
 ### Debug et robustesse de parsing
 - `DEBUG_CAPTURE_HTML_ON_ERROR`
@@ -62,7 +59,10 @@ Les variables ci-dessous ont un effet concret sur le runtime public actuel.
 
 Ces variables existent dans `Settings`, mais la version actuelle de l'application ne les exploite pas réellement dans les routes publiques :
 - `ADMIN_TOKEN`
+- `REQUEST_MAX_RETRIES`
+- `REQUEST_BACKOFF_SECONDS`
 - `DEFAULT_LIMIT`
+- `LOG_FORMAT`
 - `RATE_LIMIT_ENABLED`
 - `RATE_LIMIT_REQUESTS`
 - `RATE_LIMIT_WINDOW_SECONDS`
@@ -70,12 +70,9 @@ Ces variables existent dans `Settings`, mais la version actuelle de l'applicatio
 - `RATE_LIMIT_INCLUDE_ADMIN`
 - `RATE_LIMIT_EXEMPT_PATHS`
 
-Variables maintenant réellement branchées :
-- `REQUEST_MAX_RETRIES`
-- `REQUEST_BACKOFF_SECONDS`
-- `LOG_FORMAT`
-- `SEARCH_SOURCE_CONCURRENCY`
-- `SEARCH_ENRICHMENT_CONCURRENCY`
+Conclusion pratique :
+- tu peux les laisser dans `.env.example` ;
+- mais ne construis pas ton exploitation en supposant qu'elles modifient déjà le comportement public actuel.
 
 ## 4. Configuration minimale recommandée
 
@@ -196,7 +193,19 @@ Tu peux aussi lancer le smoke test manuel décrit dans [`ONE_PIECE_API_TESTS.txt
 - n'essaie pas de piloter une politique d'ops à partir des variables `RATE_LIMIT_*` tant qu'elles ne sont pas branchées ;
 - si tu t'appuies fortement sur cette API, surveille surtout les `UPSTREAM_PARSE_ERROR` : c'est le vrai point de fragilité quand Manga News change son HTML.
 
-## 7. Cache et mises à jour de parseur
+Recette d'exploitation utile pour un check métier rapide :
+
+```bash
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=best" \
+  --data-urlencode "limit=1"
+```
+
+Puis lire `data[0].vf.volumes`. C'est aujourd'hui le meilleur compromis vitesse / utilité pour savoir rapidement si une série a des tomes VF connus.
+
+## 11. Cache et mises à jour de parseur
 
 Quand un parseur change (par exemple pour mieux lire `#numberblock`), il faut redémarrer l'API.
 Les clés de cache métier intègrent une version interne afin d'éviter la réutilisation silencieuse d'anciens payloads incompatibles.
@@ -207,31 +216,3 @@ En cas de doute lors d'un déploiement, tu peux aussi supprimer le fichier SQLit
 ## Note de cache importante
 
 Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
-
-## Variables d'environnement restaurées
-
-- `SQLITE_BUSY_TIMEOUT_MS` ajuste la tolérance SQLite à la contention ;
-- `CACHE_MEMORY_ENTRIES` dimensionne le cache mémoire L1 ;
-- `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS`, `SEARCH_DEFAULT_PREFER_MAIN_SERIES`, `SEARCH_DEFAULT_INCLUDE_RELATED`, `SEARCH_DEFAULT_INCLUDE_BOOKS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` redonnent du pilotage sans modifier le code ; pour `/volume`, laisser `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` évite un fetch parent implicite à chaque appel ;
-- `SEARCH_FETCH_CONCURRENCY` et `SEARCH_ENRICH_CONCURRENCY` restent tolérés comme alias legacy.
-
-
-## Observabilité runtime
-
-### Headers utiles
-- `X-Request-Id` est renvoyé sur toutes les réponses ;
-- si le client en fournit un, l'API le réutilise tel quel ;
-- sinon l'API en génère un automatiquement.
-
-### Route technique
-- `GET /health/runtime` renvoie :
-  - les compteurs agrégés ;
-  - les timings roulants par scope ;
-  - les derniers événements de perf et les dernières requêtes si `include_recent=true` ;
-  - l'état du cache SQLite/L1 ;
-  - les defaults effectivement appliqués pour `/search`, `/search/resolve` et `/volume`, y compris les nouveaux flags franchise (`prefer_main_series`, `include_related`, `include_books`).
-
-### Exploitation conseillée
-- en `LOG_FORMAT=json`, filtre les événements avec `request_id` pour suivre un appel précis ;
-- utilise `/health/runtime` pour vérifier rapidement si le hot path est plutôt côté cache, single-flight ou upstream ;
-- garde `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` en exploitation si tu veux préserver la latence moyenne des fiches volume.

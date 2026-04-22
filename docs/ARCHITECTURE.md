@@ -21,36 +21,27 @@ flowchart LR
 1. **Route FastAPI**
    - valide les paramètres ;
    - vérifie le Bearer token si `API_TOKEN` est actif ;
-   - injecte / propage `X-Request-Id` via un middleware HTTP ;
-   - enregistre les métriques HTTP agrégées ;
    - délègue au `MangaNewsService`.
 
 2. **Service métier**
    - calcule une clé de cache stable ;
    - consulte le cache positif ;
    - consulte le negative cache si activé ;
-   - mutualise les fetchs concurrents identiques via un mécanisme local de type single-flight ;
    - fetch l'upstream si nécessaire ;
    - parse la réponse ;
    - construit l'enveloppe finale.
 
-3. **Observabilité runtime**
-   - un `MetricsStore` agrège compteurs, timings roulants et derniers événements ;
-   - `GET /health/runtime` expose ces métriques ainsi que l'état du cache et les defaults effectifs ;
-   - les logs applicatifs reprennent `request_id` quand il existe.
-
-4. **Cache SQLite**
+3. **Cache SQLite**
    - stocke les réponses positives ;
    - stocke aussi les erreurs négatives courtes (`negative_cache_entries`) ;
-   - garde une fenêtre stale pour servir une ancienne réponse si l'upstream échoue ;
-   - réutilise une connexion SQLite persistante avec `journal_mode=WAL`, `synchronous=NORMAL` et `busy_timeout`.
+   - garde une fenêtre stale pour servir une ancienne réponse si l'upstream échoue.
 
-5. **Fetcher HTTP**
+4. **Fetcher HTTP**
    - envoie les requêtes vers Manga News ;
    - suit les redirections ;
    - traduit les erreurs HTTP / réseau en erreurs applicatives.
 
-6. **Parsers**
+5. **Parsers**
    - analysent le HTML / RSS ;
    - extraient les champs normalisés ;
    - lèvent `ParseError` quand la page n'est pas exploitable.
@@ -77,17 +68,22 @@ flowchart TD
 
 ### `/search`
 - interroge plusieurs pages de recherche Manga News selon `kind` ;
-- cache d'abord les **pages source de recherche** par URL, indépendamment de `mode` et `limit` ;
-- recharge ces pages source en parallèle, dans la limite de `SEARCH_SOURCE_CONCURRENCY` ;
 - déduplique les URLs ;
-- applique un ranking métier avant et après enrichissement : match exact titre/slug, priorité série vs volume selon la requête, puis priorité `media_kind` ;
-- peut ensuite raffiner la logique franchise (`relation_kind`, `root_series_slug`) quand `prefer_main_series`, `include_related`, `include_books`, `media_kinds` ou `exclude_media_kinds` demandent un comportement plus piloté ;
-- enrichit ensuite les résultats retenus en mutualisant les fiches série / volume identiques, dans la limite de `SEARCH_ENRICHMENT_CONCURRENCY`.
+- trie par score ;
+- enrichit ensuite chaque résultat retenu avec `title_vo` et `translated_title` si possible ;
+- injecte aussi `vf` / `vo` en relisant la fiche série détaillée quand le candidat final est une série ou quand le candidat volume permet de remonter à une série parente.
+
+Conséquence importante pour la performance :
+- `kind=series` est moins coûteux que `kind=all` ;
+- `mode=best` + `limit=1` réduit fortement le nombre de résultats enrichis ;
+- c'est donc la forme à privilégier pour une question rapide de type "cette série a-t-elle des tomes VF ?".
 
 ### `/search/resolve`
 - s'appuie sur `/search` ;
 - choisit un `best` ;
 - calcule une confiance (`high`, `medium`, `low`, `none`).
+
+Comme `/search/resolve` appelle `/search` avec `mode=all`, il est plus pratique pour un flux applicatif complet que pour une simple vérification binaire ultra-légère.
 
 ## Projections série / volume
 
@@ -104,15 +100,11 @@ C'est utile pour :
 
 ## Particularités utiles
 
-### Titres alternatifs, typologie et logique franchise
+### Titres alternatifs
 - `title_vo`
 - `translated_title`
-- `source_type`
-- `media_kind`
-- `relation_kind`
-- `root_series_slug`
 
-Ils sont disponibles sur les fiches détaillées et/ou remontent aussi dans les recherches quand l'enrichissement ou les filtres métier le justifient. `source_type` reflète le `Type` Manga-News. `media_kind` distingue manga principal, spin-off, roman, essai, guide, artbook, cookbook, etc. `relation_kind` et `root_series_slug` servent à expliquer si un résultat est vu comme série mère, spin-off manga, livre dérivé ou résultat standalone, y compris quand la fiche Manga-News n'est pas parfaitement renseignée et que l'API doit retomber sur des heuristiques plus robustes.
+Ils sont disponibles sur les fiches détaillées et remontent aussi dans les recherches quand l'enrichissement réussit.
 
 ### Normalisation volume
 Les parseurs produisent des champs standardisés pour les volumes :
@@ -143,16 +135,11 @@ Debug HTML saved to /tmp/manga-news-debug-html/...
 
 Présent dans la config ou dans des modules, mais non exposé comme contrat public aujourd'hui :
 - admin API publique ;
-- rate limiting branché aux routes.
+- rate limiting branché aux routes ;
+- format de logs JSON activé depuis la config runtime ;
+- retries/backoff pilotés par les variables `REQUEST_MAX_RETRIES` / `REQUEST_BACKOFF_SECONDS`.
 
-Les variables suivantes sont maintenant **actives** dans le runtime :
-- `LOG_FORMAT`
-- `X-Request-Id` sur toutes les réponses ;
-- `/health/runtime` pour l'observabilité technique ;
-- `REQUEST_MAX_RETRIES`
-- `REQUEST_BACKOFF_SECONDS`
-- `SEARCH_SOURCE_CONCURRENCY`
-- `SEARCH_ENRICHMENT_CONCURRENCY`
+Le documente comme tel est plus honnête que de faire semblant que tout est déjà actif.
 
 ## Enrichissement des recherches
 
@@ -162,18 +149,10 @@ Pour certains résultats `/search`, le service relit une fiche détaillée avant
 
 Ce comportement rend les réponses plus utiles, mais explique aussi pourquoi une recherche peut déclencher plusieurs fetchs amont lors d'un cache froid.
 
-## Réglages d'exécution réellement pilotables
+Ordre de coût approximatif, à contrat constant :
+1. `/search?kind=series&mode=best&limit=1`
+2. `/search?kind=series&mode=all&limit=5`
+3. `/search?kind=all&mode=all&limit=10`
+4. `/search/resolve?kind=all&limit=10`
 
-Les knobs suivants sont à nouveau pilotés par l'environnement et appliqués par le runtime :
-
-- `SQLITE_BUSY_TIMEOUT_MS` pour le `PRAGMA busy_timeout` SQLite ;
-- `CACHE_MEMORY_ENTRIES` pour le cache mémoire L1 ;
-- `SEARCH_DEFAULT_ENRICH` et `SEARCH_DEFAULT_INCLUDE_EDITIONS` pour les routes de recherche ;
-- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` pour l'hydratation des compteurs sur `/volume` ; la valeur par défaut recommandée est `false` pour éviter un fetch parent implicite sur chaque volume.
-
-
-## Optimisations structurelles des fiches
-
-- les pages série et volume disposent maintenant d'un cache HTML brut partagé ;
-- les parseurs légers `series-search-meta` et `volume-search-meta` relisent ce HTML pour hydrater rapidement `title_vo`, `translated_title`, `vf`, `vo`, `number`, `edition_label`, `is_special`, `is_one_shot` ;
-- les routes détaillées (`/series`, `/volume`) peuvent ensuite parser le même HTML déjà en cache sans nouveau fetch upstream.
+Autrement dit : plus tu élargis `kind`, plus tu gardes de candidats, plus tu paies en pages de recherche et en enrichissement détaillé.

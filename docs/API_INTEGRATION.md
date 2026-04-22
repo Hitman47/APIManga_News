@@ -37,7 +37,7 @@ Le format exact actuel est :
 
 ## 3. Enveloppe commune
 
-Toutes les routes métier sauf `/health` et `/health/runtime` renvoient une enveloppe standard :
+Toutes les routes métier sauf `/health` renvoient une enveloppe standard :
 
 ```json
 {
@@ -59,7 +59,6 @@ Toutes les routes métier sauf `/health` et `/health/runtime` renvoient une enve
 ### Sens des champs importants
 - `found=false` : la route a répondu correctement mais sans ressource exploitable ;
 - `cached=true` : la réponse vient du cache SQLite ;
-- le calcul interne peut aussi réutiliser des caches source de recherche et des enrichissements mutualisés, même quand l'enveloppe finale courante n'était pas encore en cache ;
 - `partial=true` : la réponse provient d'un cache stale utilisé après échec upstream ;
 - `warnings` : message explicatif, généralement lié à `partial=true` ;
 - `fingerprint` : hash métier stable servant d'ETag ;
@@ -70,7 +69,6 @@ Toutes les routes métier sauf `/health` et `/health/runtime` renvoient une enve
 Quand un `fingerprint` est présent, l'API renvoie aussi :
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
-- `X-Request-Id: <uuid-ou-valeur-fournie-par-le-client>`
 
 Tu peux alors envoyer :
 
@@ -129,25 +127,6 @@ Réponse :
 
 ---
 
-### 6.1 bis `GET /health/runtime`
-
-Usage : diagnostic technique local, corrélation de logs et inspection du cache.
-
-Ce que la route renvoie :
-- `metrics.counters` : compteurs agrégés (`cache_hits`, `cache_misses`, `singleflight_*`, `upstream_fetch_*`, etc.) ;
-- `metrics.timings` : latences roulantes par scope (`http.request`, `service.search`, `service.get_volume`, etc.) ;
-- `metrics.recent_requests` et `metrics.recent_events` si `include_recent=true` ;
-- `cache` : état du cache SQLite/L1 ;
-- `defaults` : valeurs serveur effectivement appliquées quand les query params optionnels sont absents.
-
-Exemple :
-
-```bash
-curl "http://localhost:8017/health/runtime?include_recent=true"
-```
-
----
-
 ### 6.2 `GET /search`
 
 Usage : rechercher des séries ou des volumes à partir d'un texte libre.
@@ -156,14 +135,7 @@ Paramètres :
 - `q` : texte libre, obligatoire ;
 - `kind` : `series`, `volume`, `all` ;
 - `mode` : `best` ou `all` ;
-- `limit` : 1 à 50 ;
-- `enrich` : optionnel, sinon fallback sur `SEARCH_DEFAULT_ENRICH` ;
-- `include_editions` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_EDITIONS` ;
-- `prefer_main_series` : optionnel, sinon fallback sur `SEARCH_DEFAULT_PREFER_MAIN_SERIES` ;
-- `include_related` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_RELATED` ;
-- `include_books` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_BOOKS` ;
-- `media_kinds` : CSV whitelist des `media_kind` à conserver ;
-- `exclude_media_kinds` : CSV blacklist des `media_kind` à exclure.
+- `limit` : 1 à 50.
 
 Exemple :
 
@@ -176,29 +148,50 @@ curl --get "http://localhost:8017/search" \
 ```
 
 Résultat typique par item :
-- `title`
-- `url`
-- `kind`
-- `score`
-- `slug`
-- `series_slug`
-- `volume_slug`
-- `title_vo`
-- `translated_title`
-- `source_type` : valeur du champ `Type` sur la fiche Manga-News quand elle est disponible
-- `media_kind` : classification métier (`manga`, `manga_spinoff`, `novel`, `essay`, `cookbook`, `guide`, etc.)
-- `relation_kind` : position dans une franchise (`main`, `spinoff`, `related_manga`, `related_book`, `standalone`, `unknown`)
-- `root_series_slug` : slug de la série mère quand l'API a pu le déduire de manière fiable
+- `title` : titre tel que visible dans la recherche ;
+- `url` : URL absolue Manga News du candidat ;
+- `kind` : `series` ou `volume` ;
+- `score` : score interne de matching, utile pour ordonner mais pas comme vérité métier absolue ;
+- `slug` : slug principal du candidat ;
+- `series_slug` : slug de série quand il est connu ;
+- `volume_slug` : slug de volume quand il est connu ;
+- `number` / `number_int` : champs volume normalisés, uniquement utiles pour les candidats volume enrichis ;
+- `edition_label` : libellé d'édition normalisé pour un volume ;
+- `is_special` / `is_one_shot` : indicateurs métier volume ;
+- `title_vo` / `translated_title` : titres alternatifs si la fiche détaillée a pu être relue ;
+- `vf` / `vo` : compteurs d'éditions quand la fiche série correspondante a pu être relue.
+
+Sémantique réelle du ranking :
+- `kind=series` limite les pages source aux recherches séries VF et VO ;
+- `kind=volume` limite les pages source aux recherches volumes VF et VO ;
+- `kind=all` interroge les quatre pages ;
+- `mode=best` retourne **une liste** contenant au mieux un seul item ;
+- `mode=all` conserve les candidats retenus après déduplication par URL et tri décroissant par score.
 
 Important :
-- `mode=best` retourne **une liste** contenant au mieux un seul item ;
 - `title_vo` et `translated_title` sont enrichis en allant lire la fiche détaillée quand c'est possible ;
-- le ranking ne repose plus sur le seul fuzzy score : la route peut aussi s'appuyer sur `prefer_main_series`, les `media_kind` et la logique franchise (`relation_kind`, `root_series_slug`) pour remonter la série mère avant ses spin-offs manga puis avant les livres dérivés ;
-- `include_related=false` retire les résultats vus comme spin-offs / séries liées ;
-- `include_books=false` retire romans, essais, guides, artbooks, cookbooks et autres livres dérivés ;
-- `media_kinds` / `exclude_media_kinds` donnent un contrôle explicite côté client sans changer le ranking global ;
-- les fiches source de recherche sont mises en cache indépendamment du rendu final, donc changer `mode` ou `limit` sur une même requête ne force pas forcément un nouveau fetch upstream ;
-- si l'enrichissement échoue, le résultat principal reste retourné.
+- `vf` / `vo` sur les résultats de recherche sont eux aussi issus d'une relecture de la fiche série détaillée ;
+- si l'enrichissement échoue, le résultat principal reste retourné sans ces champs enrichis.
+
+Recette recommandée pour une question simple "cette série a-t-elle des tomes VF ?" :
+
+```bash
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=best" \
+  --data-urlencode "limit=1"
+```
+
+Pourquoi c'est la meilleure requête rapide actuellement :
+- elle n'interroge pas les pages volume ;
+- elle ne conserve qu'un seul candidat final ;
+- elle ne relit donc qu'une seule fiche détaillée côté enrichissement, au lieu d'une liste entière.
+
+Lecture de la réponse :
+- `data[0].vf.volumes > 0` : oui, des tomes VF sont connus ;
+- `data[0].vf` absent ou `null` : aucune confirmation VF exploitable dans cette réponse ;
+- si tu veux confirmer après coup avec un coût encore raisonnable, utilise ensuite `GET /series/{slug}?fields=title,vf.volumes,vf.status`.
 
 ---
 
@@ -210,7 +203,6 @@ Paramètres :
 - `q`
 - `kind`
 - `limit`
-- mêmes flags métier que `/search` : `enrich`, `include_editions`, `prefer_main_series`, `include_related`, `include_books`, `media_kinds`, `exclude_media_kinds`
 
 Exemple :
 
@@ -227,6 +219,11 @@ Réponse :
 - `data.confidence` (`high`, `medium`, `low`, `none`)
 - `data.best`
 - `data.candidates`
+
+Note pratique :
+- `/search/resolve` s'appuie sur `/search` en interne avec `mode=all` ;
+- il est donc pratique pour un flux applicatif propre, mais **pas** la route la plus légère si tu veux seulement une réponse binaire rapide sur l'existence d'une édition VF ;
+- pour ce besoin minimal, préfère `/search?kind=series&mode=best&limit=1`.
 
 ---
 
@@ -525,10 +522,3 @@ Tu peux donner ces règles à un agent consommateur :
 ## Note de cache importante
 
 Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
-
-## Paramètres optionnels avec défauts côté serveur
-
-Quand ils sont omis, les endpoints utilisent les valeurs de configuration serveur :
-
-- `/search` et `/search/resolve` : `enrich` ← `SEARCH_DEFAULT_ENRICH`, `include_editions` ← `SEARCH_DEFAULT_INCLUDE_EDITIONS`, `prefer_main_series` ← `SEARCH_DEFAULT_PREFER_MAIN_SERIES`, `include_related` ← `SEARCH_DEFAULT_INCLUDE_RELATED`, `include_books` ← `SEARCH_DEFAULT_INCLUDE_BOOKS` ;
-- `/volume` : `include_parent_editions` ← `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` ; la valeur d'exploitation recommandée est `false` pour garder la route légère par défaut.

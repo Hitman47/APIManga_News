@@ -33,6 +33,56 @@ curl --get "http://localhost:8017/search/resolve" \
 - `data.best.volume_slug`
 - `data.confidence`
 
+## 2 bis. Search rapide et simple pour savoir si une série a des tomes VF
+
+C'est la requête la plus légère qui reste utile pour cette question :
+
+```bash
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=best" \
+  --data-urlencode "limit=1"
+```
+
+Pourquoi ce choix est optimisé :
+- `kind=series` évite deux pages de recherche volume inutiles ;
+- `mode=best` évite de garder une liste complète ;
+- `limit=1` évite d'enrichir plusieurs candidats finaux ;
+- la réponse contient quand même `vf` / `vo` si la fiche série détaillée a pu être relue.
+
+Lecture de la réponse :
+- `data[0].vf.volumes > 0` : oui, des tomes VF sont connus ;
+- `data[0].vf.status` : état de l'édition VF (`En cours`, `Terminé`, etc.) ;
+- `data[0].vf` absent ou `null` : pas de confirmation exploitable dans cette réponse.
+
+Important :
+- cette recette est **rapide**, pas infaillible ;
+- si le titre est ambigu ou si tu veux une confirmation plus robuste, fais ensuite un second appel léger sur la fiche série.
+
+## 2 ter. Vérification légère mais plus fiable après recherche
+
+Étape 1 : identifier le bon slug.
+
+```bash
+curl --get "http://localhost:8017/search" \
+  --data-urlencode "q=one piece" \
+  --data-urlencode "kind=series" \
+  --data-urlencode "mode=best" \
+  --data-urlencode "limit=1"
+```
+
+Étape 2 : ne charger que les champs utiles de la fiche série.
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
+  --data-urlencode "fields=title,vf.volumes,vf.status"
+```
+
+C'est le meilleur compromis quand tu veux :
+- un premier repérage rapide par titre libre ;
+- puis une confirmation fiable sans charger toute la fiche série.
+
 ## 3. Charger une fiche série complète
 
 ```bash
