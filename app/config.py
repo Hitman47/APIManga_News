@@ -46,7 +46,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices('SEARCH_DEFAULT_INCLUDE_EDITIONS'),
     )
     volume_default_include_parent_editions: bool = Field(
-        default=True,
+        default=False,
         validation_alias=AliasChoices('VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS'),
     )
     enable_docs: bool = Field(default=True, alias='ENABLE_DOCS')

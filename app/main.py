@@ -76,7 +76,8 @@ Points importants :
 - pas de routes admin publiques ;
 - authentification optionnelle via `Authorization: Bearer <API_TOKEN>` si `API_TOKEN` est défini ;
 - `ETag` / `If-None-Match` disponibles sur les réponses enveloppées ;
-- les réponses de recherche et de résolution peuvent être enrichies avec `title_vo`, `translated_title`, et, quand l'information existe, les compteurs `vf` / `vo` issus de la fiche série parente.
+- les réponses de recherche et de résolution peuvent être enrichies avec `title_vo`, `translated_title`, et, quand l'information existe, les compteurs `vf` / `vo` issus de la fiche série parente ;
+- les réponses volume restent légères par défaut et n'hydratent `vf` / `vo` que si `include_parent_editions=true` ou si la configuration serveur l'active explicitement.
 
 Flux conseillé :
 1. utiliser `/search` ou `/search/resolve` pour obtenir un slug ou un couple `series_slug` / `volume_slug` ;
@@ -454,7 +455,7 @@ async def get_series_editions_by_url(
     response_model=VolumeResponse,
     tags=['Volume'],
     summary='Get a detailed volume payload',
-    description='Lit une fiche volume Manga-News. Le payload est enrichi avec les compteurs `vf` / `vo` de la série parente quand cette fiche est accessible.',
+    description='Lit une fiche volume Manga-News. Le payload peut être enrichi avec les compteurs `vf` / `vo` de la série parente via `include_parent_editions=true` ou via la configuration serveur.',
     responses={200: {'description': 'Volume envelope.', 'content': {'application/json': {'example': VOLUME_RESPONSE_EXAMPLE}}}},
 )
 async def get_volume(

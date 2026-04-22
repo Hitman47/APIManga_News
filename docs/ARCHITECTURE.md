@@ -155,4 +155,4 @@ Les knobs suivants sont à nouveau pilotés par l'environnement et appliqués pa
 - `SQLITE_BUSY_TIMEOUT_MS` pour le `PRAGMA busy_timeout` SQLite ;
 - `CACHE_MEMORY_ENTRIES` pour le cache mémoire L1 ;
 - `SEARCH_DEFAULT_ENRICH` et `SEARCH_DEFAULT_INCLUDE_EDITIONS` pour les routes de recherche ;
-- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` pour l'hydratation des compteurs sur `/volume`.
+- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` pour l'hydratation des compteurs sur `/volume`. Par défaut, il vaut désormais `false` pour éviter un refetch série implicite sur les lectures volume standards.

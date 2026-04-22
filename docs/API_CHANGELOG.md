@@ -56,6 +56,7 @@ Recommandation pour les consommateurs :
 
 ## 2026-04-22 - Config de tuning restaurée
 
+- Correction de la régression : `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` repasse à `false` par défaut pour que `/volume` ne refetch pas silencieusement la fiche série parente. L'hydratation `vf` / `vo` reste disponible via `include_parent_editions=true` ou via la variable d'environnement.
 - Réintroduction de `SQLITE_BUSY_TIMEOUT_MS`, `CACHE_MEMORY_ENTRIES`, `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` dans `Settings` et `.env.example`.
 - Ajout d'un vrai cache mémoire L1 paramétrable au-dessus de SQLite.
 - Compatibilité conservée pour les anciens noms d'environnement `SEARCH_FETCH_CONCURRENCY` et `SEARCH_ENRICH_CONCURRENCY`.

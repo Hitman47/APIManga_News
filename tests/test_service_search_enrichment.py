@@ -150,7 +150,7 @@ async def test_volume_payload_includes_parent_vf_vo(tmp_path: Path):
     )
     service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
 
-    response = await service.get_volume(series_slug='One-Piece', volume_slug='vol-110')
+    response = await service.get_volume(series_slug='One-Piece', volume_slug='vol-110', include_parent_editions=True)
 
     assert response.data['vf']['volumes'] == 112
     assert response.data['vo']['volumes'] == 114

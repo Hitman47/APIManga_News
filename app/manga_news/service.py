@@ -699,7 +699,7 @@ class MangaNewsService:
         payload, entry, cached, partial, warnings = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug, url=url)
         data = deepcopy(payload.get('data', {}) or {})
         resolved_include_parent_editions = (
-            self._setting_bool('volume_default_include_parent_editions', True)
+            self._setting_bool('volume_default_include_parent_editions', False)
             if include_parent_editions is None
             else include_parent_editions
         )

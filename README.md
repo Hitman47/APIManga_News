@@ -295,7 +295,7 @@ La configuration `.env.example` réexpose maintenant les réglages de tuning qui
 - `CACHE_MEMORY_ENTRIES` : pilote le cache mémoire L1 au-dessus de SQLite ;
 - `SEARCH_DEFAULT_ENRICH` : valeur par défaut de `enrich` sur `/search` et `/search/resolve` ;
 - `SEARCH_DEFAULT_INCLUDE_EDITIONS` : valeur par défaut de `include_editions` sur `/search` et `/search/resolve` ;
-- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` : valeur par défaut de `include_parent_editions` sur `/volume`.
+- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` : valeur par défaut de `include_parent_editions` sur `/volume` ; la valeur recommandée est `false` pour éviter un refetch série implicite sur chaque lecture volume.
 
 Compatibilité conservée :
 

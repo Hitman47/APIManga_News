@@ -212,5 +212,5 @@ Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un c
 
 - `SQLITE_BUSY_TIMEOUT_MS` ajuste la tolérance SQLite à la contention ;
 - `CACHE_MEMORY_ENTRIES` dimensionne le cache mémoire L1 ;
-- `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` redonnent du pilotage sans modifier le code ;
+- `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` redonnent du pilotage sans modifier le code ; pour `/volume`, la valeur sûre côté perf reste `false` tant que tu n'as pas explicitement besoin de `vf` / `vo` ;
 - `SEARCH_FETCH_CONCURRENCY` et `SEARCH_ENRICH_CONCURRENCY` restent tolérés comme alias legacy.
