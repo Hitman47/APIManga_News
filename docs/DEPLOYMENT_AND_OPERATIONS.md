@@ -203,7 +203,7 @@ En cas de doute lors d'un déploiement, tu peux aussi supprimer le fichier SQLit
 
 ## Note de cache importante
 
-Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Le runtime ajoute désormais SQLite WAL, une connexion persistante, un `busy_timeout`, un cache mémoire L1 et une mutualisation single-flight des fetchs concurrents. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+Les réponses `series`, `volume`, `search`, `search/resolve` et `series/{slug}/editions` dépendent d'un cache SQLite local. Le runtime ajoute désormais SQLite WAL, une connexion persistante, un `busy_timeout`, un cache mémoire L1, une mutualisation single-flight des fetchs concurrents, un cache source dédié pour les candidats de recherche et un cache séparé pour les blocs d'éditions `vf` / `vo`. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
 
 
 ## Réglages de perf à surveiller
@@ -215,4 +215,4 @@ Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un c
 - `CACHE_MEMORY_ENTRIES` : taille du cache mémoire L1.
 - `SQLITE_BUSY_TIMEOUT_MS` : délai d'attente SQLite avant erreur de verrouillage.
 - `REQUEST_MAX_RETRIES` / `REQUEST_BACKOFF_SECONDS` : retries HTTP amont.
-- Surveille les logs `search_perf` et `volume_perf` pour voir si `enrich=true` est utilisé trop souvent ou si la concurrence est trop haute.
+- Surveille les logs `search_source_perf`, `search_perf`, `volume_perf` et `series_editions_perf` pour voir si le coût vient des pages sources, de l'enrichissement détaillé, ou des lectures d'éditions.

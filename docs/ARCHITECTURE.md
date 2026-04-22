@@ -148,5 +148,7 @@ Ce comportement rend les réponses plus utiles, mais explique aussi pourquoi une
 
 - cache mémoire L1 au-dessus de SQLite ;
 - SQLite en mode WAL avec connexion persistante et `busy_timeout` ;
+- cache source dédié pour les candidats de recherche, réutilisé entre plusieurs variantes de `/search` et `/search/resolve` ;
+- cache séparé des blocs d'éditions série `vf` / `vo`, ensuite recomposés pour `/series/{slug}/editions` ;
 - mutualisation single-flight des fetchs concurrents vers une même clé de cache ;
-- logs `search_perf` et `volume_perf` pour rendre visibles les coûts de chaque opération.
+- logs `search_source_perf`, `search_perf`, `volume_perf` et `series_editions_perf` pour rendre visibles les coûts de chaque opération.

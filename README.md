@@ -36,7 +36,9 @@ Fonctions utiles déjà en place :
 - normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning, les éditions de série, et les résultats de recherche enrichis ;
 - projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
 - cache SQLite persistant avec stale cache, negative cache, cache mémoire L1 et SQLite WAL ;
+- cache source dédié pour les pages de recherche, afin de réutiliser les mêmes candidats entre `mode=best`, `mode=all`, `enrich=true` et `enrich=false` ;
 - déduplication single-flight pour éviter les fetchs amont dupliqués sous charge concurrente ;
+- cache par bloc d'éditions (`vf` / `vo`) pour que `/series/{slug}/editions` réutilise les mêmes fetchs entre `edition=vf`, `edition=vo` et `edition=all` ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
 - documentation OpenAPI native via `/docs`, `/redoc`, `/openapi.json` ;
 - exemples JSON versionnés dans `docs/examples/`.
@@ -296,7 +298,7 @@ Après un changement de parseur, il faut redémarrer l'API. Les clés de cache m
 
 ## Note de cache importante
 
-Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+Les réponses `series`, `volume`, `search`, `search/resolve` et `series/{slug}/editions` dépendent d'un cache SQLite local. Le runtime sépare maintenant le cache des candidats de recherche du cache des réponses finales, ce qui évite de refetch les pages Manga-News quand seul `mode`, `limit` ou `enrich` change. Les blocs d'éditions série `vf` / `vo` sont eux aussi mis en cache individuellement, puis réutilisés pour `edition=all`. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
 
 
 ## Réglages performance utiles
@@ -308,4 +310,5 @@ Les réglages les plus utiles pour cette version :
 - `SEARCH_FETCH_CONCURRENCY` pour le parallélisme des pages de recherche ;
 - `SEARCH_ENRICH_CONCURRENCY` pour le parallélisme de l'enrichissement détaillé ;
 - `SEARCH_DEFAULT_ENRICH=false` pour garder `/search` léger par défaut ;
-- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` pour éviter le refetch automatique de la série parente sur les fiches volume.
+- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` pour éviter le refetch automatique de la série parente sur les fiches volume ;
+- surveiller désormais `search_source_perf`, `search_perf`, `volume_perf` et `series_editions_perf` pour identifier la vraie étape coûteuse.

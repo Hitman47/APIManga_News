@@ -330,6 +330,81 @@ class MangaNewsService:
     def _log_perf(self, event: str, **fields: Any) -> None:
         logger.info('%s %s', event, ' '.join(f'{key}={value!r}' for key, value in sorted(fields.items())))
 
+    def _build_search_urls(self, *, query: str, kind: Literal['series', 'volume', 'all']) -> list[str]:
+        search_urls: list[str] = []
+        if kind in {'series', 'all'}:
+            search_urls.extend([
+                f'{self.base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}',
+                f'{self.base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}',
+            ])
+        if kind in {'volume', 'all'}:
+            search_urls.extend([
+                f'{self.base_url}/index.php/recherche/?cat=manga-volume-vf&q={query}',
+                f'{self.base_url}/index.php/recherche/?cat=manga-volume-vo&q={query}',
+            ])
+        return search_urls
+
+    async def _get_search_candidates_payload(self, *, query: str, kind: Literal['series', 'volume', 'all']):
+        search_urls = self._build_search_urls(query=query, kind=kind)
+        raw_limit = max(1, int(self.settings.max_limit))
+        cache_key = versioned_cache_key(
+            'search-source',
+            query,
+            kind,
+            str(raw_limit),
+            str(self.settings.search_score_threshold),
+            *search_urls,
+        )
+
+        async def loader():
+            started = time.perf_counter()
+
+            async def _fetch_search_page(url: str):
+                result = await self.fetcher.get_text(url)
+                parsed = parse_search_page(
+                    html=result.text,
+                    page_url=result.url,
+                    base_url=self.base_url,
+                    query=query,
+                    kind=kind,
+                    score_threshold=self.settings.search_score_threshold,
+                    limit=raw_limit,
+                )
+                return result.url, parsed
+
+            fetched_pages = await self._run_with_limit(
+                search_urls,
+                _fetch_search_page,
+                concurrency=self._search_fetch_concurrency,
+            )
+            aggregated = [item for _, parsed in fetched_pages for item in parsed]
+            deduped: dict[str, object] = {}
+            for item in aggregated:
+                existing = deduped.get(item.url)
+                if existing is None or item.score > existing.score:
+                    deduped[item.url] = item
+            results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)[:raw_limit]
+            duration_ms = round((time.perf_counter() - started) * 1000, 2)
+            self._log_perf(
+                'search_source_perf',
+                query=query,
+                kind=kind,
+                search_pages=len(search_urls),
+                aggregated_hits=len(aggregated),
+                deduped_hits=len(deduped),
+                cached_candidates=len(results),
+                duration_ms=duration_ms,
+            )
+            return [item.model_dump() for item in results], search_urls[0] if search_urls else self.base_url
+
+        return await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_search_seconds,
+            loader=loader,
+            namespace='search-source',
+            resource_url=search_urls[0] if search_urls else self.base_url,
+        )
+
     async def _enrich_search_results(self, results: list[Any]) -> tuple[list[SearchResult], dict[str, int]]:
         perf = {
             'input_results': len(results),
@@ -455,47 +530,26 @@ class MangaNewsService:
         if not query:
             raise ParseError('The search query cannot be empty.')
         enrich = self._search_default_enrich if enrich is None else enrich
-        search_urls: list[str] = []
-        if kind in {'series', 'all'}:
-            search_urls.extend([
-                f'{self.base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}',
-                f'{self.base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}',
-            ])
-        if kind in {'volume', 'all'}:
-            search_urls.extend([
-                f'{self.base_url}/index.php/recherche/?cat=manga-volume-vf&q={query}',
-                f'{self.base_url}/index.php/recherche/?cat=manga-volume-vo&q={query}',
-            ])
-        cache_key = versioned_cache_key('search', query, kind, mode, str(limit), str(bool(enrich)), *search_urls)
+        search_urls = self._build_search_urls(query=query, kind=kind)
+        cache_key = versioned_cache_key(
+            'search',
+            query,
+            kind,
+            mode,
+            str(limit),
+            str(bool(enrich)),
+            str(self.settings.max_limit),
+            str(self.settings.search_score_threshold),
+        )
 
         async def loader():
             started = time.perf_counter()
-
-            async def _fetch_search_page(url: str):
-                result = await self.fetcher.get_text(url)
-                parsed = parse_search_page(
-                    html=result.text,
-                    page_url=result.url,
-                    base_url=self.base_url,
-                    query=query,
-                    kind=kind,
-                    score_threshold=self.settings.search_score_threshold,
-                    limit=max(limit, self.settings.max_limit),
-                )
-                return result.url, parsed
-
-            fetched_pages = await self._run_with_limit(
-                search_urls,
-                _fetch_search_page,
-                concurrency=self._search_fetch_concurrency,
-            )
-            aggregated = [item for _, parsed in fetched_pages for item in parsed]
-            deduped: dict[str, object] = {}
-            for item in aggregated:
-                existing = deduped.get(item.url)
-                if existing is None or item.score > existing.score:
-                    deduped[item.url] = item
-            results = sorted(deduped.values(), key=lambda item: item.score, reverse=True)
+            source_payload, *_ = await self._get_search_candidates_payload(query=query, kind=kind)
+            source_results = [
+                SearchResult.model_validate(item)
+                for item in (source_payload.get('data', []) or [])
+            ]
+            results: list[SearchResult] = source_results
             if mode == 'best' and results:
                 results = [results[0]]
             results = results[:limit]
@@ -504,7 +558,10 @@ class MangaNewsService:
             if enrich:
                 final_results, enrichment_perf = await self._enrich_search_results(results)
             else:
-                final_results = [SearchResult.model_validate(item.model_dump() if hasattr(item, 'model_dump') else dict(item)) for item in results]
+                final_results = [
+                    SearchResult.model_validate(item.model_dump() if hasattr(item, 'model_dump') else dict(item))
+                    for item in results
+                ]
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             self._log_perf(
                 'search_perf',
@@ -512,9 +569,7 @@ class MangaNewsService:
                 kind=kind,
                 mode=mode,
                 enrich=enrich,
-                search_pages=len(search_urls),
-                aggregated_hits=len(aggregated),
-                deduped_hits=len(deduped),
+                source_candidates=len(source_results),
                 returned_hits=len(final_results),
                 unique_series_fetches=enrichment_perf['unique_series_fetches'],
                 unique_volume_fetches=enrichment_perf['unique_volume_fetches'],
@@ -526,6 +581,8 @@ class MangaNewsService:
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_search_seconds,
             loader=loader,
+            namespace='search',
+            resource_url=search_urls[0] if search_urls else self.base_url,
         )
         found = bool(payload.get('data'))
         return Envelope(
@@ -666,28 +723,62 @@ class MangaNewsService:
         )
         return self._envelope({'data': related_data.model_dump(), 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
+    async def _get_series_editions_block_payload(self, *, slug: str, edition: Literal['vf', 'vo']):
+        target_url = f'{self.base_url}/index.php/serie/{"editionsVo" if edition == "vo" else "editions"}/{slug}'
+        cache_key = versioned_cache_key('series-editions-block', target_url, edition)
+
+        async def loader():
+            try:
+                result = await self.fetcher.get_text(target_url)
+                parsed = parse_series_editions_page(result.text, result.url, self.base_url, edition)
+                return parsed.model_dump(), result.url
+            except ResourceNotFound:
+                parsed = SeriesEditionsBlock(edition=edition, source_url=target_url, total=0, items=[])
+                return parsed.model_dump(), target_url
+
+        return await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_series_seconds,
+            loader=loader,
+            namespace='series-editions-block',
+            resource_url=target_url,
+        )
+
     async def get_series_editions(self, *, slug: str | None = None, url: str | None = None, edition: Literal['all', 'vf', 'vo'] = 'all') -> Envelope:
         target_url = self._resolve_series_url(slug=slug, url=url)
         target_slug = self._extract_series_slug(target_url)
         cache_key = versioned_cache_key('series-editions', target_url, edition)
 
         async def loader():
-            series_result = await self.fetcher.get_text(target_url)
-            series_payload = parse_series_page(series_result.text, series_result.url)
-            data = SeriesEditionsData(title=series_payload.title, series_slug=target_slug, source_url=series_result.url)
+            started = time.perf_counter()
+            series_payload, *_ = await self._get_series_payload(slug=target_slug)
+            series_data = series_payload.get('data', {}) or {}
+            data = SeriesEditionsData(title=series_data.get('title'), series_slug=target_slug, source_url=series_payload.get('source_url'))
             editions_to_fetch = ['vf', 'vo'] if edition == 'all' else [edition]
-            for current in editions_to_fetch:
-                current_url = f'{self.base_url}/index.php/serie/{"editionsVo" if current == "vo" else "editions"}/{target_slug}'
-                try:
-                    result = await self.fetcher.get_text(current_url)
-                    parsed = parse_series_editions_page(result.text, result.url, self.base_url, current)
-                except ResourceNotFound:
-                    parsed = SeriesEditionsBlock(edition=current, source_url=current_url, total=0, items=[])
+
+            async def _load_block(current: Literal['vf', 'vo']):
+                block_payload, *_ = await self._get_series_editions_block_payload(slug=target_slug, edition=current)
+                block_data = block_payload.get('data', {}) or {}
+                return current, SeriesEditionsBlock.model_validate(block_data)
+
+            for current, block in await self._run_with_limit(
+                editions_to_fetch,
+                _load_block,
+                concurrency=min(len(editions_to_fetch), 2),
+            ):
                 if current == 'vf':
-                    data.vf = parsed
+                    data.vf = block
                 else:
-                    data.vo = parsed
-            return data.model_dump(), series_result.url
+                    data.vo = block
+
+            self._log_perf(
+                'series_editions_perf',
+                slug=target_slug,
+                edition=edition,
+                blocks=len(editions_to_fetch),
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            )
+            return data.model_dump(), series_payload.get('source_url')
 
         payload, entry, cached, partial, warnings = await self._cached_payload(
             cache_key=cache_key,

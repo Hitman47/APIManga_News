@@ -1,3 +1,10 @@
+## 2026-04-22 — optimisation phase 2, cache source de recherche et éditions réutilisables
+
+- Les pages sources de `/search` sont désormais mises en cache séparément des réponses finales. Changer `mode`, `limit` ou `enrich` ne refetch donc plus automatiquement les pages de recherche Manga-News si les candidats bruts sont déjà chauds.
+- `/series/{slug}/editions` réutilise maintenant la fiche série cachée et met en cache séparément les blocs `vf` et `vo`, ce qui évite de relire inutilement les mêmes pages entre `edition=vf`, `edition=vo` et `edition=all`.
+- Les chargements d'éditions `vf` et `vo` peuvent maintenant être exécutés en parallèle lors d'un cache froid.
+- Ajout de logs `search_source_perf` et `series_editions_perf` pour distinguer le coût des pages sources du coût de l'enrichissement applicatif.
+
 ## 2026-04-22 — optimisation phase 1, search plus léger et volume opt-in
 
 - `/search` et `/search/resolve` restent désormais légers par défaut ; l'enrichissement détaillé devient opt-in via `enrich=true`.
