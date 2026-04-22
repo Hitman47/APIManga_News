@@ -207,12 +207,12 @@ async def test_volume_uses_settings_default_include_parent_editions(tmp_path: Pa
 
     calls = {'series': 0}
 
-    async def fake_get_series_payload(**kwargs):
+    async def fake_get_series_search_meta(**kwargs):
         calls['series'] += 1
         return ({'data': {'vf': {'volumes': 1}, 'vo': {'volumes': 2}}, 'source_url': 'https://example/series'}, DummyEntry(), False, False, [])
 
     service._get_volume_payload = fake_get_volume_payload
-    service._get_series_payload = fake_get_series_payload
+    service._get_series_search_meta = fake_get_series_search_meta
     service._extract_series_slug_from_volume_url = lambda url: 'One-Piece'
 
     payload = await service.get_volume(series_slug=None, volume_slug=None, url='https://example/volume')
@@ -220,3 +220,38 @@ async def test_volume_uses_settings_default_include_parent_editions(tmp_path: Pa
     assert calls['series'] == 1
     assert payload.data['vf']['volumes'] == 1
     assert payload.data['vo']['volumes'] == 2
+
+
+
+@pytest.mark.asyncio
+async def test_search_then_get_series_reuses_raw_html_cache(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    query = 'one piece'
+    search_url = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}'
+    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}'
+    series_url = f'{base_url}/index.php/serie/One-piece-Edition-originale'
+
+    class MappingFetcher:
+        def __init__(self, responses):
+            self.responses = responses
+            self.calls = []
+
+        async def get_text(self, url: str, params: dict | None = None):
+            self.calls.append(url)
+            return DummyFetchResult(self.responses[url], url)
+
+    fetcher = MappingFetcher({
+        search_url: f'<html><body><a href="{series_url}">One Piece</a></body></html>',
+        search_url_vo: '<html><body></body></html>',
+        series_url: Path('tests/fixtures/series_one_piece.html').read_text(encoding='utf-8'),
+    })
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    await service.search(query=query, kind='series', mode='all', limit=5, enrich=True)
+    await service.get_series(slug='One-piece-Edition-originale')
+
+    assert fetcher.calls.count(series_url) == 1

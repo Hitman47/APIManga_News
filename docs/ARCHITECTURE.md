@@ -155,4 +155,11 @@ Les knobs suivants sont à nouveau pilotés par l'environnement et appliqués pa
 - `SQLITE_BUSY_TIMEOUT_MS` pour le `PRAGMA busy_timeout` SQLite ;
 - `CACHE_MEMORY_ENTRIES` pour le cache mémoire L1 ;
 - `SEARCH_DEFAULT_ENRICH` et `SEARCH_DEFAULT_INCLUDE_EDITIONS` pour les routes de recherche ;
-- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` pour l'hydratation des compteurs sur `/volume`. Par défaut, il vaut désormais `false` pour éviter un refetch série implicite sur les lectures volume standards.
+- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` pour l'hydratation des compteurs sur `/volume` ; la valeur par défaut recommandée est `false` pour éviter un fetch parent implicite sur chaque volume.
+
+
+## Optimisations structurelles des fiches
+
+- les pages série et volume disposent maintenant d'un cache HTML brut partagé ;
+- les parseurs légers `series-search-meta` et `volume-search-meta` relisent ce HTML pour hydrater rapidement `title_vo`, `translated_title`, `vf`, `vo`, `number`, `edition_label`, `is_special`, `is_one_shot` ;
+- les routes détaillées (`/series`, `/volume`) peuvent ensuite parser le même HTML déjà en cache sans nouveau fetch upstream.

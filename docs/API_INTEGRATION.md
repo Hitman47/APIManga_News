@@ -495,4 +495,4 @@ Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un c
 Quand ils sont omis, les endpoints utilisent les valeurs de configuration serveur :
 
 - `/search` et `/search/resolve` : `enrich` ← `SEARCH_DEFAULT_ENRICH`, `include_editions` ← `SEARCH_DEFAULT_INCLUDE_EDITIONS` ;
-- `/volume` : `include_parent_editions` ← `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` (recommandé à `false` pour garder la lecture volume légère par défaut).
+- `/volume` : `include_parent_editions` ← `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` ; la valeur d'exploitation recommandée est `false` pour garder la route légère par défaut.
