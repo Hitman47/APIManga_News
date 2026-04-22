@@ -159,10 +159,12 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
     assert '/series/{slug}/editions' in payload['paths']
     assert '/series/{slug}/related' in payload['paths']
     assert '/search/resolve' in payload['paths']
+    assert '/health/runtime' in payload['paths']
     schemas = payload['components']['schemas']
     assert 'SeriesData' in schemas
     assert 'SeriesEditionsData' in schemas
     assert 'ResolveResponse' in schemas
+    assert 'RuntimeObservabilityResponse' in schemas
 
 
 def test_search_endpoint_exposes_alternate_titles():
@@ -273,4 +275,80 @@ def test_volume_route_forwards_include_parent_editions():
     with TestClient(app) as client:
         app.state.service = DummyService()
         response = client.get('/volume/One-Piece/vol-1?include_parent_editions=true')
+    assert response.status_code == 200
+
+
+def test_request_id_header_round_trips():
+    with TestClient(app) as client:
+        response = client.get('/health', headers={'X-Request-Id': 'req-test-123'})
+    assert response.status_code == 200
+    assert response.headers['X-Request-Id'] == 'req-test-123'
+
+
+
+def test_health_runtime_endpoint_exposes_metrics_and_defaults():
+    with TestClient(app) as client:
+        client.get('/health')
+        response = client.get('/health/runtime')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['ok'] is True
+    assert 'metrics' in payload
+    assert 'cache' in payload
+    assert 'defaults' in payload
+    assert 'timings' in payload['metrics']
+    assert payload['defaults']['search_default_enrich'] in {True, False}
+    assert response.headers['X-Request-Id']
+
+
+
+def test_search_route_preserves_none_when_optional_flags_omitted():
+    class DummyService:
+        async def search(self, **kwargs):
+            assert kwargs['enrich'] is None
+            assert kwargs['include_editions'] is None
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/recherche/',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-search-default-none',
+                'data': [],
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/search?q=one%20piece&kind=series&mode=all')
+    assert response.status_code == 200
+
+
+
+def test_volume_route_preserves_none_when_include_parent_editions_omitted():
+    class DummyService:
+        async def get_volume(self, **kwargs):
+            assert kwargs['include_parent_editions'] is None
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-1',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-volume-default-none',
+                'data': {'title': 'One Piece'},
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/volume/One-Piece/vol-1')
     assert response.status_code == 200

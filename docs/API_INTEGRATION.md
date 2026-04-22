@@ -37,7 +37,7 @@ Le format exact actuel est :
 
 ## 3. Enveloppe commune
 
-Toutes les routes métier sauf `/health` renvoient une enveloppe standard :
+Toutes les routes métier sauf `/health` et `/health/runtime` renvoient une enveloppe standard :
 
 ```json
 {
@@ -70,6 +70,7 @@ Toutes les routes métier sauf `/health` renvoient une enveloppe standard :
 Quand un `fingerprint` est présent, l'API renvoie aussi :
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
+- `X-Request-Id: <uuid-ou-valeur-fournie-par-le-client>`
 
 Tu peux alors envoyer :
 
@@ -128,6 +129,25 @@ Réponse :
 
 ---
 
+### 6.1 bis `GET /health/runtime`
+
+Usage : diagnostic technique local, corrélation de logs et inspection du cache.
+
+Ce que la route renvoie :
+- `metrics.counters` : compteurs agrégés (`cache_hits`, `cache_misses`, `singleflight_*`, `upstream_fetch_*`, etc.) ;
+- `metrics.timings` : latences roulantes par scope (`http.request`, `service.search`, `service.get_volume`, etc.) ;
+- `metrics.recent_requests` et `metrics.recent_events` si `include_recent=true` ;
+- `cache` : état du cache SQLite/L1 ;
+- `defaults` : valeurs serveur effectivement appliquées quand les query params optionnels sont absents.
+
+Exemple :
+
+```bash
+curl "http://localhost:8017/health/runtime?include_recent=true"
+```
+
+---
+
 ### 6.2 `GET /search`
 
 Usage : rechercher des séries ou des volumes à partir d'un texte libre.
@@ -136,7 +156,9 @@ Paramètres :
 - `q` : texte libre, obligatoire ;
 - `kind` : `series`, `volume`, `all` ;
 - `mode` : `best` ou `all` ;
-- `limit` : 1 à 50.
+- `limit` : 1 à 50 ;
+- `enrich` : optionnel, sinon fallback sur `SEARCH_DEFAULT_ENRICH` ;
+- `include_editions` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_EDITIONS`.
 
 Exemple :
 

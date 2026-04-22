@@ -214,3 +214,24 @@ Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un c
 - `CACHE_MEMORY_ENTRIES` dimensionne le cache mémoire L1 ;
 - `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` redonnent du pilotage sans modifier le code ; pour `/volume`, laisser `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` évite un fetch parent implicite à chaque appel ;
 - `SEARCH_FETCH_CONCURRENCY` et `SEARCH_ENRICH_CONCURRENCY` restent tolérés comme alias legacy.
+
+
+## Observabilité runtime
+
+### Headers utiles
+- `X-Request-Id` est renvoyé sur toutes les réponses ;
+- si le client en fournit un, l'API le réutilise tel quel ;
+- sinon l'API en génère un automatiquement.
+
+### Route technique
+- `GET /health/runtime` renvoie :
+  - les compteurs agrégés ;
+  - les timings roulants par scope ;
+  - les derniers événements de perf et les dernières requêtes si `include_recent=true` ;
+  - l'état du cache SQLite/L1 ;
+  - les defaults effectivement appliqués pour `/search`, `/search/resolve` et `/volume`.
+
+### Exploitation conseillée
+- en `LOG_FORMAT=json`, filtre les événements avec `request_id` pour suivre un appel précis ;
+- utilise `/health/runtime` pour vérifier rapidement si le hot path est plutôt côté cache, single-flight ou upstream ;
+- garde `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` en exploitation si tu veux préserver la latence moyenne des fiches volume.

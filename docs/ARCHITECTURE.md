@@ -21,6 +21,8 @@ flowchart LR
 1. **Route FastAPI**
    - valide les paramètres ;
    - vérifie le Bearer token si `API_TOKEN` est actif ;
+   - injecte / propage `X-Request-Id` via un middleware HTTP ;
+   - enregistre les métriques HTTP agrégées ;
    - délègue au `MangaNewsService`.
 
 2. **Service métier**
@@ -32,18 +34,23 @@ flowchart LR
    - parse la réponse ;
    - construit l'enveloppe finale.
 
-3. **Cache SQLite**
+3. **Observabilité runtime**
+   - un `MetricsStore` agrège compteurs, timings roulants et derniers événements ;
+   - `GET /health/runtime` expose ces métriques ainsi que l'état du cache et les defaults effectifs ;
+   - les logs applicatifs reprennent `request_id` quand il existe.
+
+4. **Cache SQLite**
    - stocke les réponses positives ;
    - stocke aussi les erreurs négatives courtes (`negative_cache_entries`) ;
    - garde une fenêtre stale pour servir une ancienne réponse si l'upstream échoue ;
    - réutilise une connexion SQLite persistante avec `journal_mode=WAL`, `synchronous=NORMAL` et `busy_timeout`.
 
-4. **Fetcher HTTP**
+5. **Fetcher HTTP**
    - envoie les requêtes vers Manga News ;
    - suit les redirections ;
    - traduit les erreurs HTTP / réseau en erreurs applicatives.
 
-5. **Parsers**
+6. **Parsers**
    - analysent le HTML / RSS ;
    - extraient les champs normalisés ;
    - lèvent `ParseError` quand la page n'est pas exploitable.
@@ -135,6 +142,8 @@ Présent dans la config ou dans des modules, mais non exposé comme contrat publ
 
 Les variables suivantes sont maintenant **actives** dans le runtime :
 - `LOG_FORMAT`
+- `X-Request-Id` sur toutes les réponses ;
+- `/health/runtime` pour l'observabilité technique ;
 - `REQUEST_MAX_RETRIES`
 - `REQUEST_BACKOFF_SECONDS`
 - `SEARCH_SOURCE_CONCURRENCY`

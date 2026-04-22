@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
@@ -13,12 +15,15 @@ from app.cache import SQLiteCache
 from app.config import Settings, get_settings
 from app.exceptions import ParseError, ResourceNotFound, UpstreamError
 from app.http import AsyncFetcher
+from app.logging_utils import get_request_id, reset_request_id, set_request_id
 from app.manga_news.service import MangaNewsService
+from app.metrics import MetricsStore
 from app.models import (
     HealthResponse,
     NewsResponse,
     PlanningResponse,
     ResolveResponse,
+    RuntimeObservabilityResponse,
     SearchResponse,
     SeriesEditionsResponse,
     SeriesRelatedResponse,
@@ -36,12 +41,14 @@ def configure_logging(settings: Settings) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = get_settings()
+    settings = getattr(app.state, 'settings', get_settings())
     configure_logging(settings)
+    metrics = MetricsStore()
     cache = SQLiteCache(
         settings.db_path,
         busy_timeout_ms=settings.sqlite_busy_timeout_ms,
         memory_entries=settings.cache_memory_entries,
+        metrics=metrics,
     )
     fetcher = AsyncFetcher(
         settings.user_agent,
@@ -49,9 +56,11 @@ async def lifespan(app: FastAPI):
         max_retries=settings.request_max_retries,
         backoff_seconds=settings.request_backoff_seconds,
         log_json=settings.log_format == 'json',
+        metrics=metrics,
     )
-    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=cache)
+    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=cache, metrics=metrics)
     app.state.settings = settings
+    app.state.metrics = metrics
     app.state.service = service
     try:
         yield
@@ -60,7 +69,8 @@ async def lifespan(app: FastAPI):
 
 
 TAGS_METADATA = [
-    {'name': 'Health', 'description': 'Minimal availability and auth sanity checks.'},
+    {'name': 'Health', 'description': 'Minimal availability checks and runtime observability helpers.'},
+    {'name': 'Observability', 'description': 'Request correlation headers, rolling metrics, and cache/runtime inspection.'},
     {'name': 'Search', 'description': 'Search Manga-News public pages and resolve the best candidate.'},
     {'name': 'Series', 'description': 'Detailed series payloads, related links, and edition listings.'},
     {'name': 'Volume', 'description': 'Detailed volume payloads.'},
@@ -76,8 +86,10 @@ Points importants :
 - pas de routes admin publiques ;
 - authentification optionnelle via `Authorization: Bearer <API_TOKEN>` si `API_TOKEN` est défini ;
 - `ETag` / `If-None-Match` disponibles sur les réponses enveloppées ;
+- `X-Request-Id` renvoyé sur toutes les réponses pour corréler les logs ;
 - les réponses de recherche et de résolution peuvent être enrichies avec `title_vo`, `translated_title`, et, quand l'information existe, les compteurs `vf` / `vo` issus de la fiche série parente ;
-- les réponses volume restent légères par défaut et n'hydratent `vf` / `vo` que si `include_parent_editions=true` ou si la configuration serveur l'active explicitement.
+- les réponses volume restent légères par défaut et n'hydratent `vf` / `vo` que si `include_parent_editions=true` ou si la configuration serveur l'active explicitement ;
+- une route technique `/health/runtime` expose les métriques agrégées, les derniers événements de perf et l'état du cache local.
 
 Flux conseillé :
 1. utiliser `/search` ou `/search/resolve` pour obtenir un slug ou un couple `series_slug` / `volume_slug` ;
@@ -264,6 +276,41 @@ app = FastAPI(
 )
 
 
+@app.middleware('http')
+async def request_context_middleware(request: Request, call_next):
+    request_id = request.headers.get('X-Request-Id') or uuid4().hex
+    token = set_request_id(request_id)
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        metrics = getattr(app.state, 'metrics', None)
+        if metrics is not None:
+            metrics.record_request(
+                method=request.method,
+                path=request.url.path,
+                status_code=500,
+                duration_ms=duration_ms,
+                request_id=request_id,
+            )
+        reset_request_id(token)
+        raise
+    duration_ms = round((time.perf_counter() - started) * 1000, 2)
+    response.headers['X-Request-Id'] = request_id
+    metrics = getattr(app.state, 'metrics', None)
+    if metrics is not None:
+        metrics.record_request(
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+            request_id=request_id,
+        )
+    reset_request_id(token)
+    return response
+
+
 def get_service() -> MangaNewsService:
     return app.state.service
 
@@ -320,6 +367,49 @@ async def health():
 
 
 @app.get(
+    '/health/runtime',
+    dependencies=[Depends(auth_dependency)],
+    response_model=RuntimeObservabilityResponse,
+    tags=['Observability'],
+    summary='Inspect runtime metrics and cache state',
+    description=(
+        'Route technique destinée au diagnostic local. Elle renvoie les compteurs agrégés, les timings roulants, '
+        'les derniers événements de performance, l’état du cache SQLite/L1, ainsi que les comportements par défaut actifs '
+        'pour `/search`, `/search/resolve` et `/volume`. Toutes les réponses incluent aussi `X-Request-Id`.'
+    ),
+)
+async def health_runtime(
+    include_recent: bool = Query(default=True, description='Inclure les dernières requêtes et événements de performance.'),
+):
+    metrics = getattr(app.state, 'metrics', None)
+    service = getattr(app.state, 'service', None)
+    settings = get_settings()
+    snapshot = metrics.snapshot(include_recent=include_recent).model_dump() if metrics is not None else {}
+    cache_stats = service.cache.stats() if service is not None else {}
+    return {
+        'ok': True,
+        'request_id': get_request_id(),
+        'metrics': snapshot,
+        'cache': cache_stats,
+        'defaults': {
+            'search_default_enrich': settings.search_default_enrich,
+            'search_default_include_editions': settings.search_default_include_editions,
+            'volume_default_include_parent_editions': settings.volume_default_include_parent_editions,
+            'search_source_concurrency': settings.search_source_concurrency,
+            'search_enrichment_concurrency': settings.search_enrichment_concurrency,
+            'request_max_retries': settings.request_max_retries,
+            'request_backoff_seconds': settings.request_backoff_seconds,
+            'sqlite_busy_timeout_ms': settings.sqlite_busy_timeout_ms,
+            'cache_memory_entries': settings.cache_memory_entries,
+        },
+        'service': {
+            'cache_schema_version': getattr(service, 'cache_schema_version', None),
+            'inflight_singleflight': service.inflight_count() if service is not None else 0,
+        },
+    }
+
+
+@app.get(
     '/search',
     dependencies=[Depends(auth_dependency)],
     response_model=SearchResponse,
@@ -327,8 +417,9 @@ async def health():
     summary='Search Manga-News public pages',
     description=(
         'Recherche des séries et/ou volumes à partir d’une requête libre. '
-        'Les résultats sont scorés après normalisation du texte et peuvent être enrichis avec '
-        '`title_vo`, `translated_title` et, quand la série parente est accessible, les compteurs `vf` / `vo`.'
+        'Les résultats sont scorés après normalisation du texte. Quand `enrich` et `include_editions` sont absents, '
+        'la route applique respectivement `SEARCH_DEFAULT_ENRICH` et `SEARCH_DEFAULT_INCLUDE_EDITIONS`. '
+        "L'enrichissement peut ajouter `title_vo`, `translated_title` et, quand la série parente est accessible, les compteurs `vf` / `vo`."
     ),
     responses={200: {'description': 'Search results envelope.', 'content': {'application/json': {'example': SEARCH_RESPONSE_EXAMPLE}}}},
 )
@@ -359,7 +450,7 @@ async def search(
     response_model=ResolveResponse,
     tags=['Search'],
     summary='Resolve the best search candidate',
-    description='Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`.',
+    description='Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`. Les flags `enrich` et `include_editions` suivent le même contrat par défaut que `/search`.',
     responses={200: {'description': 'Resolved best candidate.', 'content': {'application/json': {'example': RESOLVE_RESPONSE_EXAMPLE}}}},
 )
 async def search_resolve(
@@ -455,7 +546,7 @@ async def get_series_editions_by_url(
     response_model=VolumeResponse,
     tags=['Volume'],
     summary='Get a detailed volume payload',
-    description='Lit une fiche volume Manga-News. Le payload peut être enrichi avec les compteurs `vf` / `vo` de la série parente via `include_parent_editions=true` ou via la configuration serveur.',
+    description='Lit une fiche volume Manga-News. Quand `include_parent_editions` est absent, la route applique `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`. Avec `false`, la réponse reste légère ; avec `true`, elle peut hydrater `vf` / `vo` depuis la série parente.',
     responses={200: {'description': 'Volume envelope.', 'content': {'application/json': {'example': VOLUME_RESPONSE_EXAMPLE}}}},
 )
 async def get_volume(

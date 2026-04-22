@@ -19,6 +19,7 @@ Règle simple :
 Une IA consommatrice ne doit pas inventer :
 - de préfixe `/v1` ;
 - des routes admin ;
+- l'absence de `/health/runtime` dans le schéma si le code l'expose ;
 - une pagination normalisée absente ;
 - des champs non décrits dans les modèles ;
 - une recherche dédiée par `title_vo=` ou `translated_title=` ;
@@ -32,7 +33,9 @@ Elle peut supposer que :
 - `title_vo` et `translated_title` peuvent apparaître dans les recherches **et** les fiches détaillées ;
 - `vf` et `vo` peuvent apparaître sur les fiches série, les fiches volume enrichies, et les recherches enrichies ;
 - les champs peuvent être absents ou `null` ;
-- `ETag` et `X-Data-Fingerprint` sont présents sur les réponses enveloppées avec fingerprint.
+- `ETag` et `X-Data-Fingerprint` sont présents sur les réponses enveloppées avec fingerprint ;
+- `X-Request-Id` est présent sur toutes les réponses HTTP ;
+- `/health/runtime` est une route technique utile pour comprendre les timings et l'état du cache.
 
 ## 4. Mode opératoire conseillé pour une IA
 
@@ -106,4 +109,4 @@ Cette validation vérifie :
 
 ## Defaults serveur et query params
 
-L'OpenAPI expose `enrich`, `include_editions` et `include_parent_editions`. Quand ces query params sont absents, le comportement tombe sur les variables serveur documentées dans `.env.example`.
+L'OpenAPI expose `enrich`, `include_editions` et `include_parent_editions`. Quand ces query params sont absents, le comportement tombe sur les variables serveur documentées dans `.env.example`. `/health/runtime` permet ensuite de vérifier les defaults effectivement actifs sur l'instance.

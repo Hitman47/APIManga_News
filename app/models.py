@@ -32,6 +32,16 @@ class HealthResponse(BaseModel):
     ok: bool = True
 
 
+
+class RuntimeObservabilityResponse(BaseModel):
+    ok: bool = True
+    request_id: str | None = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    cache: dict[str, Any] = Field(default_factory=dict)
+    defaults: dict[str, Any] = Field(default_factory=dict)
+    service: dict[str, Any] = Field(default_factory=dict)
+
+
 class SearchResult(BaseModel):
     title: str
     url: str

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.metrics import MetricsStore
 from app.utils import now_utc
 
 
@@ -58,13 +59,14 @@ class NegativeCacheEntry:
 
 
 class SQLiteCache:
-    def __init__(self, db_path: Path, *, busy_timeout_ms: int = 5000, memory_entries: int = 0):
+    def __init__(self, db_path: Path, *, busy_timeout_ms: int = 5000, memory_entries: int = 0, metrics: MetricsStore | None = None):
         self.db_path = db_path
         self.busy_timeout_ms = max(0, int(busy_timeout_ms))
         self.memory_entries = max(0, int(memory_entries))
         self._lock = threading.RLock()
         self._memory_entries: OrderedDict[str, CacheEntry] = OrderedDict()
         self._memory_negative_entries: OrderedDict[str, NegativeCacheEntry] = OrderedDict()
+        self._metrics = metrics
         self._conn = self._connect()
         self._init_db()
 
@@ -203,6 +205,8 @@ class SQLiteCache:
             memory_entry = self._memory_entries.get(cache_key)
             if memory_entry is not None:
                 self._memory_entries.move_to_end(cache_key)
+                if self._metrics is not None:
+                    self._metrics.increment('cache_memory_hits')
                 return memory_entry
             with self._conn as conn:
                 row = conn.execute(
@@ -210,6 +214,8 @@ class SQLiteCache:
                     (cache_key,),
                 ).fetchone()
         if row is None:
+            if self._metrics is not None:
+                self._metrics.increment('cache_db_misses')
             return None
         entry = CacheEntry(
             key=row['cache_key'],
@@ -222,6 +228,8 @@ class SQLiteCache:
         )
         with self._lock:
             self._remember_entry(entry)
+        if self._metrics is not None:
+            self._metrics.increment('cache_db_hits')
         return entry
 
     def set(
@@ -272,6 +280,8 @@ class SQLiteCache:
                 resource_url=resource_url,
             )
             self._remember_entry(entry)
+            if self._metrics is not None:
+                self._metrics.increment('cache_writes')
             return entry
 
     def get_negative(self, cache_key: str) -> NegativeCacheEntry | None:
@@ -279,6 +289,8 @@ class SQLiteCache:
             memory_entry = self._memory_negative_entries.get(cache_key)
             if memory_entry is not None:
                 self._memory_negative_entries.move_to_end(cache_key)
+                if self._metrics is not None:
+                    self._metrics.increment('negative_cache_memory_hits')
                 return memory_entry
             with self._conn as conn:
                 row = conn.execute(
@@ -290,6 +302,8 @@ class SQLiteCache:
                     (cache_key,),
                 ).fetchone()
         if row is None:
+            if self._metrics is not None:
+                self._metrics.increment('negative_cache_misses')
             return None
         entry = NegativeCacheEntry(
             key=row['cache_key'],
@@ -303,6 +317,8 @@ class SQLiteCache:
         )
         with self._lock:
             self._remember_negative(entry)
+        if self._metrics is not None:
+            self._metrics.increment('negative_cache_db_hits')
         return entry
 
     def set_negative(
@@ -357,6 +373,8 @@ class SQLiteCache:
                 debug_dump_path=debug_dump_path,
             )
             self._remember_negative(entry)
+            if self._metrics is not None:
+                self._metrics.increment('negative_cache_writes')
             return entry
 
     def clear_negative(self, cache_key: str) -> None:
@@ -515,6 +533,8 @@ class SQLiteCache:
                 (watch_key,),
             ).fetchone()
         if row is None:
+            if self._metrics is not None:
+                self._metrics.increment('cache_db_misses')
             return None
         return WatchSnapshot(
             watch_key=row['watch_key'],

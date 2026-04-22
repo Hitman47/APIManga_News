@@ -1,3 +1,11 @@
+## 2026-04-22 — verrouillage du contrat par défaut et observabilité runtime
+
+- Ajout de `GET /health/runtime` pour exposer les métriques agrégées, les timings roulants, les événements récents et l'état du cache.
+- Toutes les réponses HTTP renvoient désormais `X-Request-Id`, réutilisé tel quel si le client le fournit.
+- Le runtime enregistre des timings dédiés pour `search`, `resolve_search`, `get_series`, `get_volume` et `get_series_editions`.
+- Les compteurs `cache_hits`, `cache_misses`, `cache_stale_fallbacks`, `negative_cache_hits` et `singleflight_*` sont maintenant remontés dans les métriques runtime.
+- Documentation clarifiée sur les defaults serveur de `enrich`, `include_editions` et `include_parent_editions` afin d'éviter les régressions de contrat.
+
 ## 2026-04-22 — optimisation structurelle de la recherche et du cache
 
 - Les pages source de `/search` sont maintenant cachées indépendamment du rendu final, ce qui évite de relire l'upstream quand seul `mode` ou `limit` change.

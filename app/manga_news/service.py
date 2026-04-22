@@ -17,6 +17,7 @@ from app.config import Settings
 from app.exceptions import ParseError, ResourceNotFound
 from app.logging_utils import log_event
 from app.http import AsyncFetcher
+from app.metrics import MetricsStore
 from app.models import (
     Envelope,
     NewsItem,
@@ -165,11 +166,12 @@ def versioned_cache_key(*parts: str) -> str:
 
 
 class MangaNewsService:
-    def __init__(self, settings: Settings, fetcher: AsyncFetcher, cache: SQLiteCache):
+    def __init__(self, settings: Settings, fetcher: AsyncFetcher, cache: SQLiteCache, metrics: MetricsStore | None = None):
         self.settings = settings
         self.fetcher = fetcher
         self.cache = cache
         self.base_url = settings.manga_news_base_url.rstrip('/')
+        self.metrics = metrics
         self._inflight: dict[str, asyncio.Task] = {}
         self._inflight_lock = asyncio.Lock()
 
@@ -235,6 +237,30 @@ class MangaNewsService:
                 return False
         return bool(value) if value is not None else default
 
+    @property
+    def cache_schema_version(self) -> str:
+        return CACHE_SCHEMA_VERSION
+
+    def inflight_count(self) -> int:
+        return len(self._inflight)
+
+    def _metrics_increment(self, key: str, value: int = 1) -> None:
+        if self.metrics is not None:
+            self.metrics.increment(key, value)
+
+    def _record_perf(self, *, scope: str, event: str, duration_ms: float, **fields: Any) -> None:
+        rounded_duration = round(float(duration_ms), 2)
+        log_event(
+            logger,
+            logging.INFO,
+            event,
+            json_mode=getattr(self.settings, 'log_format', 'text') == 'json',
+            duration_ms=rounded_duration,
+            **fields,
+        )
+        if self.metrics is not None:
+            self.metrics.record_operation(scope, duration_ms=rounded_duration, event=event, **fields)
+
     async def _compute_and_cache_payload(self, *, cache_key: str, ttl_seconds: int, loader, namespace: str | None = None, resource_url: str | None = None):
         entry = self.cache.get(cache_key)
         if entry and not self._is_compatible_cache_payload(entry.payload):
@@ -243,10 +269,13 @@ class MangaNewsService:
         if getattr(self.settings, 'negative_cache_enabled', True):
             negative_entry = self.cache.get_negative(cache_key)
             if negative_entry and negative_entry.is_fresh:
+                self._metrics_increment('negative_cache_hits')
                 raise self._negative_cache_exception(negative_entry)
 
         try:
             payload, source_url = await loader()
+            if entry is None or not entry.is_fresh:
+                self._metrics_increment('cache_misses')
             self.cache.clear_negative(cache_key)
             cached_entry = self.cache.set(
                 cache_key=cache_key,
@@ -270,12 +299,14 @@ class MangaNewsService:
                 )
             if entry and entry.is_stale_usable:
                 warning = f'Using stale cached data because the upstream fetch failed: {exc}'
+                self._metrics_increment('cache_stale_fallbacks')
                 logger.warning(warning)
                 return entry.payload, entry, True, True, [warning]
             raise
         except Exception as exc:
             if entry and entry.is_stale_usable:
                 warning = f'Using stale cached data because the upstream fetch failed: {exc}'
+                self._metrics_increment('cache_stale_fallbacks')
                 logger.warning(warning)
                 return entry.payload, entry, True, True, [warning]
             raise
@@ -285,12 +316,14 @@ class MangaNewsService:
         if entry and not self._is_compatible_cache_payload(entry.payload):
             entry = None
         if entry and entry.is_fresh:
+            self._metrics_increment('cache_hits')
             return entry.payload, entry, True, False, []
 
         async with self._inflight_lock:
             task = self._inflight.get(cache_key)
             created = False
             if task is None:
+                self._metrics_increment('singleflight_creations')
                 task = asyncio.create_task(
                     self._compute_and_cache_payload(
                         cache_key=cache_key,
@@ -302,6 +335,8 @@ class MangaNewsService:
                 )
                 self._inflight[cache_key] = task
                 created = True
+            else:
+                self._metrics_increment('singleflight_shared')
 
         try:
             return await task
@@ -573,6 +608,7 @@ class MangaNewsService:
         enrich: bool | None = None,
         include_editions: bool | None = None,
     ) -> Envelope:
+        started = time.perf_counter()
         search_response = await self.search(
             query=query,
             kind=kind,
@@ -598,6 +634,21 @@ class MangaNewsService:
             best=best,
             candidates=candidates,
         )
+        self._record_perf(
+            scope='service.resolve_search',
+            event='resolve_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            query=query,
+            kind=kind,
+            limit=limit,
+            enrich=enrich,
+            include_editions=include_editions,
+            candidates=len(candidates),
+            confidence=confidence,
+            found=best is not None,
+            cached=search_response.cached,
+            partial=search_response.partial,
+        )
         return Envelope(
             schema_version='1.0',
             ok=True,
@@ -622,6 +673,7 @@ class MangaNewsService:
         enrich: bool | None = None,
         include_editions: bool | None = None,
     ) -> Envelope:
+        started = time.perf_counter()
         query = clean_ws(query)
         if not query:
             raise ParseError('The search query cannot be empty.')
@@ -644,14 +696,16 @@ class MangaNewsService:
         )
 
         async def loader():
-            started = time.perf_counter()
+            loader_started = time.perf_counter()
             semaphore = asyncio.Semaphore(self._setting_int('search_source_concurrency', 4))
 
             async def load_source(url: str) -> list[SearchResult]:
                 async with semaphore:
                     return await self._get_search_source_results(url=url, query=query)
 
+            source_fetch_started = time.perf_counter()
             aggregated_lists = await asyncio.gather(*(load_source(url) for url in search_urls))
+            source_fetch_ms = round((time.perf_counter() - source_fetch_started) * 1000, 2)
             aggregated = [item for batch in aggregated_lists for item in batch if item.score >= self.settings.search_score_threshold]
             deduped: dict[str, SearchResult] = {}
             for item in aggregated:
@@ -662,27 +716,28 @@ class MangaNewsService:
             if mode == 'best' and results:
                 results = [results[0]]
             results = results[:limit]
+            enrichment_started = time.perf_counter()
             enriched = await self._enrich_search_results(
                 results,
                 enrich=resolved_enrich,
                 include_editions=resolved_include_editions,
             )
-            duration_ms = round((time.perf_counter() - started) * 1000, 2)
-            log_event(
-                logger,
-                logging.INFO,
-                'search_perf',
-                json_mode=getattr(self.settings, 'log_format', 'text') == 'json',
+            enrichment_ms = round((time.perf_counter() - enrichment_started) * 1000, 2)
+            self._record_perf(
+                scope='service.search.loader',
+                event='search_perf',
+                duration_ms=(time.perf_counter() - loader_started) * 1000,
                 query=query,
                 kind=kind,
                 mode=mode,
                 limit=limit,
                 search_urls=len(search_urls),
+                source_fetch_ms=source_fetch_ms,
+                enrichment_ms=enrichment_ms,
                 candidates_before_limit=len(deduped),
                 candidates_after_limit=len(enriched),
                 enrich=resolved_enrich,
                 include_editions=resolved_include_editions,
-                duration_ms=duration_ms,
             )
             return [item.model_dump() for item in enriched], search_urls[0] if search_urls else self.base_url
 
@@ -694,6 +749,21 @@ class MangaNewsService:
             resource_url=search_urls[0] if search_urls else self.base_url,
         )
         found = bool(payload.get('data'))
+        self._record_perf(
+            scope='service.search',
+            event='search_request_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            query=query,
+            kind=kind,
+            mode=mode,
+            limit=limit,
+            enrich=resolved_enrich,
+            include_editions=resolved_include_editions,
+            cached=cached,
+            partial=partial,
+            found=found,
+            result_count=len(payload.get('data', []) or []),
+        )
         return Envelope(
             schema_version='1.0',
             ok=True,
@@ -782,13 +852,28 @@ class MangaNewsService:
         fields: str | None = None,
         include_raw_sections: bool = False,
     ) -> Envelope:
+        started = time.perf_counter()
+        block_list = _split_csv_param(blocks)
+        field_list = _split_csv_param(fields)
         payload, entry, cached, partial, warnings = await self._get_series_payload(slug=slug, url=url)
         projected = project_resource_payload(
             payload.get('data', {}) or {},
             resource='series',
-            blocks=_split_csv_param(blocks),
-            fields=_split_csv_param(fields),
+            blocks=block_list,
+            fields=field_list,
             include_raw_sections=include_raw_sections,
+        )
+        self._record_perf(
+            scope='service.get_series',
+            event='series_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            slug=slug,
+            by_url=bool(url),
+            blocks=block_list,
+            fields=field_list,
+            include_raw_sections=include_raw_sections,
+            cached=cached,
+            partial=partial,
         )
         return self._envelope({'data': projected, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
@@ -803,6 +888,9 @@ class MangaNewsService:
         include_raw_sections: bool = False,
         include_parent_editions: bool | None = None,
     ) -> Envelope:
+        started = time.perf_counter()
+        block_list = _split_csv_param(blocks)
+        field_list = _split_csv_param(fields)
         payload, entry, cached, partial, warnings = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug, url=url)
         data = deepcopy(payload.get('data', {}) or {})
         resolved_include_parent_editions = (
@@ -811,9 +899,12 @@ class MangaNewsService:
             else include_parent_editions
         )
         target_series_slug = series_slug or self._extract_series_slug_from_volume_url(payload.get('source_url') or url or '')
+        parent_enrichment_ms = 0.0
         if resolved_include_parent_editions and target_series_slug:
             try:
+                parent_started = time.perf_counter()
                 series_payload, *_ = await self._get_series_search_meta(slug=target_series_slug)
+                parent_enrichment_ms = round((time.perf_counter() - parent_started) * 1000, 2)
                 series_data = series_payload.get('data', {}) or {}
                 data['vf'] = series_data.get('vf')
                 data['vo'] = series_data.get('vo')
@@ -822,9 +913,24 @@ class MangaNewsService:
         projected = project_resource_payload(
             data,
             resource='volume',
-            blocks=_split_csv_param(blocks),
-            fields=_split_csv_param(fields),
+            blocks=block_list,
+            fields=field_list,
             include_raw_sections=include_raw_sections,
+        )
+        self._record_perf(
+            scope='service.get_volume',
+            event='volume_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            series_slug=series_slug,
+            volume_slug=volume_slug,
+            by_url=bool(url),
+            include_parent_editions=resolved_include_parent_editions,
+            parent_enrichment_ms=parent_enrichment_ms,
+            blocks=block_list,
+            fields=field_list,
+            include_raw_sections=include_raw_sections,
+            cached=cached,
+            partial=partial,
         )
         return self._envelope({'data': projected, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
@@ -839,31 +945,36 @@ class MangaNewsService:
         return self._envelope({'data': related_data.model_dump(), 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
     async def get_series_editions(self, *, slug: str | None = None, url: str | None = None, edition: Literal['all', 'vf', 'vo'] = 'all') -> Envelope:
+        request_started = time.perf_counter()
         target_url = self._resolve_series_url(slug=slug, url=url)
         target_slug = self._extract_series_slug(target_url)
         cache_key = versioned_cache_key('series-editions', target_url, edition)
 
         async def loader():
             started = time.perf_counter()
+            series_meta_started = time.perf_counter()
             series_payload, *_ = await self._get_series_search_meta(slug=target_slug if slug or not url else None, url=target_url if url else None)
+            series_meta_ms = round((time.perf_counter() - series_meta_started) * 1000, 2)
             series_data = series_payload.get('data', {}) or {}
             data = SeriesEditionsData(title=series_data.get('title'), series_slug=target_slug, source_url=series_payload.get('source_url'))
             editions_to_fetch = ['vf', 'vo'] if edition == 'all' else [edition]
+            blocks_started = time.perf_counter()
             blocks = await asyncio.gather(*(self._get_series_editions_block(series_slug=target_slug, edition=current) for current in editions_to_fetch))
+            blocks_ms = round((time.perf_counter() - blocks_started) * 1000, 2)
             for block in blocks:
                 if block.edition == 'vf':
                     data.vf = block
                 else:
                     data.vo = block
-            log_event(
-                logger,
-                logging.INFO,
-                'series_editions_perf',
-                json_mode=getattr(self.settings, 'log_format', 'text') == 'json',
+            self._record_perf(
+                scope='service.get_series_editions.loader',
+                event='series_editions_perf',
+                duration_ms=(time.perf_counter() - started) * 1000,
                 series_slug=target_slug,
                 edition=edition,
+                series_meta_ms=series_meta_ms,
+                blocks_ms=blocks_ms,
                 fetched_blocks=len(blocks),
-                duration_ms=round((time.perf_counter() - started) * 1000, 2),
             )
             return data.model_dump(), series_payload.get('source_url') or target_url
 
@@ -873,6 +984,15 @@ class MangaNewsService:
             loader=loader,
             namespace='series-editions',
             resource_url=target_url,
+        )
+        self._record_perf(
+            scope='service.get_series_editions',
+            event='series_editions_request_perf',
+            duration_ms=(time.perf_counter() - request_started) * 1000,
+            series_slug=target_slug,
+            edition=edition,
+            cached=cached,
+            partial=partial,
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 

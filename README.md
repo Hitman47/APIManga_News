@@ -10,6 +10,7 @@ Le projet est pensé pour deux usages :
 
 Routes publiques actuellement disponibles :
 - `GET /health`
+- `GET /health/runtime`
 - `GET /search`
 - `GET /search/resolve`
 - `GET /series/{slug}`
@@ -38,6 +39,8 @@ Fonctions utiles déjà en place :
 - anti-stampede local (`single-flight`) pour éviter plusieurs fetchs identiques en parallèle sur une même clé ;
 - cache source des pages de recherche, réutilisé entre `mode=best` / `mode=all` et entre plusieurs limites pour une même requête ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
+- corrélation des logs via `X-Request-Id` sur toutes les réponses ;
+- observabilité runtime via `GET /health/runtime` (métriques agrégées, événements récents, état du cache) ;
 - documentation OpenAPI native via `/docs`, `/redoc`, `/openapi.json` ;
 - exemples JSON versionnés dans `docs/examples/`.
 
@@ -128,6 +131,12 @@ Oui, ce format 401 n'est pas identique aux 404/502. La doc le documente tel qu'i
 curl http://localhost:8017/health
 ```
 
+### Observabilité runtime
+
+```bash
+curl http://localhost:8017/health/runtime
+```
+
 ### Recherche de série
 
 ```bash
@@ -178,6 +187,19 @@ curl -H "Authorization: Bearer MON_TOKEN" \
   "http://localhost:8017/search?q=one%20piece"
 ```
 
+
+## Contrat par défaut verrouillé
+
+Ces comportements ne doivent plus être déduits au hasard :
+- `/search` et `/search/resolve` :
+  - si `enrich` est absent, la valeur vient de `SEARCH_DEFAULT_ENRICH` ;
+  - si `include_editions` est absent, la valeur vient de `SEARCH_DEFAULT_INCLUDE_EDITIONS`.
+- `/volume` :
+  - si `include_parent_editions` est absent, la valeur vient de `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` ;
+  - la recommandation d'exploitation reste `false` pour garder la route légère par défaut.
+- toutes les réponses HTTP renvoient `X-Request-Id` pour recouper un appel client avec les logs du serveur.
+- `GET /health/runtime` expose l'état courant du cache, les compteurs agrégés, les timings roulants et les derniers événements de performance.
+
 ## Contrat HTTP commun
 
 La plupart des routes renvoient une enveloppe comme celle-ci :
@@ -211,6 +233,7 @@ Les champs importants :
 Sur les routes enveloppées, l'API peut renvoyer :
 - `ETag: "<fingerprint>"`
 - `X-Data-Fingerprint: <fingerprint>`
+- `X-Request-Id: <uuid-ou-valeur-fournie-par-le-client>`
 
 Tu peux ensuite rejouer la requête avec :
 
