@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,9 +58,13 @@ class NegativeCacheEntry:
 
 
 class SQLiteCache:
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, *, busy_timeout_ms: int = 5000, memory_entries: int = 0):
         self.db_path = db_path
+        self.busy_timeout_ms = max(0, int(busy_timeout_ms))
+        self.memory_entries = max(0, int(memory_entries))
         self._lock = threading.RLock()
+        self._memory_entries: OrderedDict[str, CacheEntry] = OrderedDict()
+        self._memory_negative_entries: OrderedDict[str, NegativeCacheEntry] = OrderedDict()
         self._conn = self._connect()
         self._init_db()
 
@@ -69,8 +74,81 @@ class SQLiteCache:
         connection.execute('PRAGMA journal_mode=WAL')
         connection.execute('PRAGMA synchronous=NORMAL')
         connection.execute('PRAGMA temp_store=MEMORY')
-        connection.execute('PRAGMA busy_timeout=5000')
+        connection.execute(f'PRAGMA busy_timeout={self.busy_timeout_ms}')
         return connection
+
+    def _memory_enabled(self) -> bool:
+        return self.memory_entries > 0
+
+    def _remember_entry(self, entry: CacheEntry) -> None:
+        if not self._memory_enabled():
+            return
+        self._memory_entries.pop(entry.key, None)
+        self._memory_entries[entry.key] = entry
+        while len(self._memory_entries) > self.memory_entries:
+            self._memory_entries.popitem(last=False)
+
+    def _remember_negative(self, entry: NegativeCacheEntry) -> None:
+        if not self._memory_enabled():
+            return
+        self._memory_negative_entries.pop(entry.key, None)
+        self._memory_negative_entries[entry.key] = entry
+        while len(self._memory_negative_entries) > self.memory_entries:
+            self._memory_negative_entries.popitem(last=False)
+
+    def _forget_entry(self, cache_key: str) -> None:
+        self._memory_entries.pop(cache_key, None)
+
+    def _forget_negative(self, cache_key: str) -> None:
+        self._memory_negative_entries.pop(cache_key, None)
+
+    def _entry_matches(
+        self,
+        entry: CacheEntry,
+        *,
+        cache_key: str | None = None,
+        namespace: str | None = None,
+        resource_url: str | None = None,
+        expired_only: bool = False,
+        all_entries: bool = False,
+    ) -> bool:
+        if not any([cache_key, namespace, resource_url, expired_only, all_entries]):
+            return False
+        if cache_key and entry.key != cache_key:
+            return False
+        if namespace and entry.namespace != namespace:
+            return False
+        if resource_url and entry.resource_url != resource_url:
+            return False
+        if expired_only and entry.stale_until >= now_utc():
+            return False
+        if all_entries:
+            return True
+        return any([cache_key, namespace, resource_url, expired_only])
+
+    def _negative_entry_matches(
+        self,
+        entry: NegativeCacheEntry,
+        *,
+        cache_key: str | None = None,
+        namespace: str | None = None,
+        resource_url: str | None = None,
+        expired_only: bool = False,
+        all_entries: bool = False,
+    ) -> bool:
+        if not any([cache_key, namespace, resource_url, expired_only, all_entries]):
+            return False
+        if cache_key and entry.key != cache_key:
+            return False
+        if namespace and entry.namespace != namespace:
+            return False
+        if resource_url and entry.resource_url != resource_url:
+            return False
+        if expired_only and entry.expires_at >= now_utc():
+            return False
+        if all_entries:
+            return True
+        return any([cache_key, namespace, resource_url, expired_only])
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:
         existing_columns = {row['name'] for row in conn.execute(f'PRAGMA table_info({table})').fetchall()}
@@ -121,14 +199,19 @@ class SQLiteCache:
             conn.commit()
 
     def get(self, cache_key: str) -> CacheEntry | None:
-        with self._lock, self._conn as conn:
-            row = conn.execute(
-                'SELECT cache_key, payload, fetched_at, expires_at, stale_until, namespace, resource_url FROM cache_entries WHERE cache_key = ?',
-                (cache_key,),
-            ).fetchone()
+        with self._lock:
+            memory_entry = self._memory_entries.get(cache_key)
+            if memory_entry is not None:
+                self._memory_entries.move_to_end(cache_key)
+                return memory_entry
+            with self._conn as conn:
+                row = conn.execute(
+                    'SELECT cache_key, payload, fetched_at, expires_at, stale_until, namespace, resource_url FROM cache_entries WHERE cache_key = ?',
+                    (cache_key,),
+                ).fetchone()
         if row is None:
             return None
-        return CacheEntry(
+        entry = CacheEntry(
             key=row['cache_key'],
             payload=json.loads(row['payload']),
             fetched_at=datetime.fromisoformat(row['fetched_at']).astimezone(UTC),
@@ -137,6 +220,9 @@ class SQLiteCache:
             namespace=row['namespace'],
             resource_url=row['resource_url'],
         )
+        with self._lock:
+            self._remember_entry(entry)
+        return entry
 
     def set(
         self,
@@ -176,29 +262,36 @@ class SQLiteCache:
                 ),
             )
             conn.commit()
-        return CacheEntry(
-            key=cache_key,
-            payload=payload,
-            fetched_at=fetched_at,
-            expires_at=expires_at,
-            stale_until=stale_until,
-            namespace=namespace,
-            resource_url=resource_url,
-        )
+            entry = CacheEntry(
+                key=cache_key,
+                payload=payload,
+                fetched_at=fetched_at,
+                expires_at=expires_at,
+                stale_until=stale_until,
+                namespace=namespace,
+                resource_url=resource_url,
+            )
+            self._remember_entry(entry)
+            return entry
 
     def get_negative(self, cache_key: str) -> NegativeCacheEntry | None:
-        with self._lock, self._conn as conn:
-            row = conn.execute(
-                '''
-                SELECT cache_key, error_code, detail, created_at, expires_at, namespace, resource_url, debug_dump_path
-                FROM negative_cache_entries
-                WHERE cache_key = ?
-                ''',
-                (cache_key,),
-            ).fetchone()
+        with self._lock:
+            memory_entry = self._memory_negative_entries.get(cache_key)
+            if memory_entry is not None:
+                self._memory_negative_entries.move_to_end(cache_key)
+                return memory_entry
+            with self._conn as conn:
+                row = conn.execute(
+                    '''
+                    SELECT cache_key, error_code, detail, created_at, expires_at, namespace, resource_url, debug_dump_path
+                    FROM negative_cache_entries
+                    WHERE cache_key = ?
+                    ''',
+                    (cache_key,),
+                ).fetchone()
         if row is None:
             return None
-        return NegativeCacheEntry(
+        entry = NegativeCacheEntry(
             key=row['cache_key'],
             error_code=row['error_code'],
             detail=row['detail'],
@@ -208,6 +301,9 @@ class SQLiteCache:
             resource_url=row['resource_url'],
             debug_dump_path=row['debug_dump_path'],
         )
+        with self._lock:
+            self._remember_negative(entry)
+        return entry
 
     def set_negative(
         self,
@@ -250,21 +346,24 @@ class SQLiteCache:
                 ),
             )
             conn.commit()
-        return NegativeCacheEntry(
-            key=cache_key,
-            error_code=error_code,
-            detail=detail,
-            created_at=created_at,
-            expires_at=expires_at,
-            namespace=namespace,
-            resource_url=resource_url,
-            debug_dump_path=debug_dump_path,
-        )
+            entry = NegativeCacheEntry(
+                key=cache_key,
+                error_code=error_code,
+                detail=detail,
+                created_at=created_at,
+                expires_at=expires_at,
+                namespace=namespace,
+                resource_url=resource_url,
+                debug_dump_path=debug_dump_path,
+            )
+            self._remember_negative(entry)
+            return entry
 
     def clear_negative(self, cache_key: str) -> None:
         with self._lock, self._conn as conn:
             conn.execute('DELETE FROM negative_cache_entries WHERE cache_key = ?', (cache_key,))
             conn.commit()
+            self._forget_negative(cache_key)
 
     def stats(self) -> dict[str, Any]:
         now = now_utc()
@@ -316,6 +415,12 @@ class SQLiteCache:
 
         return {
             'db_path': str(self.db_path),
+            'memory_cache': {
+                'enabled': self._memory_enabled(),
+                'configured_entries': self.memory_entries,
+                'entry_count': len(self._memory_entries),
+                'negative_entry_count': len(self._memory_negative_entries),
+            },
             'totals': totals,
             'by_namespace': by_namespace,
             'negative_cache': {
@@ -375,6 +480,32 @@ class SQLiteCache:
             cursor = conn.execute(f'DELETE FROM cache_entries{entry_where_clause}', tuple(entry_params))
             negative_cursor = conn.execute(f'DELETE FROM negative_cache_entries{negative_where_clause}', tuple(negative_params))
             conn.commit()
+            keys_to_remove = [
+                key for key, entry in list(self._memory_entries.items())
+                if self._entry_matches(
+                    entry,
+                    cache_key=cache_key,
+                    namespace=namespace,
+                    resource_url=resource_url,
+                    expired_only=expired_only,
+                    all_entries=all_entries,
+                )
+            ]
+            for key in keys_to_remove:
+                self._forget_entry(key)
+            negative_keys_to_remove = [
+                key for key, entry in list(self._memory_negative_entries.items())
+                if self._negative_entry_matches(
+                    entry,
+                    cache_key=cache_key,
+                    namespace=namespace,
+                    resource_url=resource_url,
+                    expired_only=expired_only,
+                    all_entries=all_entries,
+                )
+            ]
+            for key in negative_keys_to_remove:
+                self._forget_negative(key)
             return int((cursor.rowcount or 0) + (negative_cursor.rowcount or 0))
 
     def get_watch_snapshot(self, watch_key: str) -> WatchSnapshot | None:

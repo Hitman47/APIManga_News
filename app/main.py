@@ -38,7 +38,11 @@ def configure_logging(settings: Settings) -> None:
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings)
-    cache = SQLiteCache(settings.db_path)
+    cache = SQLiteCache(
+        settings.db_path,
+        busy_timeout_ms=settings.sqlite_busy_timeout_ms,
+        memory_entries=settings.cache_memory_entries,
+    )
     fetcher = AsyncFetcher(
         settings.user_agent,
         settings.request_timeout_seconds,
@@ -333,9 +337,18 @@ async def search(
     kind: Literal['series', 'volume', 'all'] = Query(default='all', description='Limiter la recherche aux séries, aux volumes, ou aux deux.'),
     mode: Literal['best', 'all'] = Query(default='best', description='`best` garde les meilleurs candidats après tri ; `all` renvoie tous les candidats retenus.'),
     limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de résultats renvoyés.'),
+    enrich: bool | None = Query(default=None, description='`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.'),
+    include_editions: bool | None = Query(default=None, description='`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.'),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.search(query=q, kind=kind, mode=mode, limit=limit)
+    payload = await service.search(
+        query=q,
+        kind=kind,
+        mode=mode,
+        limit=limit,
+        enrich=enrich,
+        include_editions=include_editions,
+    )
     return _build_envelope_response(payload.model_dump(), request)
 
 
@@ -353,9 +366,17 @@ async def search_resolve(
     q: str = Query(..., min_length=1, description='Requête libre à résoudre.'),
     kind: Literal['series', 'volume', 'all'] = Query(default='all', description='Type d’objet à résoudre.'),
     limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de candidats inspectés.'),
+    enrich: bool | None = Query(default=None, description='`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.'),
+    include_editions: bool | None = Query(default=None, description='`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.'),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.resolve_search(query=q, kind=kind, limit=limit)
+    payload = await service.resolve_search(
+        query=q,
+        kind=kind,
+        limit=limit,
+        enrich=enrich,
+        include_editions=include_editions,
+    )
     return _build_envelope_response(payload.model_dump(), request)
 
 
@@ -443,9 +464,17 @@ async def get_volume(
     blocks: str | None = Query(default=None, description='Liste de blocs séparés par des virgules, par exemple `release,scores`.'),
     fields: str | None = Query(default=None, description='Liste de chemins de champs séparés par des virgules, par exemple `publication_date,isbn_ean`.'),
     include_raw_sections: bool = Query(default=False, description='Inclure les sections brutes extraites de la page HTML.'),
+    include_parent_editions: bool | None = Query(default=None, description='`true` pour hydrater `vf` / `vo` depuis la série parente ; `null` applique `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`.'),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.get_volume(series_slug=series_slug, volume_slug=volume_slug, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
+    payload = await service.get_volume(
+        series_slug=series_slug,
+        volume_slug=volume_slug,
+        blocks=blocks,
+        fields=fields,
+        include_raw_sections=include_raw_sections,
+        include_parent_editions=include_parent_editions,
+    )
     return _build_envelope_response(payload.model_dump(), request)
 
 
@@ -456,9 +485,16 @@ async def get_volume_by_url(
     blocks: str | None = Query(default=None),
     fields: str | None = Query(default=None),
     include_raw_sections: bool = Query(default=False),
+    include_parent_editions: bool | None = Query(default=None),
     service: MangaNewsService = Depends(get_service),
 ):
-    payload = await service.get_volume(url=url, blocks=blocks, fields=fields, include_raw_sections=include_raw_sections)
+    payload = await service.get_volume(
+        url=url,
+        blocks=blocks,
+        fields=fields,
+        include_raw_sections=include_raw_sections,
+        include_parent_editions=include_parent_editions,
+    )
     return _build_envelope_response(payload.model_dump(), request)
 
 

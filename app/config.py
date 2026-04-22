@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=20.0, alias='REQUEST_TIMEOUT_SECONDS')
     request_max_retries: int = Field(default=2, alias='REQUEST_MAX_RETRIES')
     request_backoff_seconds: float = Field(default=0.5, alias='REQUEST_BACKOFF_SECONDS')
+    sqlite_busy_timeout_ms: int = Field(default=5000, validation_alias=AliasChoices('SQLITE_BUSY_TIMEOUT_MS'))
+    cache_memory_entries: int = Field(default=512, validation_alias=AliasChoices('CACHE_MEMORY_ENTRIES'))
     cache_stale_grace_seconds: int = Field(default=7 * 24 * 3600, alias='CACHE_STALE_GRACE_SECONDS')
     cache_ttl_search_seconds: int = Field(default=24 * 3600, alias='CACHE_TTL_SEARCH_SECONDS')
     cache_ttl_series_seconds: int = Field(default=24 * 3600, alias='CACHE_TTL_SERIES_SECONDS')
@@ -30,8 +32,23 @@ class Settings(BaseSettings):
     search_score_threshold: int = Field(default=60, alias='SEARCH_SCORE_THRESHOLD')
     default_limit: int = Field(default=10, alias='DEFAULT_LIMIT')
     max_limit: int = Field(default=50, alias='MAX_LIMIT')
-    search_source_concurrency: int = Field(default=4, alias='SEARCH_SOURCE_CONCURRENCY')
-    search_enrichment_concurrency: int = Field(default=4, alias='SEARCH_ENRICHMENT_CONCURRENCY')
+    search_source_concurrency: int = Field(
+        default=4,
+        validation_alias=AliasChoices('SEARCH_SOURCE_CONCURRENCY', 'SEARCH_FETCH_CONCURRENCY'),
+    )
+    search_enrichment_concurrency: int = Field(
+        default=4,
+        validation_alias=AliasChoices('SEARCH_ENRICHMENT_CONCURRENCY', 'SEARCH_ENRICH_CONCURRENCY'),
+    )
+    search_default_enrich: bool = Field(default=True, validation_alias=AliasChoices('SEARCH_DEFAULT_ENRICH'))
+    search_default_include_editions: bool = Field(
+        default=True,
+        validation_alias=AliasChoices('SEARCH_DEFAULT_INCLUDE_EDITIONS'),
+    )
+    volume_default_include_parent_editions: bool = Field(
+        default=True,
+        validation_alias=AliasChoices('VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS'),
+    )
     enable_docs: bool = Field(default=True, alias='ENABLE_DOCS')
     debug_capture_html_on_error: bool = Field(default=False, alias='DEBUG_CAPTURE_HTML_ON_ERROR')
     debug_html_dump_dir: Path = Field(default=Path('/tmp/manga-news-debug-html'), alias='DEBUG_HTML_DUMP_DIR')
@@ -58,7 +75,6 @@ class Settings(BaseSettings):
     @property
     def rate_limit_exempt_path_list(self) -> list[str]:
         return [part.strip() for part in self.rate_limit_exempt_paths.split(',') if part.strip()]
-
 
 
 def _resolve_writable_db_path(db_path: Path) -> Path:

@@ -219,6 +219,18 @@ class MangaNewsService:
         except (TypeError, ValueError):
             return max(1, default)
 
+    def _setting_bool(self, name: str, default: bool) -> bool:
+        value = getattr(self.settings, name, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {'1', 'true', 'yes', 'on'}:
+                return True
+            if normalized in {'0', 'false', 'no', 'off'}:
+                return False
+        return bool(value) if value is not None else default
+
     async def _compute_and_cache_payload(self, *, cache_key: str, ttl_seconds: int, loader, namespace: str | None = None, resource_url: str | None = None):
         entry = self.cache.get(cache_key)
         if entry and not self._is_compatible_cache_payload(entry.payload):
@@ -380,19 +392,31 @@ class MangaNewsService:
             data=data,
         )
 
-    async def _enrich_search_results(self, results: list[Any]) -> list[SearchResult]:
+    async def _enrich_search_results(
+        self,
+        results: list[Any],
+        *,
+        enrich: bool,
+        include_editions: bool,
+    ) -> list[SearchResult]:
         if not results:
             return []
 
         payloads = [item.model_dump() if hasattr(item, 'model_dump') else dict(item) for item in results]
+        if not enrich and not include_editions:
+            return [SearchResult.model_validate(payload) for payload in payloads]
         series_slugs = {payload.get('slug') for payload in payloads if payload.get('kind') == 'series' and payload.get('slug')}
         series_slugs.update({payload.get('series_slug') for payload in payloads if payload.get('kind') == 'volume' and payload.get('series_slug')})
         series_slugs.discard(None)
-        volume_keys = {
-            (payload.get('series_slug'), payload.get('volume_slug'))
-            for payload in payloads
-            if payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug')
-        }
+        volume_keys = (
+            {
+                (payload.get('series_slug'), payload.get('volume_slug'))
+                for payload in payloads
+                if payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug')
+            }
+            if enrich
+            else set()
+        )
 
         series_data_map: dict[str, dict[str, Any]] = {}
         volume_data_map: dict[tuple[str, str], dict[str, Any]] = {}
@@ -423,27 +447,45 @@ class MangaNewsService:
         for payload in payloads:
             if payload.get('kind') == 'series' and payload.get('slug'):
                 series_data = series_data_map.get(payload['slug'], {})
-                payload['title_vo'] = series_data.get('title_vo')
-                payload['translated_title'] = series_data.get('translated_title')
-                payload['vf'] = series_data.get('vf')
-                payload['vo'] = series_data.get('vo')
+                if enrich:
+                    payload['title_vo'] = series_data.get('title_vo')
+                    payload['translated_title'] = series_data.get('translated_title')
+                if include_editions:
+                    payload['vf'] = series_data.get('vf')
+                    payload['vo'] = series_data.get('vo')
             elif payload.get('kind') == 'volume' and payload.get('series_slug') and payload.get('volume_slug'):
-                volume_data = volume_data_map.get((payload['series_slug'], payload['volume_slug']), {})
-                payload['title_vo'] = volume_data.get('title_vo')
-                payload['translated_title'] = volume_data.get('translated_title')
-                payload['number'] = volume_data.get('number')
-                payload['number_int'] = volume_data.get('number_int')
-                payload['edition_label'] = volume_data.get('edition_label')
-                payload['is_special'] = volume_data.get('is_special')
-                payload['is_one_shot'] = volume_data.get('is_one_shot')
-                series_data = series_data_map.get(payload['series_slug'], {})
-                payload['vf'] = series_data.get('vf')
-                payload['vo'] = series_data.get('vo')
+                if enrich:
+                    volume_data = volume_data_map.get((payload['series_slug'], payload['volume_slug']), {})
+                    payload['title_vo'] = volume_data.get('title_vo')
+                    payload['translated_title'] = volume_data.get('translated_title')
+                    payload['number'] = volume_data.get('number')
+                    payload['number_int'] = volume_data.get('number_int')
+                    payload['edition_label'] = volume_data.get('edition_label')
+                    payload['is_special'] = volume_data.get('is_special')
+                    payload['is_one_shot'] = volume_data.get('is_one_shot')
+                if include_editions:
+                    series_data = series_data_map.get(payload['series_slug'], {})
+                    payload['vf'] = series_data.get('vf')
+                    payload['vo'] = series_data.get('vo')
             enriched.append(SearchResult.model_validate(payload))
         return enriched
 
-    async def resolve_search(self, query: str, kind: Literal['series', 'volume', 'all'], limit: int) -> Envelope:
-        search_response = await self.search(query=query, kind=kind, mode='all', limit=limit)
+    async def resolve_search(
+        self,
+        query: str,
+        kind: Literal['series', 'volume', 'all'],
+        limit: int,
+        enrich: bool | None = None,
+        include_editions: bool | None = None,
+    ) -> Envelope:
+        search_response = await self.search(
+            query=query,
+            kind=kind,
+            mode='all',
+            limit=limit,
+            enrich=enrich,
+            include_editions=include_editions,
+        )
         candidates = [ResolveResult.model_validate(item) for item in (search_response.data or [])]
         best = candidates[0] if candidates else None
         if not best:
@@ -476,12 +518,35 @@ class MangaNewsService:
             data=data.model_dump(),
         )
 
-    async def search(self, query: str, kind: Literal['series', 'volume', 'all'], mode: Literal['best', 'all'], limit: int) -> Envelope:
+    async def search(
+        self,
+        query: str,
+        kind: Literal['series', 'volume', 'all'],
+        mode: Literal['best', 'all'],
+        limit: int,
+        enrich: bool | None = None,
+        include_editions: bool | None = None,
+    ) -> Envelope:
         query = clean_ws(query)
         if not query:
             raise ParseError('The search query cannot be empty.')
+        resolved_enrich = self._setting_bool('search_default_enrich', True) if enrich is None else enrich
+        resolved_include_editions = (
+            self._setting_bool('search_default_include_editions', True)
+            if include_editions is None
+            else include_editions
+        )
         search_urls = self._search_urls(query, kind)
-        cache_key = versioned_cache_key('search', query, kind, mode, str(limit), *search_urls)
+        cache_key = versioned_cache_key(
+            'search',
+            query,
+            kind,
+            mode,
+            str(limit),
+            str(int(resolved_enrich)),
+            str(int(resolved_include_editions)),
+            *search_urls,
+        )
 
         async def loader():
             started = time.perf_counter()
@@ -502,7 +567,11 @@ class MangaNewsService:
             if mode == 'best' and results:
                 results = [results[0]]
             results = results[:limit]
-            enriched = await self._enrich_search_results(results)
+            enriched = await self._enrich_search_results(
+                results,
+                enrich=resolved_enrich,
+                include_editions=resolved_include_editions,
+            )
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             log_event(
                 logger,
@@ -516,6 +585,8 @@ class MangaNewsService:
                 search_urls=len(search_urls),
                 candidates_before_limit=len(deduped),
                 candidates_after_limit=len(enriched),
+                enrich=resolved_enrich,
+                include_editions=resolved_include_editions,
                 duration_ms=duration_ms,
             )
             return [item.model_dump() for item in enriched], search_urls[0] if search_urls else self.base_url
@@ -623,11 +694,17 @@ class MangaNewsService:
         blocks: str | None = None,
         fields: str | None = None,
         include_raw_sections: bool = False,
+        include_parent_editions: bool | None = None,
     ) -> Envelope:
         payload, entry, cached, partial, warnings = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug, url=url)
         data = deepcopy(payload.get('data', {}) or {})
+        resolved_include_parent_editions = (
+            self._setting_bool('volume_default_include_parent_editions', True)
+            if include_parent_editions is None
+            else include_parent_editions
+        )
         target_series_slug = series_slug or self._extract_series_slug_from_volume_url(payload.get('source_url') or url or '')
-        if target_series_slug:
+        if resolved_include_parent_editions and target_series_slug:
             try:
                 series_payload, *_ = await self._get_series_payload(slug=target_series_slug)
                 series_data = series_payload.get('data', {}) or {}

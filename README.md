@@ -286,3 +286,18 @@ Après un changement de parseur, il faut redémarrer l'API. Les clés de cache m
 ## Note de cache importante
 
 Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+
+## Réglages de configuration restaurés
+
+La configuration `.env.example` réexpose maintenant les réglages de tuning qui avaient disparu :
+
+- `SQLITE_BUSY_TIMEOUT_MS` : pilote le `PRAGMA busy_timeout` réellement appliqué à SQLite ;
+- `CACHE_MEMORY_ENTRIES` : pilote le cache mémoire L1 au-dessus de SQLite ;
+- `SEARCH_DEFAULT_ENRICH` : valeur par défaut de `enrich` sur `/search` et `/search/resolve` ;
+- `SEARCH_DEFAULT_INCLUDE_EDITIONS` : valeur par défaut de `include_editions` sur `/search` et `/search/resolve` ;
+- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` : valeur par défaut de `include_parent_editions` sur `/volume`.
+
+Compatibilité conservée :
+
+- `SEARCH_FETCH_CONCURRENCY` reste accepté comme alias de `SEARCH_SOURCE_CONCURRENCY` ;
+- `SEARCH_ENRICH_CONCURRENCY` reste accepté comme alias de `SEARCH_ENRICHMENT_CONCURRENCY`.

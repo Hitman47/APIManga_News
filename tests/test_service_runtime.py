@@ -21,6 +21,9 @@ class DummySettings:
         self.cache_ttl_planning_seconds = 60
         self.search_score_threshold = 60
         self.max_limit = 50
+        self.search_default_enrich = False
+        self.search_default_include_editions = True
+        self.volume_default_include_parent_editions = False
         self.negative_cache_enabled = True
         self.negative_cache_ttl_seconds = 300
         self.debug_capture_html_on_error = debug_capture_html_on_error
@@ -147,3 +150,73 @@ async def test_series_editions_reuses_series_cache_and_block_cache(tmp_path: Pat
     assert fetcher.calls.count(series_url) == 1
     assert fetcher.calls.count(vf_url) == 1
     assert fetcher.calls.count(vo_url) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_uses_settings_defaults_for_optional_flags(tmp_path: Path):
+    class SearchDefaultsSettings(DummySettings):
+        def __init__(self, tmp_path: Path):
+            super().__init__(tmp_path)
+            self.search_default_enrich = True
+            self.search_default_include_editions = False
+
+    service = MangaNewsService(
+        settings=SearchDefaultsSettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+    called = {}
+
+    async def fake_get_search_source_results(*, url: str, query: str):
+        from app.models import SearchResult
+        return [SearchResult(title='One Piece', url=url, kind='series', score=95, slug='One-piece-Edition-originale')]
+
+    async def fake_enrich(results, *, enrich: bool, include_editions: bool):
+        called['enrich'] = enrich
+        called['include_editions'] = include_editions
+        return results
+
+    service._get_search_source_results = fake_get_search_source_results
+    service._enrich_search_results = fake_enrich
+
+    await service.search(query='one piece', kind='series', mode='all', limit=10)
+
+    assert called == {'enrich': True, 'include_editions': False}
+
+
+@pytest.mark.asyncio
+async def test_volume_uses_settings_default_include_parent_editions(tmp_path: Path):
+    class VolumeDefaultsSettings(DummySettings):
+        def __init__(self, tmp_path: Path):
+            super().__init__(tmp_path)
+            self.volume_default_include_parent_editions = True
+
+    service = MangaNewsService(
+        settings=VolumeDefaultsSettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    class DummyEntry:
+        from datetime import UTC, datetime
+        fetched_at = datetime(2026, 4, 22, 10, 0, tzinfo=UTC)
+        expires_at = datetime(2026, 4, 22, 11, 0, tzinfo=UTC)
+
+    async def fake_get_volume_payload(**kwargs):
+        return ({'data': {'title': 'One Piece 1'}, 'source_url': 'https://example/volume'}, DummyEntry(), False, False, [])
+
+    calls = {'series': 0}
+
+    async def fake_get_series_payload(**kwargs):
+        calls['series'] += 1
+        return ({'data': {'vf': {'volumes': 1}, 'vo': {'volumes': 2}}, 'source_url': 'https://example/series'}, DummyEntry(), False, False, [])
+
+    service._get_volume_payload = fake_get_volume_payload
+    service._get_series_payload = fake_get_series_payload
+    service._extract_series_slug_from_volume_url = lambda url: 'One-Piece'
+
+    payload = await service.get_volume(series_slug=None, volume_slug=None, url='https://example/volume')
+
+    assert calls['series'] == 1
+    assert payload.data['vf']['volumes'] == 1
+    assert payload.data['vo']['volumes'] == 2

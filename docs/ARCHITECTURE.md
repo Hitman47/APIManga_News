@@ -147,3 +147,12 @@ Pour certains résultats `/search`, le service relit une fiche détaillée avant
 - résultat `volume` -> relit la fiche volume pour injecter les champs normalisés du volume, puis relit la fiche série parente pour injecter `vf` / `vo`.
 
 Ce comportement rend les réponses plus utiles, mais explique aussi pourquoi une recherche peut déclencher plusieurs fetchs amont lors d'un cache froid.
+
+## Réglages d'exécution réellement pilotables
+
+Les knobs suivants sont à nouveau pilotés par l'environnement et appliqués par le runtime :
+
+- `SQLITE_BUSY_TIMEOUT_MS` pour le `PRAGMA busy_timeout` SQLite ;
+- `CACHE_MEMORY_ENTRIES` pour le cache mémoire L1 ;
+- `SEARCH_DEFAULT_ENRICH` et `SEARCH_DEFAULT_INCLUDE_EDITIONS` pour les routes de recherche ;
+- `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` pour l'hydratation des compteurs sur `/volume`.

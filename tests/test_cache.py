@@ -38,3 +38,22 @@ def test_negative_cache_round_trip(tmp_path: Path):
     assert entry.error_code == 'UPSTREAM_FETCH_ERROR'
     assert entry.detail == 'upstream down'
     assert entry.debug_dump_path == '/tmp/debug.html'
+
+
+def test_memory_cache_is_configurable_and_clears_on_invalidate(tmp_path: Path):
+    cache = SQLiteCache(tmp_path / 'cache.sqlite3', busy_timeout_ms=9000, memory_entries=1)
+    cache.set('key1', {'x': 1}, ttl_seconds=3600, stale_grace_seconds=3600, namespace='series', resource_url='https://example/series/1')
+    assert cache.stats()['memory_cache']['configured_entries'] == 1
+    assert cache.stats()['memory_cache']['entry_count'] == 1
+
+    cache.set('key2', {'x': 2}, ttl_seconds=3600, stale_grace_seconds=3600, namespace='series', resource_url='https://example/series/2')
+    cache_stats = cache.stats()
+    assert cache_stats['memory_cache']['configured_entries'] == 1
+    assert cache_stats['memory_cache']['entry_count'] == 1
+
+    pragma_timeout = cache._conn.execute('PRAGMA busy_timeout').fetchone()[0]
+    assert pragma_timeout == 9000
+
+    deleted = cache.invalidate(all_entries=True)
+    assert deleted >= 2
+    assert cache.stats()['memory_cache']['entry_count'] == 0

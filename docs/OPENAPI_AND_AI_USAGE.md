@@ -29,9 +29,8 @@ Une IA consommatrice ne doit pas inventer :
 Elle peut supposer que :
 - les routes publiques décrites dans `/openapi.json` existent ;
 - la plupart des réponses métier utilisent une enveloppe stable ;
-- `vf` / `vo` peuvent apparaître dans les recherches même sans `enrich=true`, tant que `include_editions=true` ;
-- `title_vo` et `translated_title` peuvent apparaître dans les recherches **si** `enrich=true`, et sur les fiches détaillées ;
-- `vf` et `vo` peuvent apparaître sur les fiches série, sur les recherches enrichies, et sur les fiches volume si `include_parent_editions=true` ou si une projection explicite les demande ;
+- `title_vo` et `translated_title` peuvent apparaître dans les recherches **et** les fiches détaillées ;
+- `vf` et `vo` peuvent apparaître sur les fiches série, les fiches volume enrichies, et les recherches enrichies ;
 - les champs peuvent être absents ou `null` ;
 - `ETag` et `X-Data-Fingerprint` sont présents sur les réponses enveloppées avec fingerprint.
 
@@ -39,16 +38,13 @@ Elle peut supposer que :
 
 ### Cas A — trouver une série
 1. `GET /search/resolve?q=<titre>&kind=series`
-   - garde le comportement par défaut si tu veux déjà `vf` / `vo` ; ajoute `&enrich=true` seulement si tu as aussi besoin de `title_vo` ou `translated_title` dès cette étape
 2. lire `data.best.slug`
 3. `GET /series/{slug}`
 
 ### Cas B — trouver un volume
 1. `GET /search/resolve?q=<titre>&kind=volume`
-   - garde le comportement par défaut si tu veux déjà les compteurs parentaux ; ajoute `&enrich=true` seulement si tu as aussi besoin de la normalisation volume avant l'appel détail
 2. lire `series_slug` et `volume_slug`
 3. `GET /volume/{series_slug}/{volume_slug}`
-   - ajoute `include_parent_editions=true` seulement si les compteurs `vf` / `vo` sont nécessaires
 
 ### Cas C — interface légère
 - utiliser `fields=` ou `blocks=` sur les routes détail ;
@@ -107,3 +103,7 @@ Cette validation vérifie :
 - que les routes clés existent ;
 - que les liens Markdown locaux sont valides ;
 - que les exemples JSON canoniques correspondent aux modèles Pydantic.
+
+## Defaults serveur et query params
+
+L'OpenAPI expose `enrich`, `include_editions` et `include_parent_editions`. Quand ces query params sont absents, le comportement tombe sur les variables serveur documentées dans `.env.example`.

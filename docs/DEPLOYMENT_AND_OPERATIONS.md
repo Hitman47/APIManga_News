@@ -207,3 +207,10 @@ En cas de doute lors d'un déploiement, tu peux aussi supprimer le fichier SQLit
 ## Note de cache importante
 
 Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+
+## Variables d'environnement restaurées
+
+- `SQLITE_BUSY_TIMEOUT_MS` ajuste la tolérance SQLite à la contention ;
+- `CACHE_MEMORY_ENTRIES` dimensionne le cache mémoire L1 ;
+- `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` redonnent du pilotage sans modifier le code ;
+- `SEARCH_FETCH_CONCURRENCY` et `SEARCH_ENRICH_CONCURRENCY` restent tolérés comme alias legacy.

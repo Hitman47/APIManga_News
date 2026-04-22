@@ -53,3 +53,9 @@ Recommandation pour les consommateurs :
 
 
 - 2026-04-21: invalidation automatique des anciennes entrées de cache incompatibles pour `series`, `volume`, `search` et `search/resolve`, afin d'éviter de conserver des payloads sans `vf` / `vo` après une mise à jour du parseur.
+
+## 2026-04-22 - Config de tuning restaurée
+
+- Réintroduction de `SQLITE_BUSY_TIMEOUT_MS`, `CACHE_MEMORY_ENTRIES`, `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` dans `Settings` et `.env.example`.
+- Ajout d'un vrai cache mémoire L1 paramétrable au-dessus de SQLite.
+- Compatibilité conservée pour les anciens noms d'environnement `SEARCH_FETCH_CONCURRENCY` et `SEARCH_ENRICH_CONCURRENCY`.

@@ -109,8 +109,6 @@ def test_series_route_forwards_projection_params():
 def test_search_resolve_and_etag_304():
     class DummyService:
         async def resolve_search(self, **kwargs):
-            assert kwargs['enrich'] is False
-            assert kwargs['include_editions'] is True
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
@@ -170,8 +168,6 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
 def test_search_endpoint_exposes_alternate_titles():
     class DummyService:
         async def search(self, **kwargs):
-            assert kwargs['enrich'] is False
-            assert kwargs['include_editions'] is True
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
@@ -227,3 +223,54 @@ def test_openapi_exposes_search_and_volume_edition_counters():
     assert payload['paths']['/series/{slug}']['get']['description']
     assert payload['paths']['/volume/{series_slug}/{volume_slug}']['get']['description']
     assert payload['paths']['/planning']['get']['description']
+
+
+def test_search_route_forwards_optional_perf_flags():
+    class DummyService:
+        async def search(self, **kwargs):
+            assert kwargs['enrich'] is True
+            assert kwargs['include_editions'] is False
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/recherche/',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-search-flags',
+                'data': [],
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/search?q=one%20piece&kind=series&mode=all&enrich=true&include_editions=false')
+    assert response.status_code == 200
+
+
+def test_volume_route_forwards_include_parent_editions():
+    class DummyService:
+        async def get_volume(self, **kwargs):
+            assert kwargs['include_parent_editions'] is True
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-1',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-volume-flags',
+                'data': {'title': 'One Piece'},
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/volume/One-Piece/vol-1?include_parent_editions=true')
+    assert response.status_code == 200

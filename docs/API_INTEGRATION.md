@@ -489,3 +489,10 @@ Tu peux donner ces règles à un agent consommateur :
 ## Note de cache importante
 
 Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+
+## Paramètres optionnels avec défauts côté serveur
+
+Quand ils sont omis, les endpoints utilisent les valeurs de configuration serveur :
+
+- `/search` et `/search/resolve` : `enrich` ← `SEARCH_DEFAULT_ENRICH`, `include_editions` ← `SEARCH_DEFAULT_INCLUDE_EDITIONS` ;
+- `/volume` : `include_parent_editions` ← `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`.
