@@ -1,3 +1,10 @@
+## 2026-04-22 — optimisation phase 5, méta volume légère et news source-cache
+
+- Ajout d'un cache léger `volume-search-meta` pour les résultats de recherche volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`, `title_vo` et `translated_title` sont maintenant récupérés sans passer par le parseur volume complet.
+- Conséquence : `enrich=true` sur `/search` et `/search/resolve` reste utile, mais coûte moins cher sur les résultats volume.
+- Les routes news (`/news/global`, `/news/series/...`, `/news/volume/...`) mettent maintenant en cache leur source normalisée indépendamment de `limit`, ce qui évite de refetch et reparser la même page quand seul le nombre d'items demandés change.
+- Ajout de logs `news_source_perf` pour distinguer le coût de chargement initial du simple slicing de réponse.
+
 ## 2026-04-22 — optimisation phase 4, cache HTML brut et méta série légère
 
 - Les pages HTML série / volume sont maintenant mises en cache séparément du payload JSON final, ce qui permet de réutiliser un même téléchargement entre plusieurs parseurs sans nouveau fetch réseau.

@@ -39,6 +39,8 @@ Fonctions utiles déjà en place :
 - cache HTML brut des pages série / volume pour réutiliser un même téléchargement entre plusieurs parseurs métier sans refetch réseau ;
 - cache source dédié pour les pages de recherche, afin de réutiliser les mêmes candidats entre `mode=best`, `mode=all`, `enrich=true`, `enrich=false`, `include_editions=true` et `include_editions=false` ;
 - cache léger `series-search-meta` pour les besoins de recherche (`title`, `title_vo`, `translated_title`, `vf`, `vo`) sans repasser systématiquement par le parseur série complet ;
+- cache léger `volume-search-meta` pour enrichir les résultats de recherche volume (`number`, `number_int`, `edition_label`, `is_special`, `is_one_shot`, `title_vo`, `translated_title`) sans lancer le parseur volume complet ;
+- cache source dédié pour les flux news et pages news, afin de réutiliser la même source entre plusieurs variantes de `limit` sans refetch ni reparsing complet ;
 - déduplication single-flight pour éviter les fetchs amont dupliqués sous charge concurrente ;
 - cache par bloc d'éditions (`vf` / `vo`) pour que `/series/{slug}/editions` réutilise les mêmes fetchs entre `edition=vf`, `edition=vo` et `edition=all` ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
@@ -122,7 +124,7 @@ curl http://localhost:8017/health
 
 Par défaut, `/search` garde les compteurs `vf` / `vo` mais évite l’enrichissement complet. Ajoute `enrich=true` seulement si tu as besoin des titres alternatifs ou de la normalisation volume. Passe `include_editions=false` si tu veux supprimer aussi l’hydratation des compteurs pour viser la latence minimale.
 
-En interne, les recherches et l'hydratation des compteurs réutilisent maintenant un cache HTML brut + un cache léger de méta série. Le but est simple : garder `vf` / `vo` par défaut sans reparser inutilement toute la fiche série ni refetch la même page juste après un `/search`.
+En interne, les recherches et l'hydratation des compteurs réutilisent maintenant un cache HTML brut + des caches légers de méta série et volume. Le but est simple : garder `vf` / `vo` par défaut et enrichir les volumes utiles sans reparser inutilement une fiche détaillée complète ni refetch la même page juste après un `/search`.
 
 
 ```bash

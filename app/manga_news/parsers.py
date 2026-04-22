@@ -23,6 +23,7 @@ from app.models import (
     SeriesSearchMetaData,
     SeriesStats,
     VolumeData,
+    VolumeSearchMetaData,
 )
 from app.utils import (
     clean_ws,
@@ -460,6 +461,30 @@ def parse_series_search_meta_page(html: str, page_url: str) -> SeriesSearchMetaD
         translated_title=_extract_line_value(lines, VALUE_LABELS['translated_title']),
         vf=vf,
         vo=vo,
+        source_url=page_url,
+    )
+
+
+def parse_volume_search_meta_page(html: str, page_url: str) -> VolumeSearchMetaData:
+    soup = _soup(html)
+    lines = _lines(soup)
+    title_clean = _extract_page_title(soup, lines, kind='volume')
+    parsed_path = [part for part in urlparse(page_url).path.split('/') if part]
+    number = extract_volume_number(title_clean, parsed_path[-1] if parsed_path else None)
+    volume_type = _extract_line_value(lines, VALUE_LABELS['type'])
+    collection = _extract_line_value(lines, VALUE_LABELS['collection'])
+    edition_label = infer_volume_edition_label(title_clean, collection, volume_type)
+    is_special, is_one_shot = infer_volume_flags(title_clean, collection, volume_type)
+
+    return VolumeSearchMetaData(
+        title=title_clean,
+        number=number,
+        number_int=parse_volume_number_int(number),
+        edition_label=edition_label,
+        is_special=is_special,
+        is_one_shot=is_one_shot,
+        title_vo=_extract_line_value(lines, VALUE_LABELS['title_vo']),
+        translated_title=_extract_line_value(lines, VALUE_LABELS['translated_title']),
         source_url=page_url,
     )
 

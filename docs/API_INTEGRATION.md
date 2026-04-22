@@ -490,3 +490,9 @@ Tu peux donner ces règles à un agent consommateur :
 ## Note de cache importante
 
 Les réponses `series`, `volume`, `search`, `search/resolve` et `series/{slug}/editions` dépendent d'un cache SQLite local. Le runtime ajoute maintenant un cache mémoire L1, SQLite WAL, un `busy_timeout`, une déduplication single-flight pour éviter les fetchs et accès disque redondants, un cache source dédié pour les candidats de recherche, puis un cache séparé pour les blocs d'éditions série `vf` / `vo`. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+
+
+- `enrich=true` sur `/search` et `/search/resolve` doit rester un choix explicite : c'est utile, mais plus coûteux qu'une recherche brute, même si les enrichissements volume passent désormais par un chemin léger dédié.
+- `include_editions=false` coupe aussi l’hydratation des compteurs `vf` / `vo` et reste donc le chemin le plus rapide possible quand ces compteurs sont inutiles.
+- `include_parent_editions=true` sur les fiches volume doit rester opt-in.
+- changer uniquement `limit` sur `/news/global`, `/news/series/...` ou `/news/volume/...` ne force plus un refetch upstream tant que la source news reste chaude en cache.

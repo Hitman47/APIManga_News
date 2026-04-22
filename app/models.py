@@ -176,6 +176,18 @@ class SeriesSearchMetaData(BaseModel):
     source_url: str | None = None
 
 
+class VolumeSearchMetaData(BaseModel):
+    title: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    edition_label: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
+    title_vo: str | None = None
+    translated_title: str | None = None
+    source_url: str | None = None
+
+
 class VolumeData(BaseModel):
     title: str | None = None
     series_title: str | None = None

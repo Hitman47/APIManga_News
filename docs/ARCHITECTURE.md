@@ -73,6 +73,7 @@ flowchart TD
 - trie par score ;
 - hydrate par défaut les compteurs `vf` / `vo` via un cache léger `series-search-meta` branché sur le HTML brut de la fiche série parente quand elle est nécessaire ;
 - peut ensuite enrichir davantage les résultats retenus, mais uniquement si `enrich=true` est demandé ;
+- pour les résultats `volume`, l'enrichissement détaillé passe maintenant par un cache léger `volume-search-meta` au lieu d'un parse volume complet, tant qu'on ne demande pas la fiche volume détaillée ;
 - déduplique les lectures détaillées par `series_slug` / `volume_slug` avant de lancer l'enrichissement.
 
 ### `/search/resolve`
@@ -152,7 +153,9 @@ Ce comportement rend les réponses plus utiles, mais explique aussi pourquoi une
 - SQLite en mode WAL avec connexion persistante et `busy_timeout` ;
 - cache HTML brut des pages série / volume, réutilisable entre plusieurs parseurs ;
 - cache léger `series-search-meta` pour les chemins qui ont seulement besoin des titres alternatifs et des compteurs `vf` / `vo` ;
+- cache léger `volume-search-meta` pour les enrichissements volume de `/search` et `/search/resolve` ;
 - cache source dédié pour les candidats de recherche, réutilisé entre plusieurs variantes de `/search` et `/search/resolve` ;
+- cache source dédié pour les flux et pages news, réutilisé entre plusieurs variantes de `limit` ;
 - cache séparé des blocs d'éditions série `vf` / `vo`, ensuite recomposés pour `/series/{slug}/editions` ;
 - mutualisation single-flight des fetchs concurrents vers une même clé de cache ;
 - logs `search_source_perf`, `search_perf`, `volume_perf` et `series_editions_perf` pour rendre visibles les coûts de chaque opération.

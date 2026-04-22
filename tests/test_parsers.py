@@ -4,6 +4,7 @@ from app.manga_news.parsers import (
     parse_series_editions_page,
     parse_series_page,
     parse_volume_page,
+    parse_volume_search_meta_page,
 )
 
 
@@ -177,6 +178,19 @@ def test_parse_volume_page():
     assert parsed.editorial_score == 16.0
     assert parsed.illustration_details and parsed.illustration_details.pages == 208
     assert parsed.related and parsed.related.external[0].title == 'Acheter'
+
+
+
+def test_parse_volume_search_meta_page():
+    parsed = parse_volume_search_meta_page(VOLUME_HTML, 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110')
+    assert parsed.title == 'One Piece Vol.110'
+    assert parsed.number == '110'
+    assert parsed.number_int == 110
+    assert parsed.edition_label == 'edition_originale'
+    assert parsed.is_special is False
+    assert parsed.is_one_shot is False
+    assert parsed.title_vo == 'ワンピース'
+    assert parsed.translated_title == 'One Piece'
 
 
 

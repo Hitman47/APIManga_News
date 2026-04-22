@@ -35,6 +35,7 @@ from app.manga_news.parsers import (
     parse_series_page,
     parse_series_search_meta_page,
     parse_volume_page,
+    parse_volume_search_meta_page,
 )
 from app.utils import clean_ws, fingerprint_data, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
 
@@ -485,7 +486,7 @@ class MangaNewsService:
         async def _fetch_volume(key: tuple[str, str]):
             series_slug, volume_slug = key
             try:
-                payload, *_ = await self._get_volume_payload(series_slug=series_slug, volume_slug=volume_slug)
+                payload, *_ = await self._get_volume_search_meta_payload(series_slug=series_slug, volume_slug=volume_slug)
                 return key, payload.get('data', {}) or {}
             except Exception as exc:  # pragma: no cover - best-effort enrichment
                 logger.debug('Search volume enrichment failed for %s/%s: %s', series_slug, volume_slug, exc)
@@ -737,6 +738,38 @@ class MangaNewsService:
             resource_url=target_url,
         )
 
+    async def _get_volume_search_meta_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
+        target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
+        cache_key = versioned_cache_key('volume-search-meta', target_url)
+
+        async def loader():
+            html_payload, *_ = await self._get_raw_html_payload(
+                target_url=target_url,
+                ttl_seconds=self.settings.cache_ttl_volume_seconds,
+                resource_kind='volume',
+            )
+            html = html_payload.get('data', {}).get('html', '')
+            source_url = html_payload.get('source_url') or target_url
+            try:
+                parsed = parse_volume_search_meta_page(html, source_url)
+            except ParseError as exc:
+                raise self._with_debug_dump(
+                    error=exc,
+                    html=html,
+                    source_url=source_url,
+                    cache_key=cache_key,
+                    resource_kind='volume-search-meta',
+                ) from exc
+            return parsed.model_dump(), source_url
+
+        return await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_volume_seconds,
+            loader=loader,
+            namespace='volume-search-meta',
+            resource_url=target_url,
+        )
+
     async def _get_raw_html_payload(self, *, target_url: str, ttl_seconds: int, resource_kind: Literal['series', 'volume']):
         cache_key = versioned_cache_key('raw-html', resource_kind, target_url)
 
@@ -889,15 +922,16 @@ class MangaNewsService:
         )
         return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
 
-    async def get_global_news(self, *, limit: int) -> Envelope:
+    async def _get_global_news_items_payload(self):
         rss_url = f'{self.base_url}/index.php/feed/news'
-        cache_key = versioned_cache_key('news-global', rss_url, str(limit))
+        cache_key = versioned_cache_key('news-global-source', rss_url, str(self.settings.max_limit))
 
         async def loader():
+            started = time.perf_counter()
             result = await self.fetcher.get_text(rss_url)
             feed = feedparser.parse(result.text)
             items: list[NewsItem] = []
-            for entry in feed.entries[:limit]:
+            for entry in feed.entries[: self.settings.max_limit]:
                 items.append(
                     NewsItem(
                         title=clean_ws(entry.get('title')),
@@ -907,16 +941,27 @@ class MangaNewsService:
                         category=clean_ws(entry.tags[0].term) if getattr(entry, 'tags', None) else None,
                     )
                 )
+            self._log_perf(
+                'news_source_perf',
+                target_url=result.url,
+                namespace='news-global',
+                items=len(items),
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            )
             return [item.model_dump() for item in items], result.url
 
-        payload, entry, cached, partial, warnings = await self._cached_payload(
+        return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_news_global_seconds,
             loader=loader,
-            namespace='news-global',
+            namespace='news-global-source',
             resource_url=rss_url,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def get_global_news(self, *, limit: int) -> Envelope:
+        payload, entry, cached, partial, warnings = await self._get_global_news_items_payload()
+        sliced = list((payload.get('data', []) or [])[:limit])
+        return self._envelope({'data': sliced, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
     async def get_series_news(self, *, slug: str, limit: int) -> Envelope:
         target_url = f'{self.base_url}/index.php/serie/news/{slug}'
@@ -1064,22 +1109,38 @@ class MangaNewsService:
         except ValueError as exc:
             raise ParseError(f'{field_name} must be a valid date.') from exc
 
-    async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> Envelope:
-        cache_key = versioned_cache_key(cache_namespace, target_url, str(limit))
+    async def _get_news_page_items_payload(self, *, target_url: str, cache_namespace: str, ttl: int):
+        cache_key = versioned_cache_key(f'{cache_namespace}-source', target_url, str(self.settings.max_limit))
 
         async def loader():
+            started = time.perf_counter()
             result = await self.fetcher.get_text(target_url)
-            parsed = parse_news_page(result.text, result.url, self.base_url, limit=limit)
+            parsed = parse_news_page(result.text, result.url, self.base_url, limit=self.settings.max_limit)
+            self._log_perf(
+                'news_source_perf',
+                target_url=result.url,
+                namespace=cache_namespace,
+                items=len(parsed),
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            )
             return [item.model_dump() for item in parsed], result.url
 
-        payload, entry, cached, partial, warnings = await self._cached_payload(
+        return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=ttl,
             loader=loader,
-            namespace=cache_namespace,
+            namespace=f'{cache_namespace}-source',
             resource_url=target_url,
         )
-        return self._envelope(payload, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def _get_news_page(self, *, target_url: str, cache_namespace: str, ttl: int, limit: int) -> Envelope:
+        payload, entry, cached, partial, warnings = await self._get_news_page_items_payload(
+            target_url=target_url,
+            cache_namespace=cache_namespace,
+            ttl=ttl,
+        )
+        sliced = list((payload.get('data', []) or [])[:limit])
+        return self._envelope({'data': sliced, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
     def _resolve_series_url(self, *, slug: str | None, url: str | None) -> str:
         if url:
