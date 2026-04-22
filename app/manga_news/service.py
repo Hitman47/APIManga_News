@@ -33,13 +33,14 @@ from app.manga_news.parsers import (
     parse_search_page,
     parse_series_editions_page,
     parse_series_page,
+    parse_series_search_meta_page,
     parse_volume_page,
 )
 from app.utils import clean_ws, fingerprint_data, is_manga_news_url, make_cache_key, normalize_text, now_utc, parse_french_date, score_match
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-04-21-vfvo-2'
+CACHE_SCHEMA_VERSION = '2026-04-22-search-meta-rawhtml-1'
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
@@ -417,7 +418,7 @@ class MangaNewsService:
 
         async def _fetch_series(slug: str):
             try:
-                payload, *_ = await self._get_series_payload(slug=slug)
+                payload, *_ = await self._get_series_search_meta_payload(slug=slug)
                 return slug, payload.get('data', {}) or {}
             except Exception as exc:  # pragma: no cover - best-effort enrichment
                 logger.debug('Search series enrichment failed for %s: %s', slug, exc)
@@ -645,18 +646,24 @@ class MangaNewsService:
         cache_key = versioned_cache_key('series', target_url)
 
         async def loader():
-            result = await self.fetcher.get_text(target_url)
+            html_payload, *_ = await self._get_raw_html_payload(
+                target_url=target_url,
+                ttl_seconds=self.settings.cache_ttl_series_seconds,
+                resource_kind='series',
+            )
+            html = html_payload.get('data', {}).get('html', '')
+            source_url = html_payload.get('source_url') or target_url
             try:
-                parsed = parse_series_page(result.text, result.url)
+                parsed = parse_series_page(html, source_url)
             except ParseError as exc:
                 raise self._with_debug_dump(
                     error=exc,
-                    html=result.text,
-                    source_url=result.url,
+                    html=html,
+                    source_url=source_url,
                     cache_key=cache_key,
                     resource_kind='series',
                 ) from exc
-            return parsed.model_dump(), result.url
+            return parsed.model_dump(), source_url
 
         return await self._cached_payload(
             cache_key=cache_key,
@@ -666,29 +673,82 @@ class MangaNewsService:
             resource_url=target_url,
         )
 
+    async def _get_series_search_meta_payload(self, *, slug: str | None = None, url: str | None = None):
+        target_url = self._resolve_series_url(slug=slug, url=url)
+        cache_key = versioned_cache_key('series-search-meta', target_url)
+
+        async def loader():
+            html_payload, *_ = await self._get_raw_html_payload(
+                target_url=target_url,
+                ttl_seconds=self.settings.cache_ttl_series_seconds,
+                resource_kind='series',
+            )
+            html = html_payload.get('data', {}).get('html', '')
+            source_url = html_payload.get('source_url') or target_url
+            try:
+                parsed = parse_series_search_meta_page(html, source_url)
+            except ParseError as exc:
+                raise self._with_debug_dump(
+                    error=exc,
+                    html=html,
+                    source_url=source_url,
+                    cache_key=cache_key,
+                    resource_kind='series-search-meta',
+                ) from exc
+            return parsed.model_dump(), source_url
+
+        return await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_series_seconds,
+            loader=loader,
+            namespace='series-search-meta',
+            resource_url=target_url,
+        )
+
     async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
         cache_key = versioned_cache_key('volume', target_url)
 
         async def loader():
-            result = await self.fetcher.get_text(target_url)
+            html_payload, *_ = await self._get_raw_html_payload(
+                target_url=target_url,
+                ttl_seconds=self.settings.cache_ttl_volume_seconds,
+                resource_kind='volume',
+            )
+            html = html_payload.get('data', {}).get('html', '')
+            source_url = html_payload.get('source_url') or target_url
             try:
-                parsed = parse_volume_page(result.text, result.url)
+                parsed = parse_volume_page(html, source_url)
             except ParseError as exc:
                 raise self._with_debug_dump(
                     error=exc,
-                    html=result.text,
-                    source_url=result.url,
+                    html=html,
+                    source_url=source_url,
                     cache_key=cache_key,
                     resource_kind='volume',
                 ) from exc
-            return parsed.model_dump(), result.url
+            return parsed.model_dump(), source_url
 
         return await self._cached_payload(
             cache_key=cache_key,
             ttl_seconds=self.settings.cache_ttl_volume_seconds,
             loader=loader,
             namespace='volume',
+            resource_url=target_url,
+        )
+
+    async def _get_raw_html_payload(self, *, target_url: str, ttl_seconds: int, resource_kind: Literal['series', 'volume']):
+        cache_key = versioned_cache_key('raw-html', resource_kind, target_url)
+
+        async def loader():
+            result = await self.fetcher.get_text(target_url)
+            return {'html': result.text}, result.url
+
+        return await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=ttl_seconds,
+            loader=loader,
+            namespace=f'raw-html-{resource_kind}',
             resource_url=target_url,
         )
 
@@ -731,7 +791,7 @@ class MangaNewsService:
         if should_include_parent_editions and target_series_slug:
             started = time.perf_counter()
             try:
-                series_payload, *_ = await self._get_series_payload(slug=target_series_slug)
+                series_payload, *_ = await self._get_series_search_meta_payload(slug=target_series_slug)
                 series_data = series_payload.get('data', {}) or {}
                 data['vf'] = series_data.get('vf')
                 data['vo'] = series_data.get('vo')
@@ -791,7 +851,7 @@ class MangaNewsService:
 
         async def loader():
             started = time.perf_counter()
-            series_payload, *_ = await self._get_series_payload(slug=target_slug)
+            series_payload, *_ = await self._get_series_search_meta_payload(slug=target_slug)
             series_data = series_payload.get('data', {}) or {}
             data = SeriesEditionsData(title=series_data.get('title'), series_slug=target_slug, source_url=series_payload.get('source_url'))
             editions_to_fetch = ['vf', 'vo'] if edition == 'all' else [edition]

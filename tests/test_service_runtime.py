@@ -145,6 +145,32 @@ async def test_search_reuses_cached_source_pages_across_modes_and_enrichment(tmp
 
 
 @pytest.mark.asyncio
+async def test_search_then_series_detail_reuses_cached_raw_series_html(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    search_url_vf = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q=one piece'
+    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q=one piece'
+    series_slug = 'One-piece-Edition-originale'
+    series_url = f'{base_url}/index.php/serie/{series_slug}'
+    fetcher = MappingFetcher({
+        search_url_vf: f'<html><body><a href="{series_url}">One Piece</a></body></html>',
+        search_url_vo: '<html><body></body></html>',
+        series_url: Path('tests/fixtures/series_one_piece.html').read_text(encoding='utf-8'),
+    })
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    search_response = await service.search(query='one piece', kind='series', mode='best', limit=1, enrich=False)
+    series_response = await service.get_series(slug=series_slug)
+
+    assert search_response.data[0]['vf']['volumes'] == 112
+    assert series_response.data['title'] == 'One Piece'
+    assert fetcher.calls.count(series_url) == 1
+
+
+@pytest.mark.asyncio
 async def test_series_editions_reuses_cached_series_and_edition_blocks(tmp_path: Path):
     base_url = 'https://www.manga-news.com'
     series_slug = 'One-piece-Edition-originale'

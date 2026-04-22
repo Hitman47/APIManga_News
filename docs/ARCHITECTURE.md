@@ -33,6 +33,7 @@ flowchart LR
 
 3. **Cache SQLite**
    - stocke les réponses positives ;
+   - stocke aussi le HTML brut des pages série / volume pour éviter de retélécharger la même page quand plusieurs parseurs internes en ont besoin ;
    - stocke aussi les erreurs négatives courtes (`negative_cache_entries`) ;
    - garde une fenêtre stale pour servir une ancienne réponse si l'upstream échoue.
 
@@ -70,7 +71,7 @@ flowchart TD
 - interroge plusieurs pages de recherche Manga News selon `kind` ;
 - déduplique les URLs ;
 - trie par score ;
-- hydrate par défaut les compteurs `vf` / `vo` en relisant uniquement la fiche série parente quand elle est nécessaire ;
+- hydrate par défaut les compteurs `vf` / `vo` via un cache léger `series-search-meta` branché sur le HTML brut de la fiche série parente quand elle est nécessaire ;
 - peut ensuite enrichir davantage les résultats retenus, mais uniquement si `enrich=true` est demandé ;
 - déduplique les lectures détaillées par `series_slug` / `volume_slug` avant de lancer l'enrichissement.
 
@@ -149,6 +150,8 @@ Ce comportement rend les réponses plus utiles, mais explique aussi pourquoi une
 
 - cache mémoire L1 au-dessus de SQLite ;
 - SQLite en mode WAL avec connexion persistante et `busy_timeout` ;
+- cache HTML brut des pages série / volume, réutilisable entre plusieurs parseurs ;
+- cache léger `series-search-meta` pour les chemins qui ont seulement besoin des titres alternatifs et des compteurs `vf` / `vo` ;
 - cache source dédié pour les candidats de recherche, réutilisé entre plusieurs variantes de `/search` et `/search/resolve` ;
 - cache séparé des blocs d'éditions série `vf` / `vo`, ensuite recomposés pour `/series/{slug}/editions` ;
 - mutualisation single-flight des fetchs concurrents vers une même clé de cache ;

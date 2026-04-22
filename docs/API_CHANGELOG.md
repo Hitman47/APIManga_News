@@ -1,3 +1,10 @@
+## 2026-04-22 — optimisation phase 4, cache HTML brut et méta série légère
+
+- Les pages HTML série / volume sont maintenant mises en cache séparément du payload JSON final, ce qui permet de réutiliser un même téléchargement entre plusieurs parseurs sans nouveau fetch réseau.
+- Ajout d'un cache léger `series-search-meta` pour les chemins qui ont seulement besoin de `title`, `title_vo`, `translated_title`, `vf` et `vo`.
+- `/search`, `/search/resolve`, `/volume?...include_parent_editions=true` et `/series/{slug}/editions` réutilisent ce chemin léger au lieu de dépendre systématiquement du parseur série complet.
+- Conséquence importante : un `/search` qui hydrate les compteurs `vf` / `vo` peut maintenant être suivi d'un `/series/{slug}` sans refetch réseau supplémentaire de la même page série tant que le HTML brut est encore chaud.
+
 ## 2026-04-22 — optimisation phase 2, cache source de recherche et éditions réutilisables
 
 - Les pages sources de `/search` sont désormais mises en cache séparément des réponses finales. Changer `mode`, `limit` ou `enrich` ne refetch donc plus automatiquement les pages de recherche Manga-News si les candidats bruts sont déjà chauds.

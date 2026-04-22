@@ -167,6 +167,15 @@ class SeriesData(BaseModel):
     source_url: str | None = None
 
 
+class SeriesSearchMetaData(BaseModel):
+    title: str | None = None
+    title_vo: str | None = None
+    translated_title: str | None = None
+    vf: EditionStatus | None = None
+    vo: EditionStatus | None = None
+    source_url: str | None = None
+
+
 class VolumeData(BaseModel):
     title: str | None = None
     series_title: str | None = None

@@ -20,6 +20,7 @@ from app.models import (
     SeriesData,
     SeriesEditionItem,
     SeriesEditionsBlock,
+    SeriesSearchMetaData,
     SeriesStats,
     VolumeData,
 )
@@ -444,6 +445,21 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
         strengths=strengths,
         related=_extract_related_links(soup, _base_url_from_page(page_url), page_url),
         raw_sections=raw_sections or None,
+        source_url=page_url,
+    )
+
+
+def parse_series_search_meta_page(html: str, page_url: str) -> SeriesSearchMetaData:
+    soup = _soup(html)
+    lines = _lines(soup)
+    title_clean = _extract_page_title(soup, lines, kind='series')
+    vf, vo, _, _ = _extract_vf_vo(soup, lines)
+    return SeriesSearchMetaData(
+        title=title_clean,
+        title_vo=_extract_line_value(lines, VALUE_LABELS['title_vo']),
+        translated_title=_extract_line_value(lines, VALUE_LABELS['translated_title']),
+        vf=vf,
+        vo=vo,
         source_url=page_url,
     )
 

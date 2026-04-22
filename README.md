@@ -36,7 +36,9 @@ Fonctions utiles déjà en place :
 - normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning, les éditions de série, et les résultats de recherche enrichis ;
 - projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
 - cache SQLite persistant avec stale cache, negative cache, cache mémoire L1 et SQLite WAL ;
+- cache HTML brut des pages série / volume pour réutiliser un même téléchargement entre plusieurs parseurs métier sans refetch réseau ;
 - cache source dédié pour les pages de recherche, afin de réutiliser les mêmes candidats entre `mode=best`, `mode=all`, `enrich=true`, `enrich=false`, `include_editions=true` et `include_editions=false` ;
+- cache léger `series-search-meta` pour les besoins de recherche (`title`, `title_vo`, `translated_title`, `vf`, `vo`) sans repasser systématiquement par le parseur série complet ;
 - déduplication single-flight pour éviter les fetchs amont dupliqués sous charge concurrente ;
 - cache par bloc d'éditions (`vf` / `vo`) pour que `/series/{slug}/editions` réutilise les mêmes fetchs entre `edition=vf`, `edition=vo` et `edition=all` ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
@@ -119,6 +121,8 @@ curl http://localhost:8017/health
 ### Recherche de série
 
 Par défaut, `/search` garde les compteurs `vf` / `vo` mais évite l’enrichissement complet. Ajoute `enrich=true` seulement si tu as besoin des titres alternatifs ou de la normalisation volume. Passe `include_editions=false` si tu veux supprimer aussi l’hydratation des compteurs pour viser la latence minimale.
+
+En interne, les recherches et l'hydratation des compteurs réutilisent maintenant un cache HTML brut + un cache léger de méta série. Le but est simple : garder `vf` / `vo` par défaut sans reparser inutilement toute la fiche série ni refetch la même page juste après un `/search`.
 
 
 ```bash
