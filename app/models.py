@@ -59,8 +59,10 @@ class SearchResult(BaseModel):
     translated_title: str | None = None
     source_type: str | None = None
     media_kind: str | None = None
+    relation_kind: str | None = None
     root_series_slug: str | None = None
     relation_kind: str | None = None
+    root_series_slug: str | None = None
     vf: 'EditionStatus | None' = None
     vo: 'EditionStatus | None' = None
 
@@ -86,8 +88,6 @@ class ResolveResult(BaseModel):
     translated_title: str | None = None
     source_type: str | None = None
     media_kind: str | None = None
-    root_series_slug: str | None = None
-    relation_kind: str | None = None
     vf: 'EditionStatus | None' = None
     vo: 'EditionStatus | None' = None
 

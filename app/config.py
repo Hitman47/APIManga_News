@@ -46,7 +46,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices('SEARCH_DEFAULT_INCLUDE_EDITIONS'),
     )
     search_default_prefer_main_series: bool = Field(
-        default=True,
+        default=False,
         validation_alias=AliasChoices('SEARCH_DEFAULT_PREFER_MAIN_SERIES'),
     )
     search_default_include_related: bool = Field(

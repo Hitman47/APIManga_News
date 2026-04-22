@@ -8,6 +8,9 @@ def test_settings_accept_legacy_and_restored_env_knobs(monkeypatch):
     monkeypatch.setenv('CACHE_MEMORY_ENTRIES', '123')
     monkeypatch.setenv('SEARCH_DEFAULT_ENRICH', 'true')
     monkeypatch.setenv('SEARCH_DEFAULT_INCLUDE_EDITIONS', 'false')
+    monkeypatch.setenv('SEARCH_DEFAULT_PREFER_MAIN_SERIES', 'true')
+    monkeypatch.setenv('SEARCH_DEFAULT_INCLUDE_RELATED', 'false')
+    monkeypatch.setenv('SEARCH_DEFAULT_INCLUDE_BOOKS', 'false')
     monkeypatch.setenv('VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS', 'true')
 
     settings = Settings(_env_file=None)
@@ -18,4 +21,7 @@ def test_settings_accept_legacy_and_restored_env_knobs(monkeypatch):
     assert settings.cache_memory_entries == 123
     assert settings.search_default_enrich is True
     assert settings.search_default_include_editions is False
+    assert settings.search_default_prefer_main_series is True
+    assert settings.search_default_include_related is False
+    assert settings.search_default_include_books is False
     assert settings.volume_default_include_parent_editions is True

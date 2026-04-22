@@ -162,8 +162,8 @@ Paramètres :
 - `prefer_main_series` : optionnel, sinon fallback sur `SEARCH_DEFAULT_PREFER_MAIN_SERIES` ;
 - `include_related` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_RELATED` ;
 - `include_books` : optionnel, sinon fallback sur `SEARCH_DEFAULT_INCLUDE_BOOKS` ;
-- `media_kinds` : CSV optionnel pour ne garder que certains `media_kind` ;
-- `exclude_media_kinds` : CSV optionnel pour exclure certains `media_kind`.
+- `media_kinds` : CSV whitelist des `media_kind` à conserver ;
+- `exclude_media_kinds` : CSV blacklist des `media_kind` à exclure.
 
 Exemple :
 
@@ -187,15 +187,16 @@ Résultat typique par item :
 - `translated_title`
 - `source_type` : valeur du champ `Type` sur la fiche Manga-News quand elle est disponible
 - `media_kind` : classification métier (`manga`, `manga_spinoff`, `novel`, `essay`, `cookbook`, `guide`, etc.)
-- `relation_kind` : rattachement métier (`main`, `related_manga`, `spinoff`, `related_book`, `standalone`)
-- `root_series_slug` : slug de l’œuvre mère quand l’API a pu l’identifier depuis les séries liées
+- `relation_kind` : position dans une franchise (`main`, `spinoff`, `related_manga`, `related_book`, `standalone`, `unknown`)
+- `root_series_slug` : slug de la série mère quand l'API a pu le déduire de manière fiable
 
 Important :
 - `mode=best` retourne **une liste** contenant au mieux un seul item ;
 - `title_vo` et `translated_title` sont enrichis en allant lire la fiche détaillée quand c'est possible ;
-- le ranking ne repose plus sur le seul fuzzy score : la route priorise les mangas principaux avant les romans, essais, guides, artbooks ou livres dérivés quand la requête cible une licence nue ;
-- tu peux forcer un comportement plus strict avec `include_books=false` et/ou `media_kinds=manga,manga_spinoff` ;
-- `include_related=false` retire les spin-offs et autres résultats liés quand ils sont correctement reconnus ;
+- le ranking ne repose plus sur le seul fuzzy score : la route peut aussi s'appuyer sur `prefer_main_series`, les `media_kind` et la logique franchise (`relation_kind`, `root_series_slug`) pour remonter la série mère avant ses spin-offs manga puis avant les livres dérivés ;
+- `include_related=false` retire les résultats vus comme spin-offs / séries liées ;
+- `include_books=false` retire romans, essais, guides, artbooks, cookbooks et autres livres dérivés ;
+- `media_kinds` / `exclude_media_kinds` donnent un contrôle explicite côté client sans changer le ranking global ;
 - les fiches source de recherche sont mises en cache indépendamment du rendu final, donc changer `mode` ou `limit` sur une même requête ne force pas forcément un nouveau fetch upstream ;
 - si l'enrichissement échoue, le résultat principal reste retourné.
 
@@ -209,7 +210,7 @@ Paramètres :
 - `q`
 - `kind`
 - `limit`
-- mêmes filtres métier que `/search` : `enrich`, `include_editions`, `prefer_main_series`, `include_related`, `include_books`, `media_kinds`, `exclude_media_kinds`
+- mêmes flags métier que `/search` : `enrich`, `include_editions`, `prefer_main_series`, `include_related`, `include_books`, `media_kinds`, `exclude_media_kinds`
 
 Exemple :
 

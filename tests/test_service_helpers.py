@@ -211,6 +211,137 @@ async def test_search_prioritizes_main_manga_over_books_and_marks_spinoffs(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_search_exposes_relation_kind_and_root_series_slug_with_main_series_preference(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    query = 'naruto'
+    search_url = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}'
+    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}'
+    naruto_url = f'{base_url}/index.php/serie/Naruto'
+    boruto_url = f'{base_url}/index.php/serie/Boruto-Naruto-Next-Generations'
+    roman_url = f'{base_url}/index.php/serie/Naruto-Roman'
+
+    search_html = f'''
+    <html><body>
+      <a href="{roman_url}">Naruto - Roman (2008) Masashi KISHIMOTO</a>
+      <a href="{boruto_url}">Boruto - Naruto Next Generations (2016)</a>
+      <a href="{naruto_url}">Naruto (1999) Masashi KISHIMOTO</a>
+    </body></html>
+    '''
+    naruto_html = '<html><body><h1>Naruto</h1><ul><li>Type: Shonen</li></ul></body></html>'
+    boruto_html = '''
+    <html><body><h1>Boruto - Naruto Next Generations</h1><ul><li>Type: Shonen</li></ul>
+    <div>Manga en relation</div><a href="/index.php/serie/Naruto">Naruto</a>
+    </body></html>
+    '''
+    roman_html = '<html><body><h1>Naruto - Roman</h1><ul><li>Type: Roman</li></ul></body></html>'
+
+    fetcher = _FakeFetcher({
+        search_url: search_html,
+        search_url_vo: '<html><body></body></html>',
+        naruto_url: naruto_html,
+        boruto_url: boruto_html,
+        roman_url: roman_html,
+    })
+    settings = SimpleNamespace(
+        manga_news_base_url=base_url,
+        cache_stale_grace_seconds=3600,
+        cache_ttl_search_seconds=3600,
+        cache_ttl_series_seconds=3600,
+        cache_ttl_volume_seconds=3600,
+        cache_ttl_news_global_seconds=3600,
+        cache_ttl_news_series_seconds=3600,
+        cache_ttl_planning_seconds=3600,
+        search_score_threshold=1,
+        max_limit=50,
+        negative_cache_enabled=True,
+        negative_cache_ttl_seconds=120,
+    )
+    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
+
+    response = await service.search(
+        query=query,
+        kind='series',
+        mode='all',
+        limit=10,
+        prefer_main_series=True,
+        include_related=True,
+        include_books=True,
+    )
+
+    assert response.data[0]['slug'] == 'Naruto'
+    assert response.data[0]['relation_kind'] == 'main'
+    assert response.data[0]['root_series_slug'] == 'Naruto'
+    assert response.data[1]['slug'] == 'Boruto-Naruto-Next-Generations'
+    assert response.data[1]['relation_kind'] == 'spinoff'
+    assert response.data[1]['root_series_slug'] == 'Naruto'
+    assert response.data[2]['slug'] == 'Naruto-Roman'
+    assert response.data[2]['relation_kind'] == 'related_book'
+    assert response.data[2]['root_series_slug'] == 'Naruto'
+
+
+@pytest.mark.asyncio
+async def test_search_filters_exclude_books_and_related_results(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    query = 'naruto'
+    search_url = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}'
+    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}'
+    naruto_url = f'{base_url}/index.php/serie/Naruto'
+    boruto_url = f'{base_url}/index.php/serie/Boruto-Naruto-Next-Generations'
+    roman_url = f'{base_url}/index.php/serie/Naruto-Roman'
+
+    search_html = f'''
+    <html><body>
+      <a href="{roman_url}">Naruto - Roman (2008) Masashi KISHIMOTO</a>
+      <a href="{boruto_url}">Boruto - Naruto Next Generations (2016)</a>
+      <a href="{naruto_url}">Naruto (1999) Masashi KISHIMOTO</a>
+    </body></html>
+    '''
+    naruto_html = '<html><body><h1>Naruto</h1><ul><li>Type: Shonen</li></ul></body></html>'
+    boruto_html = '''
+    <html><body><h1>Boruto - Naruto Next Generations</h1><ul><li>Type: Shonen</li></ul>
+    <div>Manga en relation</div><a href="/index.php/serie/Naruto">Naruto</a>
+    </body></html>
+    '''
+    roman_html = '<html><body><h1>Naruto - Roman</h1><ul><li>Type: Roman</li></ul></body></html>'
+
+    fetcher = _FakeFetcher({
+        search_url: search_html,
+        search_url_vo: '<html><body></body></html>',
+        naruto_url: naruto_html,
+        boruto_url: boruto_html,
+        roman_url: roman_html,
+    })
+    settings = SimpleNamespace(
+        manga_news_base_url=base_url,
+        cache_stale_grace_seconds=3600,
+        cache_ttl_search_seconds=3600,
+        cache_ttl_series_seconds=3600,
+        cache_ttl_volume_seconds=3600,
+        cache_ttl_news_global_seconds=3600,
+        cache_ttl_news_series_seconds=3600,
+        cache_ttl_planning_seconds=3600,
+        search_score_threshold=1,
+        max_limit=50,
+        negative_cache_enabled=True,
+        negative_cache_ttl_seconds=120,
+    )
+    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
+
+    response = await service.search(
+        query=query,
+        kind='series',
+        mode='all',
+        limit=10,
+        prefer_main_series=True,
+        include_related=False,
+        include_books=False,
+        media_kinds='manga',
+    )
+
+    assert [item['slug'] for item in response.data] == ['Naruto']
+
+
+@pytest.mark.asyncio
 async def test_get_volume_enriches_with_parent_series_counts(tmp_path: Path):
     base_url = 'https://www.manga-news.com'
     volume_url = f'{base_url}/index.php/manga/One-Piece/vol-110'
@@ -321,150 +452,3 @@ async def test_get_series_ignores_incompatible_cached_payload_and_refetches(tmp_
     assert response.data['vf']['volumes'] == 112
     assert response.data['vo']['volumes'] == 114
     assert fetcher.calls == [series_url]
-
-
-
-@pytest.mark.asyncio
-async def test_search_can_filter_books_and_related_results(tmp_path: Path):
-    base_url = 'https://www.manga-news.com'
-    query = 'naruto'
-    search_url = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}'
-    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}'
-    naruto_url = f'{base_url}/index.php/serie/Naruto'
-    roman_url = f'{base_url}/index.php/serie/Naruto-Roman'
-    essay_url = f'{base_url}/index.php/serie/Philosophie-de-Naruto-la'
-    boruto_url = f'{base_url}/index.php/serie/Boruto-Naruto-Next-Generations'
-
-    search_html = f'''
-    <html><body>
-      <a href="{essay_url}">Philosophie de Naruto (la) (2021)</a>
-      <a href="{roman_url}">Naruto - Roman (2008) Masashi KISHIMOTO</a>
-      <a href="{naruto_url}">Naruto (1999) Masashi KISHIMOTO</a>
-      <a href="{boruto_url}">Boruto - Naruto Next Generations (2016)</a>
-    </body></html>
-    '''
-    naruto_html = '''
-    <html><body><h1>Naruto</h1><ul><li>Type: Shonen</li></ul>
-    <div id="numberblock"><div><div><span class="version">VF:</span><span>72</span><span class="small">(Terminé)</span></div></div></div>
-    </body></html>
-    '''
-    roman_html = '<html><body><h1>Naruto - Roman</h1><ul><li>Type: Roman</li></ul></body></html>'
-    essay_html = '<html><body><h1>Philosophie de Naruto (la)</h1><ul><li>Type: Essai</li></ul></body></html>'
-    boruto_html = '''
-    <html><body><h1>Boruto - Naruto Next Generations</h1><ul><li>Type: Shonen</li></ul>
-    <div>Manga en relation</div><a href="/index.php/serie/Naruto">Naruto</a>
-    </body></html>
-    '''
-
-    fetcher = _FakeFetcher({
-        search_url: search_html,
-        search_url_vo: '<html><body></body></html>',
-        naruto_url: naruto_html,
-        roman_url: roman_html,
-        essay_url: essay_html,
-        boruto_url: boruto_html,
-    })
-    settings = SimpleNamespace(
-        manga_news_base_url=base_url,
-        cache_stale_grace_seconds=3600,
-        cache_ttl_search_seconds=3600,
-        cache_ttl_series_seconds=3600,
-        cache_ttl_volume_seconds=3600,
-        cache_ttl_news_global_seconds=3600,
-        cache_ttl_news_series_seconds=3600,
-        cache_ttl_planning_seconds=3600,
-        search_score_threshold=1,
-        max_limit=50,
-        negative_cache_enabled=True,
-        negative_cache_ttl_seconds=120,
-    )
-    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
-
-    no_books = await service.search(
-        query=query,
-        kind='series',
-        mode='all',
-        limit=10,
-        enrich=True,
-        include_editions=False,
-        include_books=False,
-    )
-    assert [item['slug'] for item in no_books.data] == ['Naruto', 'Boruto-Naruto-Next-Generations']
-
-    mains_only = await service.search(
-        query=query,
-        kind='series',
-        mode='all',
-        limit=10,
-        enrich=True,
-        include_editions=False,
-        include_books=False,
-        include_related=False,
-    )
-    assert [item['slug'] for item in mains_only.data] == ['Naruto']
-
-
-@pytest.mark.asyncio
-async def test_search_exposes_relation_kind_root_series_and_media_filters(tmp_path: Path):
-    base_url = 'https://www.manga-news.com'
-    query = 'naruto'
-    search_url = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}'
-    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}'
-    naruto_url = f'{base_url}/index.php/serie/Naruto'
-    roman_url = f'{base_url}/index.php/serie/Naruto-Roman'
-    boruto_url = f'{base_url}/index.php/serie/Boruto-Naruto-Next-Generations'
-
-    search_html = f'''
-    <html><body>
-      <a href="{roman_url}">Naruto - Roman (2008) Masashi KISHIMOTO</a>
-      <a href="{naruto_url}">Naruto (1999) Masashi KISHIMOTO</a>
-      <a href="{boruto_url}">Boruto - Naruto Next Generations (2016)</a>
-    </body></html>
-    '''
-    naruto_html = '<html><body><h1>Naruto</h1><ul><li>Type: Shonen</li></ul></body></html>'
-    roman_html = '<html><body><h1>Naruto - Roman</h1><ul><li>Type: Roman</li></ul></body></html>'
-    boruto_html = '''
-    <html><body><h1>Boruto - Naruto Next Generations</h1><ul><li>Type: Shonen</li></ul>
-    <div>Manga en relation</div><a href="/index.php/serie/Naruto">Naruto</a>
-    </body></html>
-    '''
-
-    fetcher = _FakeFetcher({
-        search_url: search_html,
-        search_url_vo: '<html><body></body></html>',
-        naruto_url: naruto_html,
-        roman_url: roman_html,
-        boruto_url: boruto_html,
-    })
-    settings = SimpleNamespace(
-        manga_news_base_url=base_url,
-        cache_stale_grace_seconds=3600,
-        cache_ttl_search_seconds=3600,
-        cache_ttl_series_seconds=3600,
-        cache_ttl_volume_seconds=3600,
-        cache_ttl_news_global_seconds=3600,
-        cache_ttl_news_series_seconds=3600,
-        cache_ttl_planning_seconds=3600,
-        search_score_threshold=1,
-        max_limit=50,
-        negative_cache_enabled=True,
-        negative_cache_ttl_seconds=120,
-    )
-    service = MangaNewsService(settings=settings, fetcher=fetcher, cache=SQLiteCache(tmp_path / 'cache.sqlite3'))
-
-    response = await service.search(
-        query=query,
-        kind='series',
-        mode='all',
-        limit=10,
-        enrich=True,
-        include_editions=False,
-        media_kinds='manga,manga_spinoff,novel',
-        exclude_media_kinds='novel',
-    )
-
-    assert [item['slug'] for item in response.data] == ['Naruto', 'Boruto-Naruto-Next-Generations']
-    assert response.data[0]['relation_kind'] == 'main'
-    assert response.data[0]['root_series_slug'] == 'Naruto'
-    assert response.data[1]['relation_kind'] == 'spinoff'
-    assert response.data[1]['root_series_slug'] == 'Naruto'

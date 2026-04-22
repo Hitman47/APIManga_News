@@ -212,7 +212,7 @@ Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un c
 
 - `SQLITE_BUSY_TIMEOUT_MS` ajuste la tolérance SQLite à la contention ;
 - `CACHE_MEMORY_ENTRIES` dimensionne le cache mémoire L1 ;
-- `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` redonnent du pilotage sans modifier le code ; pour `/volume`, laisser `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` évite un fetch parent implicite à chaque appel ;
+- `SEARCH_DEFAULT_ENRICH`, `SEARCH_DEFAULT_INCLUDE_EDITIONS`, `SEARCH_DEFAULT_PREFER_MAIN_SERIES`, `SEARCH_DEFAULT_INCLUDE_RELATED`, `SEARCH_DEFAULT_INCLUDE_BOOKS` et `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` redonnent du pilotage sans modifier le code ; pour `/volume`, laisser `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS=false` évite un fetch parent implicite à chaque appel ;
 - `SEARCH_FETCH_CONCURRENCY` et `SEARCH_ENRICH_CONCURRENCY` restent tolérés comme alias legacy.
 
 
@@ -229,7 +229,7 @@ Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un c
   - les timings roulants par scope ;
   - les derniers événements de perf et les dernières requêtes si `include_recent=true` ;
   - l'état du cache SQLite/L1 ;
-  - les defaults effectivement appliqués pour `/search`, `/search/resolve` et `/volume`, y compris `prefer_main_series`, `include_related` et `include_books`.
+  - les defaults effectivement appliqués pour `/search`, `/search/resolve` et `/volume`, y compris les nouveaux flags franchise (`prefer_main_series`, `include_related`, `include_books`).
 
 ### Exploitation conseillée
 - en `LOG_FORMAT=json`, filtre les événements avec `request_id` pour suivre un appel précis ;

@@ -109,11 +109,6 @@ def test_series_route_forwards_projection_params():
 def test_search_resolve_and_etag_304():
     class DummyService:
         async def resolve_search(self, **kwargs):
-            assert kwargs['prefer_main_series'] is None
-            assert kwargs['include_related'] is None
-            assert kwargs['include_books'] is None
-            assert kwargs['media_kinds'] is None
-            assert kwargs['exclude_media_kinds'] is None
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
@@ -175,11 +170,6 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
 def test_search_endpoint_exposes_alternate_titles():
     class DummyService:
         async def search(self, **kwargs):
-            assert kwargs['prefer_main_series'] is None
-            assert kwargs['include_related'] is None
-            assert kwargs['include_books'] is None
-            assert kwargs['media_kinds'] is None
-            assert kwargs['exclude_media_kinds'] is None
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,
@@ -227,9 +217,8 @@ def test_openapi_exposes_search_and_volume_edition_counters():
     volume_data = schemas['VolumeData']['properties']
     assert 'vf' in search_result
     assert 'vo' in search_result
-    assert 'media_kind' in search_result
-    assert 'root_series_slug' in search_result
     assert 'relation_kind' in search_result
+    assert 'root_series_slug' in search_result
     assert 'vf' in volume_data
     assert 'vo' in volume_data
     assert payload['info']['description']
@@ -245,7 +234,7 @@ def test_search_route_forwards_optional_perf_flags():
         async def search(self, **kwargs):
             assert kwargs['enrich'] is True
             assert kwargs['include_editions'] is False
-            assert kwargs['prefer_main_series'] is False
+            assert kwargs['prefer_main_series'] is True
             assert kwargs['include_related'] is False
             assert kwargs['include_books'] is False
             assert kwargs['media_kinds'] == 'manga,manga_spinoff'
@@ -267,7 +256,42 @@ def test_search_route_forwards_optional_perf_flags():
 
     with TestClient(app) as client:
         app.state.service = DummyService()
-        response = client.get('/search?q=one%20piece&kind=series&mode=all&enrich=true&include_editions=false&prefer_main_series=false&include_related=false&include_books=false&media_kinds=manga,manga_spinoff&exclude_media_kinds=novel,essay')
+        response = client.get('/search?q=one%20piece&kind=series&mode=all&enrich=true&include_editions=false&prefer_main_series=true&include_related=false&include_books=false&media_kinds=manga,manga_spinoff&exclude_media_kinds=novel,essay')
+    assert response.status_code == 200
+
+
+def test_search_resolve_route_forwards_franchise_filters():
+    class DummyService:
+        async def resolve_search(self, **kwargs):
+            assert kwargs['prefer_main_series'] is True
+            assert kwargs['include_related'] is False
+            assert kwargs['include_books'] is False
+            assert kwargs['media_kinds'] == 'manga'
+            assert kwargs['exclude_media_kinds'] == 'novel,essay,cookbook'
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/recherche/',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-search-resolve-flags',
+                'data': {
+                    'query': 'naruto',
+                    'kind_requested': 'series',
+                    'confidence': 'high',
+                    'best': None,
+                    'candidates': [],
+                },
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/search/resolve?q=naruto&kind=series&prefer_main_series=true&include_related=false&include_books=false&media_kinds=manga&exclude_media_kinds=novel,essay,cookbook')
     assert response.status_code == 200
 
 
@@ -316,9 +340,6 @@ def test_health_runtime_endpoint_exposes_metrics_and_defaults():
     assert 'defaults' in payload
     assert 'timings' in payload['metrics']
     assert payload['defaults']['search_default_enrich'] in {True, False}
-    assert payload['defaults']['search_default_prefer_main_series'] in {True, False}
-    assert payload['defaults']['search_default_include_related'] in {True, False}
-    assert payload['defaults']['search_default_include_books'] in {True, False}
     assert response.headers['X-Request-Id']
 
 
@@ -328,11 +349,6 @@ def test_search_route_preserves_none_when_optional_flags_omitted():
         async def search(self, **kwargs):
             assert kwargs['enrich'] is None
             assert kwargs['include_editions'] is None
-            assert kwargs['prefer_main_series'] is None
-            assert kwargs['include_related'] is None
-            assert kwargs['include_books'] is None
-            assert kwargs['media_kinds'] is None
-            assert kwargs['exclude_media_kinds'] is None
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
                 'schema_version': '1.0',
                 'ok': True,

@@ -1,7 +1,13 @@
-## 2026-04-22 — filtres métier et rattachement de franchise sur `/search`
+## 2026-04-22 — filtres de recherche pilotables et logique franchise renforcée
 
-- `/search` et `/search/resolve` exposent désormais `source_type`, `media_kind`, `relation_kind` et `root_series_slug` sur les résultats quand l'information est disponible.
-- Ajout des query params `prefer_main_series`, `include_related`, `include_books`, `media_kinds` et `exclude_media_kinds` sur `/search` et `/search/resolve`.
+- `/search` et `/search/resolve` acceptent désormais `prefer_main_series`, `include_related`, `include_books`, `media_kinds` et `exclude_media_kinds`.
+- Les résultats de recherche exposent `relation_kind` et `root_series_slug` en plus de `source_type` et `media_kind`.
+- La recherche peut maintenant rattacher plus solidement un spin-off manga ou un livre dérivé à sa série mère, même quand les séries liées Manga-News sont incomplètes, grâce à un post-traitement qui croise query, résultats pairs et liens `Manga en relation`.
+- Le chargement des métadonnées de recherche détaillées reste conditionnel : il ne s'active que quand l'enrichissement, les compteurs ou les nouveaux filtres métier le nécessitent, pour limiter le coût perf sur les recherches simples.
+
+## 2026-04-22 — ranking métier de `/search`
+
+- `/search` et `/search/resolve` exposent désormais `source_type` et `media_kind` sur les résultats.
 - Le ranking ne repose plus uniquement sur le fuzzy score : l'API priorise désormais la série manga principale avant les romans, essais, guides, cookbooks ou livres dérivés quand la requête cible une licence nue.
 - Les spin-offs manga peuvent être reclassés devant les ouvrages annexes grâce aux séries liées détectées sur la fiche détaillée.
 

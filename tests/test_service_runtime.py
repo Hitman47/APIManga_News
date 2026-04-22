@@ -23,6 +23,9 @@ class DummySettings:
         self.max_limit = 50
         self.search_default_enrich = False
         self.search_default_include_editions = True
+        self.search_default_prefer_main_series = False
+        self.search_default_include_related = True
+        self.search_default_include_books = True
         self.volume_default_include_parent_editions = False
         self.negative_cache_enabled = True
         self.negative_cache_ttl_seconds = 300
@@ -171,10 +174,11 @@ async def test_search_uses_settings_defaults_for_optional_flags(tmp_path: Path):
         from app.models import SearchResult
         return [SearchResult(title='One Piece', url=url, kind='series', score=95, slug='One-piece-Edition-originale')]
 
-    async def fake_enrich(results, *, query: str, enrich: bool, include_editions: bool):
+    async def fake_enrich(results, *, query: str, enrich: bool, include_editions: bool, load_search_metadata: bool = False):
         called['query'] = query
         called['enrich'] = enrich
         called['include_editions'] = include_editions
+        called['load_search_metadata'] = load_search_metadata
         return results
 
     service._get_search_source_results = fake_get_search_source_results
@@ -182,7 +186,7 @@ async def test_search_uses_settings_defaults_for_optional_flags(tmp_path: Path):
 
     await service.search(query='one piece', kind='series', mode='all', limit=10)
 
-    assert called == {'query': 'one piece', 'enrich': True, 'include_editions': False}
+    assert called == {'query': 'one piece', 'enrich': True, 'include_editions': False, 'load_search_metadata': True}
 
 
 @pytest.mark.asyncio

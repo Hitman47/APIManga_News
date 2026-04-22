@@ -197,7 +197,7 @@ Ces comportements ne doivent plus être déduits au hasard :
   - si `prefer_main_series` est absent, la valeur vient de `SEARCH_DEFAULT_PREFER_MAIN_SERIES` ;
   - si `include_related` est absent, la valeur vient de `SEARCH_DEFAULT_INCLUDE_RELATED` ;
   - si `include_books` est absent, la valeur vient de `SEARCH_DEFAULT_INCLUDE_BOOKS` ;
-  - les items exposent aussi `source_type` (type Manga-News quand il est connu), `media_kind`, `relation_kind` (`main`, `spinoff`, `related_book`, etc.) et `root_series_slug` quand l’API a pu rattacher le résultat à une œuvre mère.
+  - les items exposent aussi `source_type`, `media_kind`, `relation_kind` et `root_series_slug` pour expliquer pourquoi un résultat est vu comme série mère, spin-off manga, livre dérivé ou résultat standalone.
 - `/volume` :
   - si `include_parent_editions` est absent, la valeur vient de `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` ;
   - la recommandation d'exploitation reste `false` pour garder la route légère par défaut.
@@ -322,12 +322,19 @@ La configuration `.env.example` réexpose maintenant les réglages de tuning qui
 - `CACHE_MEMORY_ENTRIES` : pilote le cache mémoire L1 au-dessus de SQLite ;
 - `SEARCH_DEFAULT_ENRICH` : valeur par défaut de `enrich` sur `/search` et `/search/resolve` ;
 - `SEARCH_DEFAULT_INCLUDE_EDITIONS` : valeur par défaut de `include_editions` sur `/search` et `/search/resolve` ;
-- `SEARCH_DEFAULT_PREFER_MAIN_SERIES` : valeur par défaut de `prefer_main_series` sur `/search` et `/search/resolve` ;
-- `SEARCH_DEFAULT_INCLUDE_RELATED` : valeur par défaut de `include_related` sur `/search` et `/search/resolve` ;
-- `SEARCH_DEFAULT_INCLUDE_BOOKS` : valeur par défaut de `include_books` sur `/search` et `/search/resolve` ;
+- `SEARCH_DEFAULT_PREFER_MAIN_SERIES` : renforce par défaut la priorité donnée à la série mère ;
+- `SEARCH_DEFAULT_INCLUDE_RELATED` : garde ou retire par défaut les spin-offs / séries liées ;
+- `SEARCH_DEFAULT_INCLUDE_BOOKS` : garde ou retire par défaut les romans, essais, guides, artbooks, cookbooks et autres livres dérivés ;
 - `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS` : valeur par défaut de `include_parent_editions` sur `/volume` ; `false` garde `/volume` léger par défaut, `true` réactive l'hydratation automatique de `vf` / `vo`.
 
-Le ranking `/search` ne dépend plus uniquement du fuzzy score : il combine maintenant l'égalité exacte titre/slug, le type Manga-News (`source_type`), une classification métier (`media_kind`), un rattachement d’œuvre (`relation_kind`, `root_series_slug`) et des heuristiques dérivées des séries liées pour faire remonter les mangas avant les romans/essais/livres d'univers quand c'est pertinent. Tu peux aussi piloter explicitement le comportement avec `prefer_main_series`, `include_related`, `include_books`, `media_kinds` et `exclude_media_kinds`.
+Le ranking `/search` ne dépend plus uniquement du fuzzy score : il combine maintenant l'égalité exacte titre/slug, le type Manga-News (`source_type`), une classification métier (`media_kind`) et une logique franchise (`relation_kind`, `root_series_slug`) pour faire remonter la série mère avant les spin-offs manga, puis avant les romans/essais/livres d'univers quand c'est pertinent.
+
+Quand tu veux piloter explicitement la recherche au lieu de dépendre uniquement du ranking interne, tu peux utiliser :
+- `prefer_main_series=true` pour renforcer la priorité donnée à la série mère ;
+- `include_related=false` pour retirer les spin-offs / séries liées détectées ;
+- `include_books=false` pour retirer les romans, essais, guides, artbooks, cookbooks et autres livres dérivés ;
+- `media_kinds=manga,manga_spinoff` pour une whitelist explicite ;
+- `exclude_media_kinds=novel,essay,cookbook` pour une blacklist explicite.
 
 Côté performance, l'API mutualise désormais un cache HTML brut pour les fiches série et volume. Les chemins légers (`search` enrichi, compteurs `vf` / `vo`, éditions) réutilisent ce HTML sans refetch réseau, puis les routes détaillées (`/series`, `/volume`) peuvent à leur tour repartir du même HTML déjà chaud.
 
