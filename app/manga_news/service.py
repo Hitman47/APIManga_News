@@ -60,7 +60,7 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-04-22-search-franchise-filters-1'
+CACHE_SCHEMA_VERSION = '2026-06-15-v2-parser-performance-1'
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
@@ -411,6 +411,11 @@ class MangaNewsService:
             negative_entry = self.cache.get_negative(cache_key)
             if negative_entry and negative_entry.is_fresh:
                 self._metrics_increment('negative_cache_hits')
+                if entry and entry.is_stale_usable:
+                    warning = f'Using stale cached data while a recent upstream failure is negatively cached: {negative_entry.detail}'
+                    self._metrics_increment('cache_stale_fallbacks')
+                    logger.warning(warning)
+                    return entry.payload, entry, True, True, [warning]
                 raise self._negative_cache_exception(negative_entry)
 
         try:
@@ -938,7 +943,7 @@ class MangaNewsService:
                 deduped.values(),
                 key=lambda item: search_result_sort_key(query, item, prefer_main_series=resolved_prefer_main_series),
             )
-            candidate_limit = limit if mode == 'all' else max(limit, 10)
+            candidate_limit = limit if mode == 'all' else 1
             results = results[:candidate_limit]
             enrichment_started = time.perf_counter()
             enriched = await self._enrich_search_results(

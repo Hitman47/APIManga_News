@@ -216,6 +216,55 @@ def test_parse_series_search_meta_page_extracts_type_related_and_media_kind():
     assert parsed.related and parsed.related.series[0].title == 'Naruto'
 
 
+def test_related_links_ignore_ambiguous_navigation_without_scanning_document_context(monkeypatch):
+    import app.manga_news.parsers as parsers
+
+    monkeypatch.setattr(
+        parsers,
+        '_anchor_context_heading',
+        lambda anchor: (_ for _ in ()).throw(AssertionError('slow context scan should not run')),
+    )
+    html = '''
+    <html><body>
+      <h1>Test</h1>
+      <div>Dossiers</div>
+      <a href="/index.php/planning/">Planning</a>
+      <a href="/index.php/report/One-Piece">Dossier One Piece</a>
+      <a href="/index.php/serie/One-piece-Edition-originale">One Piece</a>
+      <a href="/index.php/manga/One-Piece/vol-91">One Piece Vol.91</a>
+    </body></html>
+    '''
+
+    parsed = parse_series_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/Test',
+    )
+
+    assert [item.title for item in parsed.related.dossiers] == ['Dossier One Piece']
+    assert [item.title for item in parsed.related.series] == ['One Piece']
+    assert [item.title for item in parsed.related.volumes] == ['One Piece Vol.91']
+
+
+def test_raw_sections_normalize_each_line_only_once(monkeypatch):
+    import app.manga_news.parsers as parsers
+
+    calls = 0
+    original_normalize_text = parsers.normalize_text
+
+    def counting_normalize_text(value):
+        nonlocal calls
+        calls += 1
+        return original_normalize_text(value)
+
+    monkeypatch.setattr(parsers, 'normalize_text', counting_normalize_text)
+    lines = parsers._TextLines(['Résumé', *[f'Ligne {index}' for index in range(1000)], 'Liens', 'Fin'])
+
+    sections = parsers._extract_raw_sections(lines)
+
+    assert sections['resume'][0] == 'Ligne 0'
+    assert calls <= len(lines) + 2
+
+
 def test_parse_search_page_prioritizes_main_manga_before_books():
     html = '''
     <html>

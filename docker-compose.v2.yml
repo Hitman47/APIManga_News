@@ -1,0 +1,45 @@
+services:
+  manga-news-api-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.12-slim}
+    image: manga-news-api:v2
+    container_name: manga-news-api-v2
+    ports:
+      - "8018:8000"
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: INFO
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      MANGA_NEWS_BASE_URL: https://www.manga-news.com
+      USER_AGENT: MangaNewsPrivateAPI/0.2-v2 (+private-selfhosted)
+      API_TOKEN: "${API_TOKEN:-}"
+      DB_PATH: /data/cache.sqlite3
+      REQUEST_TIMEOUT_SECONDS: 20
+      REQUEST_MAX_RETRIES: 2
+      REQUEST_BACKOFF_SECONDS: 0.5
+      REQUEST_MAX_CONCURRENCY: ${REQUEST_MAX_CONCURRENCY:-6}
+      CACHE_MEMORY_ENTRIES: 512
+      CACHE_STALE_GRACE_SECONDS: 604800
+      CACHE_TTL_SEARCH_SECONDS: 86400
+      CACHE_TTL_SERIES_SECONDS: 86400
+      CACHE_TTL_VOLUME_SECONDS: 604800
+      CACHE_TTL_NEWS_GLOBAL_SECONDS: 21600
+      CACHE_TTL_NEWS_SERIES_SECONDS: 43200
+      CACHE_TTL_PLANNING_SECONDS: 43200
+      SEARCH_SCORE_THRESHOLD: 60
+      MAX_LIMIT: 50
+      SEARCH_SOURCE_CONCURRENCY: 4
+      SEARCH_ENRICHMENT_CONCURRENCY: 4
+      SEARCH_DEFAULT_ENRICH: "false"
+      SEARCH_DEFAULT_INCLUDE_EDITIONS: "false"
+      SEARCH_DEFAULT_PREFER_MAIN_SERIES: "false"
+      SEARCH_DEFAULT_INCLUDE_RELATED: "true"
+      SEARCH_DEFAULT_INCLUDE_BOOKS: "true"
+      VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS: "false"
+      ENABLE_DOCS: "${ENABLE_DOCS:-true}"
+    volumes:
+      - ./data-v2:/data
+    restart: unless-stopped

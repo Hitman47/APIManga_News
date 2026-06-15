@@ -1,0 +1,9 @@
+services:
+  manga-news-api-v2:
+    build:
+      secrets:
+        - custom_ca
+
+secrets:
+  custom_ca:
+    file: ${DOCKER_CA_CERT_FILE}

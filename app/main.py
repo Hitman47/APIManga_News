@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI):
         settings.request_timeout_seconds,
         max_retries=settings.request_max_retries,
         backoff_seconds=settings.request_backoff_seconds,
+        max_concurrency=settings.request_max_concurrency,
         log_json=settings.log_format == 'json',
         metrics=metrics,
     )
@@ -402,6 +403,7 @@ async def health_runtime(
             'search_enrichment_concurrency': settings.search_enrichment_concurrency,
             'request_max_retries': settings.request_max_retries,
             'request_backoff_seconds': settings.request_backoff_seconds,
+            'request_max_concurrency': settings.request_max_concurrency,
             'sqlite_busy_timeout_ms': settings.sqlite_busy_timeout_ms,
             'cache_memory_entries': settings.cache_memory_entries,
         },

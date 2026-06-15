@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=20.0, alias='REQUEST_TIMEOUT_SECONDS')
     request_max_retries: int = Field(default=2, alias='REQUEST_MAX_RETRIES')
     request_backoff_seconds: float = Field(default=0.5, alias='REQUEST_BACKOFF_SECONDS')
+    request_max_concurrency: int = Field(default=6, alias='REQUEST_MAX_CONCURRENCY', ge=1)
     sqlite_busy_timeout_ms: int = Field(default=5000, validation_alias=AliasChoices('SQLITE_BUSY_TIMEOUT_MS'))
     cache_memory_entries: int = Field(default=512, validation_alias=AliasChoices('CACHE_MEMORY_ENTRIES'))
     cache_stale_grace_seconds: int = Field(default=7 * 24 * 3600, alias='CACHE_STALE_GRACE_SECONDS')
@@ -40,9 +41,9 @@ class Settings(BaseSettings):
         default=4,
         validation_alias=AliasChoices('SEARCH_ENRICHMENT_CONCURRENCY', 'SEARCH_ENRICH_CONCURRENCY'),
     )
-    search_default_enrich: bool = Field(default=True, validation_alias=AliasChoices('SEARCH_DEFAULT_ENRICH'))
+    search_default_enrich: bool = Field(default=False, validation_alias=AliasChoices('SEARCH_DEFAULT_ENRICH'))
     search_default_include_editions: bool = Field(
-        default=True,
+        default=False,
         validation_alias=AliasChoices('SEARCH_DEFAULT_INCLUDE_EDITIONS'),
     )
     search_default_prefer_main_series: bool = Field(

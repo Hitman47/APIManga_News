@@ -5,7 +5,7 @@ import pytest
 
 from app.cache import SQLiteCache
 from app.exceptions import ParseError
-from app.manga_news.service import MangaNewsService
+from app.manga_news.service import CACHE_SCHEMA_VERSION, MangaNewsService, versioned_cache_key
 
 
 class DummySettings:
@@ -66,6 +66,43 @@ async def test_negative_cache_prevents_second_fetch_after_parse_error(tmp_path: 
     assert fetcher.calls == 1
     stats = service.cache.stats()
     assert stats['negative_cache']['totals']['entries'] == 1
+
+
+@pytest.mark.asyncio
+async def test_fresh_negative_cache_keeps_serving_usable_stale_payload(tmp_path: Path):
+    cache = SQLiteCache(tmp_path / 'cache.sqlite3')
+    series_url = 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale'
+    cache_key = versioned_cache_key('series', series_url)
+    cache.set(
+        cache_key,
+        {
+            '_schema_version': CACHE_SCHEMA_VERSION,
+            'data': {'title': 'One Piece', 'source_url': series_url},
+            'source_url': series_url,
+        },
+        ttl_seconds=-1,
+        stale_grace_seconds=3600,
+        namespace='series',
+        resource_url=series_url,
+    )
+    cache.set_negative(
+        cache_key,
+        error_code='UPSTREAM_PARSE_ERROR',
+        detail='recent parser failure',
+        ttl_seconds=300,
+        namespace='series',
+        resource_url=series_url,
+    )
+    fetcher = CountingFetcher('<html></html>')
+    service = MangaNewsService(settings=DummySettings(tmp_path), fetcher=fetcher, cache=cache)
+
+    response = await service.get_series(slug='One-piece-Edition-originale')
+
+    assert response.cached is True
+    assert response.partial is True
+    assert response.data['title'] == 'One Piece'
+    assert 'negatively cached' in response.warnings[0]
+    assert fetcher.calls == 0
 
 
 @pytest.mark.asyncio
@@ -187,6 +224,85 @@ async def test_search_uses_settings_defaults_for_optional_flags(tmp_path: Path):
     await service.search(query='one piece', kind='series', mode='all', limit=10)
 
     assert called == {'query': 'one piece', 'enrich': True, 'include_editions': False, 'load_search_metadata': True}
+
+
+@pytest.mark.asyncio
+async def test_search_best_enriches_only_one_candidate(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+    enriched_counts = []
+
+    async def fake_get_search_source_results(*, url: str, query: str):
+        from app.models import SearchResult
+
+        return [
+            SearchResult(
+                title=f'One Piece {index}',
+                url=f'https://example.test/series/{index}',
+                kind='series',
+                score=100 - index,
+                slug=f'One-Piece-{index}',
+            )
+            for index in range(12)
+        ]
+
+    async def fake_enrich(results, **kwargs):
+        enriched_counts.append(len(results))
+        return results
+
+    service._get_search_source_results = fake_get_search_source_results
+    service._enrich_search_results = fake_enrich
+
+    response = await service.search(
+        query='one piece',
+        kind='series',
+        mode='best',
+        limit=1,
+        enrich=True,
+        include_editions=True,
+    )
+
+    assert enriched_counts == [1]
+    assert len(response.data) == 1
+
+
+@pytest.mark.asyncio
+async def test_light_search_defaults_only_fetch_search_pages(tmp_path: Path):
+    class LightSearchSettings(DummySettings):
+        def __init__(self, path: Path):
+            super().__init__(path)
+            self.search_default_enrich = False
+            self.search_default_include_editions = False
+
+    base_url = 'https://www.manga-news.com'
+    query = 'one piece'
+    search_url = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}'
+    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}'
+    series_url = f'{base_url}/index.php/serie/One-piece-Edition-originale'
+
+    class MappingFetcher:
+        def __init__(self):
+            self.calls = []
+
+        async def get_text(self, url: str, params: dict | None = None):
+            self.calls.append(url)
+            html = f'<html><body><a href="{series_url}">One Piece</a></body></html>' if url == search_url else '<html></html>'
+            return DummyFetchResult(html, url)
+
+    fetcher = MappingFetcher()
+    service = MangaNewsService(
+        settings=LightSearchSettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    response = await service.search(query=query, kind='series', mode='best', limit=1)
+
+    assert response.found is True
+    assert fetcher.calls == [search_url, search_url_vo]
 
 
 @pytest.mark.asyncio
