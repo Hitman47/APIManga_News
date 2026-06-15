@@ -69,6 +69,17 @@ docker compose -f docker-compose.v2.yml up -d
 
 L'API V2 est ensuite disponible sur `http://ADRESSE_DU_NAS:8018`.
 
+Le package GHCR est privé. Le NAS doit être connecté au registre avec
+l'utilisateur `Hitman47` et un token GitHub disposant au minimum du droit
+`read:packages` :
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u Hitman47 --password-stdin
+```
+
+Dans Portainer, ajouter `ghcr.io` dans **Registries** avec ces mêmes
+identifiants, puis sélectionner ce registre pour la stack.
+
 Le tag `latest` reste associé à la version legacy. Le workflow V2 publie aussi
 un tag immuable `v2-sha-<commit>` pour permettre un retour précis à une version
 antérieure.
