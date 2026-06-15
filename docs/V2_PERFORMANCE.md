@@ -47,9 +47,9 @@ conteneur disposant de 2 CPU et 2 Go de RAM.
 
 ## Test Docker isolé
 
-La V2 possède son propre Compose, son propre tag GHCR, son propre port et son
-propre cache. Le Compose legacy reste inchangé et continue d'utiliser le tag
-`latest`, le port `8017` et le dossier `data`.
+La V2 possède son propre Compose et son propre tag GHCR. Elle remplace le
+conteneur legacy sur le même port public `8017`, sans modifier la branche
+`main`.
 
 ### Déploiement NAS
 
@@ -67,7 +67,10 @@ docker compose -f docker-compose.v2.yml pull
 docker compose -f docker-compose.v2.yml up -d
 ```
 
-L'API V2 est ensuite disponible sur `http://ADRESSE_DU_NAS:8018`.
+L'API V2 est ensuite disponible sur `http://ADRESSE_DU_NAS:8017`.
+
+L'ancien conteneur doit être arrêté avant le démarrage de la V2, car deux
+conteneurs ne peuvent pas publier simultanément le port `8017`.
 
 Le package GHCR est privé. Le NAS doit être connecté au registre avec
 l'utilisateur `Hitman47` et un token GitHub disposant au minimum du droit

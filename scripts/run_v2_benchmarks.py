@@ -321,7 +321,7 @@ def print_summary(summary: list[dict[str, Any]], metrics: list[dict[str, Any]]) 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Benchmark the Manga News API V2 with cold-ish and warm-cache passes.')
-    parser.add_argument('--base-url', default=os.getenv('BASE_URL', 'http://localhost:8018'))
+    parser.add_argument('--base-url', default=os.getenv('BASE_URL', 'http://localhost:8017'))
     parser.add_argument('--token', default=os.getenv('API_TOKEN') or os.getenv('TOKEN'))
     parser.add_argument('--profile', choices=('quick', 'standard', 'stress'), default='standard')
     parser.add_argument(
