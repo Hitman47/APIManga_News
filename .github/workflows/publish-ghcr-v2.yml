@@ -1,0 +1,103 @@
+name: publish-ghcr-v2
+
+on:
+  push:
+    branches:
+      - v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-ghcr-v2
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: hitman47/apimanga_news
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate docs and contract
+        run: python scripts/validate_contract_and_docs.py
+
+      - name: Run tests
+        run: pytest
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=v2
+            type=sha,prefix=v2-sha-
+          labels: |
+            org.opencontainers.image.title=Manga News Private API V2
+            org.opencontainers.image.description=Performance-oriented V2 of the private Manga News API.
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+
+      - name: Build and publish Docker image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha,scope=v2
+          cache-to: type=gha,mode=max,scope=v2
+
+      - name: Write publish summary
+        shell: bash
+        run: |
+          {
+            echo '## GHCR V2 publish';
+            echo '';
+            echo '- Image: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v2`';
+            echo '- Digest: `${{ steps.build.outputs.digest }}`';
+            echo '- Architectures: `linux/amd64`, `linux/arm64`';
+          } >> "$GITHUB_STEP_SUMMARY"

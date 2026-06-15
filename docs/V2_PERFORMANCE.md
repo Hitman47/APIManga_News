@@ -47,14 +47,42 @@ conteneur disposant de 2 CPU et 2 Go de RAM.
 
 ## Test Docker isolé
 
-La V2 possède son propre Compose, son propre port et son propre cache :
+La V2 possède son propre Compose, son propre tag GHCR, son propre port et son
+propre cache. Le Compose legacy reste inchangé et continue d'utiliser le tag
+`latest`, le port `8017` et le dossier `data`.
 
-```bash
-docker compose -f docker-compose.v2.yml up -d --build
+### Déploiement NAS
+
+L'image V2 multiarchitecture publiée par GitHub Actions est :
+
+```text
+ghcr.io/hitman47/apimanga_news:v2
 ```
 
-L'API V2 est ensuite disponible sur `http://localhost:8018`. Le Compose legacy
-reste inchangé et continue d'utiliser le port `8017` et le dossier `data`.
+Le fichier `docker-compose.v2.yml` tire directement cette image. Aucun clone du
+dépôt ni build local n'est nécessaire :
+
+```bash
+docker compose -f docker-compose.v2.yml pull
+docker compose -f docker-compose.v2.yml up -d
+```
+
+L'API V2 est ensuite disponible sur `http://ADRESSE_DU_NAS:8018`.
+
+Le tag `latest` reste associé à la version legacy. Le workflow V2 publie aussi
+un tag immuable `v2-sha-<commit>` pour permettre un retour précis à une version
+antérieure.
+
+### Construction locale
+
+Pour construire la V2 depuis les sources :
+
+```powershell
+docker compose `
+  -f docker-compose.v2.yml `
+  -f docker-compose.v2-build.yml `
+  up -d --build
+```
 
 ### Timeout TLS du registry
 
@@ -73,7 +101,10 @@ L'image de base est configurable si un miroir accessible est disponible :
 
 ```powershell
 $env:PYTHON_BASE_IMAGE = "mon-registry/python:3.12-slim"
-docker compose -f docker-compose.v2.yml up -d --build
+docker compose `
+  -f docker-compose.v2.yml `
+  -f docker-compose.v2-build.yml `
+  up -d --build
 ```
 
 Si plusieurs registries expirent, vérifier dans Docker Desktop la configuration
@@ -92,6 +123,7 @@ fourni :
 $env:DOCKER_CA_CERT_FILE = "C:\chemin\autorite-locale.crt"
 docker compose `
   -f docker-compose.v2.yml `
+  -f docker-compose.v2-build.yml `
   -f docker-compose.v2-ca.yml `
   up -d --build
 ```
