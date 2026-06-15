@@ -224,6 +224,12 @@ def test_openapi_exposes_search_and_volume_edition_counters():
     assert payload['info']['description']
     assert payload['paths']['/search']['get']['description']
     assert payload['paths']['/search/resolve']['get']['description']
+    search_parameters = {
+        parameter['name']: parameter
+        for parameter in payload['paths']['/search']['get']['parameters']
+    }
+    assert search_parameters['mode']['schema']['default'] == 'all'
+    assert search_parameters['limit']['schema']['default'] == 50
     assert payload['paths']['/series/{slug}']['get']['description']
     assert payload['paths']['/volume/{series_slug}/{volume_slug}']['get']['description']
     assert payload['paths']['/planning']['get']['description']
@@ -347,6 +353,8 @@ def test_health_runtime_endpoint_exposes_metrics_and_defaults():
 def test_search_route_preserves_none_when_optional_flags_omitted():
     class DummyService:
         async def search(self, **kwargs):
+            assert kwargs['mode'] == 'all'
+            assert kwargs['limit'] == 50
             assert kwargs['enrich'] is None
             assert kwargs['include_editions'] is None
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
@@ -366,7 +374,7 @@ def test_search_route_preserves_none_when_optional_flags_omitted():
 
     with TestClient(app) as client:
         app.state.service = DummyService()
-        response = client.get('/search?q=one%20piece&kind=series&mode=all')
+        response = client.get('/search?q=one%20piece&kind=series')
     assert response.status_code == 200
 
 

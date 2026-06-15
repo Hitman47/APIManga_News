@@ -268,7 +268,7 @@ PLANNING_RESPONSE_EXAMPLE = {
 
 app = FastAPI(
     title='Manga News Private API',
-    version='0.2.0',
+    version='0.3.0',
     description=APP_DESCRIPTION,
     openapi_tags=TAGS_METADATA,
     docs_url=get_settings().docs_url,
@@ -434,8 +434,8 @@ async def search(
     request: Request,
     q: str = Query(..., min_length=1, description='Requête libre, par exemple `one piece` ou `Dogs: Bullets & Carnage`.'),
     kind: Literal['series', 'volume', 'all'] = Query(default='all', description='Limiter la recherche aux séries, aux volumes, ou aux deux.'),
-    mode: Literal['best', 'all'] = Query(default='best', description='`best` garde les meilleurs candidats après tri ; `all` renvoie tous les candidats retenus.'),
-    limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de résultats renvoyés.'),
+    mode: Literal['best', 'all'] = Query(default='all', description='`all` renvoie par défaut tous les candidats retenus ; `best` limite la réponse au meilleur candidat.'),
+    limit: int = Query(default=50, ge=1, le=50, description='Nombre maximum de résultats renvoyés. La valeur par défaut couvre une recherche de franchise complète.'),
     enrich: bool | None = Query(default=None, description='`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.'),
     include_editions: bool | None = Query(default=None, description='`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.'),
     prefer_main_series: bool | None = Query(default=None, description='`true` pour renforcer la priorité donnée à la série mère quand la requête vise une franchise ; `null` applique `SEARCH_DEFAULT_PREFER_MAIN_SERIES`.'),

@@ -1,0 +1,4805 @@
+{
+  "components": {
+    "schemas": {
+      "EditionStatus": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "volumes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volumes"
+          }
+        },
+        "title": "EditionStatus",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "properties": {
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "IllustrationDetails": {
+        "properties": {
+          "has_color_pages": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Color Pages"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages"
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw"
+          }
+        },
+        "title": "IllustrationDetails",
+        "type": "object"
+      },
+      "LinkItem": {
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "LinkItem",
+        "type": "object"
+      },
+      "NewsItem": {
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "comments": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comments"
+          },
+          "excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excerpt"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "NewsItem",
+        "type": "object"
+      },
+      "NewsResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/NewsItem"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "NewsResponse",
+        "type": "object"
+      },
+      "PlanningItem": {
+        "properties": {
+          "authors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors",
+            "type": "array"
+          },
+          "edition_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Label"
+          },
+          "featured": {
+            "default": false,
+            "title": "Featured",
+            "type": "boolean"
+          },
+          "is_one_shot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is One Shot"
+          },
+          "is_special": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Special"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "number_int": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number Int"
+          },
+          "publisher": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "series_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Slug"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "volume_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Slug"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "title": "PlanningItem",
+        "type": "object"
+      },
+      "PlanningPage": {
+        "properties": {
+          "filters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filters"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanningItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Month"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort"
+          },
+          "total_items": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Items"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "section"
+        ],
+        "title": "PlanningPage",
+        "type": "object"
+      },
+      "PlanningResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanningPage"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "PlanningResponse",
+        "type": "object"
+      },
+      "RelatedLinks": {
+        "properties": {
+          "anime": {
+            "items": {
+              "$ref": "#/components/schemas/LinkItem"
+            },
+            "title": "Anime",
+            "type": "array"
+          },
+          "dossiers": {
+            "items": {
+              "$ref": "#/components/schemas/LinkItem"
+            },
+            "title": "Dossiers",
+            "type": "array"
+          },
+          "drama": {
+            "items": {
+              "$ref": "#/components/schemas/LinkItem"
+            },
+            "title": "Drama",
+            "type": "array"
+          },
+          "external": {
+            "items": {
+              "$ref": "#/components/schemas/LinkItem"
+            },
+            "title": "External",
+            "type": "array"
+          },
+          "misc": {
+            "items": {
+              "$ref": "#/components/schemas/LinkItem"
+            },
+            "title": "Misc",
+            "type": "array"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/LinkItem"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "univers": {
+            "items": {
+              "$ref": "#/components/schemas/LinkItem"
+            },
+            "title": "Univers",
+            "type": "array"
+          },
+          "volumes": {
+            "items": {
+              "$ref": "#/components/schemas/LinkItem"
+            },
+            "title": "Volumes",
+            "type": "array"
+          }
+        },
+        "title": "RelatedLinks",
+        "type": "object"
+      },
+      "ResolveData": {
+        "properties": {
+          "best": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolveResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ResolveResult"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              "none"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "kind_requested": {
+            "enum": [
+              "series",
+              "volume",
+              "all"
+            ],
+            "title": "Kind Requested",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "kind_requested",
+          "confidence"
+        ],
+        "title": "ResolveData",
+        "type": "object"
+      },
+      "ResolveResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolveData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "ResolveResponse",
+        "type": "object"
+      },
+      "ResolveResult": {
+        "properties": {
+          "edition_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Label"
+          },
+          "is_one_shot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is One Shot"
+          },
+          "is_special": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Special"
+          },
+          "kind": {
+            "enum": [
+              "series",
+              "volume"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Kind"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "number_int": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number Int"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "series_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Slug"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "title_vo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Vo"
+          },
+          "translated_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Translated Title"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "vf": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "volume_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Slug"
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "kind",
+          "score"
+        ],
+        "title": "ResolveResult",
+        "type": "object"
+      },
+      "RuntimeObservabilityResponse": {
+        "properties": {
+          "cache": {
+            "additionalProperties": true,
+            "title": "Cache",
+            "type": "object"
+          },
+          "defaults": {
+            "additionalProperties": true,
+            "title": "Defaults",
+            "type": "object"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "title": "Metrics",
+            "type": "object"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "service": {
+            "additionalProperties": true,
+            "title": "Service",
+            "type": "object"
+          }
+        },
+        "title": "RuntimeObservabilityResponse",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SearchResult": {
+        "properties": {
+          "edition_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Label"
+          },
+          "is_one_shot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is One Shot"
+          },
+          "is_special": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Special"
+          },
+          "kind": {
+            "enum": [
+              "series",
+              "volume"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Kind"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "number_int": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number Int"
+          },
+          "relation_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relation Kind"
+          },
+          "root_series_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Series Slug"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "series_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Slug"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Type"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "title_vo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Vo"
+          },
+          "translated_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Translated Title"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "vf": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "volume_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Slug"
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "kind",
+          "score"
+        ],
+        "title": "SearchResult",
+        "type": "object"
+      },
+      "SeriesData": {
+        "properties": {
+          "advisory_age": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advisory Age"
+          },
+          "authors_art": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors Art",
+            "type": "array"
+          },
+          "authors_story": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors Story",
+            "type": "array"
+          },
+          "collection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "cover_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image"
+          },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Genres",
+            "type": "array"
+          },
+          "illustration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Illustration"
+          },
+          "illustration_details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IllustrationDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Release Date"
+          },
+          "next_release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Release Date"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "prepublication": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepublication"
+          },
+          "publisher_fr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher Fr"
+          },
+          "publisher_vo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher Vo"
+          },
+          "raw_sections": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Sections"
+          },
+          "related": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RelatedLinks"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "stats": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesStats"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strengths": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strengths"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "themes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Themes",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "title_vo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Vo"
+          },
+          "translated_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Translated Title"
+          },
+          "translators": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Translators",
+            "type": "array"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "vf": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "SeriesData",
+        "type": "object"
+      },
+      "SeriesEditionItem": {
+        "properties": {
+          "cover_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image"
+          },
+          "edition_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Label"
+          },
+          "is_one_shot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is One Shot"
+          },
+          "is_special": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Special"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "number_int": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number Int"
+          },
+          "publication_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Date"
+          },
+          "series_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Slug"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          },
+          "volume_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Slug"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "title": "SeriesEditionItem",
+        "type": "object"
+      },
+      "SeriesEditionsBlock": {
+        "properties": {
+          "edition": {
+            "enum": [
+              "vf",
+              "vo"
+            ],
+            "title": "Edition",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesEditionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "edition"
+        ],
+        "title": "SeriesEditionsBlock",
+        "type": "object"
+      },
+      "SeriesEditionsData": {
+        "properties": {
+          "series_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Slug"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "vf": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesEditionsBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesEditionsBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "SeriesEditionsData",
+        "type": "object"
+      },
+      "SeriesEditionsResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesEditionsData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "SeriesEditionsResponse",
+        "type": "object"
+      },
+      "SeriesRelatedData": {
+        "properties": {
+          "related": {
+            "$ref": "#/components/schemas/RelatedLinks"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "SeriesRelatedData",
+        "type": "object"
+      },
+      "SeriesRelatedResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesRelatedData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "SeriesRelatedResponse",
+        "type": "object"
+      },
+      "SeriesResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesData"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "SeriesResponse",
+        "type": "object"
+      },
+      "SeriesStats": {
+        "properties": {
+          "editorial_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editorial Score"
+          },
+          "in_collection": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "In Collection"
+          },
+          "in_wishlist": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "In Wishlist"
+          },
+          "likes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Likes"
+          },
+          "marketplace": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marketplace"
+          },
+          "reader_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reader Score"
+          }
+        },
+        "title": "SeriesStats",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VolumeData": {
+        "properties": {
+          "advisory_age": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advisory Age"
+          },
+          "authors_art": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors Art",
+            "type": "array"
+          },
+          "authors_story": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Authors Story",
+            "type": "array"
+          },
+          "collection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "cover_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image"
+          },
+          "edition_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Label"
+          },
+          "editorial_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editorial Score"
+          },
+          "genres": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Genres",
+            "type": "array"
+          },
+          "illustration": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Illustration"
+          },
+          "illustration_details": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IllustrationDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "is_one_shot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is One Shot"
+          },
+          "is_special": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Special"
+          },
+          "isbn_ean": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn Ean"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "number_int": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number Int"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "prepublication": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepublication"
+          },
+          "price_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Code"
+          },
+          "publication_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Date"
+          },
+          "publisher_fr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher Fr"
+          },
+          "publisher_vo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher Vo"
+          },
+          "raw_sections": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Raw Sections"
+          },
+          "reader_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reader Score"
+          },
+          "related": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RelatedLinks"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "series_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Title"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "title_vo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Vo"
+          },
+          "translated_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Translated Title"
+          },
+          "translators": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Translators",
+            "type": "array"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "vf": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "VolumeData",
+        "type": "object"
+      },
+      "VolumeResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VolumeData"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "VolumeResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "API non officielle, auto-hébergeable, qui transforme des pages publiques Manga-News en JSON.\n\nPoints importants :\n- pas de préfixe `/v1` ;\n- pas de routes admin publiques ;\n- authentification optionnelle via `Authorization: Bearer <API_TOKEN>` si `API_TOKEN` est défini ;\n- `ETag` / `If-None-Match` disponibles sur les réponses enveloppées ;\n- `X-Request-Id` renvoyé sur toutes les réponses pour corréler les logs ;\n- les réponses de recherche et de résolution peuvent être enrichies avec `title_vo`, `translated_title`, et, quand l'information existe, les compteurs `vf` / `vo` issus de la fiche série parente ;\n- les réponses volume restent légères par défaut et n'hydratent `vf` / `vo` que si `include_parent_editions=true` ou si la configuration serveur l'active explicitement ;\n- une route technique `/health/runtime` expose les métriques agrégées, les derniers événements de perf et l'état du cache local.\n\nFlux conseillé :\n1. utiliser `/search` ou `/search/resolve` pour obtenir un slug ou un couple `series_slug` / `volume_slug` ;\n2. consommer ensuite `/series/{slug}` ou `/volume/{series_slug}/{volume_slug}` ;\n3. réutiliser `ETag` et `If-None-Match` pour limiter les téléchargements inutiles.",
+    "title": "Manga News Private API",
+    "version": "0.3.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "description": "Retourne simplement `{ \"ok\": true }` si l’application répond et que la vérification d’authentification éventuelle a réussi.",
+        "operationId": "health_health_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check API availability",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/health/runtime": {
+      "get": {
+        "description": "Route technique destinée au diagnostic local. Elle renvoie les compteurs agrégés, les timings roulants, les derniers événements de performance, l’état du cache SQLite/L1, ainsi que les comportements par défaut actifs pour `/search`, `/search/resolve` et `/volume`. Toutes les réponses incluent aussi `X-Request-Id`.",
+        "operationId": "health_runtime_health_runtime_get",
+        "parameters": [
+          {
+            "description": "Inclure les dernières requêtes et événements de performance.",
+            "in": "query",
+            "name": "include_recent",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "Inclure les dernières requêtes et événements de performance.",
+              "title": "Include Recent",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeObservabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect runtime metrics and cache state",
+        "tags": [
+          "Observability"
+        ]
+      }
+    },
+    "/news/global": {
+      "get": {
+        "description": "Retourne le flux RSS global Manga-News converti en JSON.",
+        "operationId": "get_global_news_news_global_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get global Manga-News RSS items",
+        "tags": [
+          "News"
+        ]
+      }
+    },
+    "/news/series/{slug}": {
+      "get": {
+        "description": "Récupère les actualités d’une série.",
+        "operationId": "get_series_news_news_series__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get news for a series",
+        "tags": [
+          "News"
+        ]
+      }
+    },
+    "/news/volume/by-url": {
+      "get": {
+        "description": "Même comportement que `/news/volume/{series_slug}/{volume_slug}`, mais en partant d’une URL directe Manga-News.",
+        "operationId": "get_volume_news_by_url_news_volume_by_url_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get volume news from a direct URL",
+        "tags": [
+          "News"
+        ]
+      }
+    },
+    "/news/volume/{series_slug}/{volume_slug}": {
+      "get": {
+        "description": "Récupère les actualités d’un volume à partir de son couple `series_slug` / `volume_slug`.",
+        "operationId": "get_volume_news_news_volume__series_slug___volume_slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "series_slug",
+            "required": true,
+            "schema": {
+              "title": "Series Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "volume_slug",
+            "required": true,
+            "schema": {
+              "title": "Volume Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get news for a volume",
+        "tags": [
+          "News"
+        ]
+      }
+    },
+    "/planning": {
+      "get": {
+        "description": "Récupère les pages de planning VF ou VO, puis applique les filtres locaux par éditeur, requête, dates et tri.",
+        "operationId": "get_planning_planning_get",
+        "parameters": [
+          {
+            "description": "Section de planning à consulter.",
+            "in": "query",
+            "name": "section",
+            "required": false,
+            "schema": {
+              "default": "manga-vf",
+              "description": "Section de planning à consulter.",
+              "enum": [
+                "manga-vf",
+                "manga-vo"
+              ],
+              "title": "Section",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Année de planning, si connue.",
+            "in": "query",
+            "name": "year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2100,
+                  "minimum": 1900,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Année de planning, si connue.",
+              "title": "Year"
+            }
+          },
+          {
+            "description": "Mois de planning, si connu.",
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 12,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Mois de planning, si connu.",
+              "title": "Month"
+            }
+          },
+          {
+            "description": "Page de planning à lire.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Page de planning à lire.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Filtre local sur le nom d’éditeur.",
+            "in": "query",
+            "name": "publisher",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtre local sur le nom d’éditeur.",
+              "title": "Publisher"
+            }
+          },
+          {
+            "description": "Filtre local fuzzy sur le titre, les auteurs et l’éditeur.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtre local fuzzy sur le titre, les auteurs et l’éditeur.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Date ISO minimale, par exemple `2026-04-01`.",
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Date ISO minimale, par exemple `2026-04-01`.",
+              "title": "Date From"
+            }
+          },
+          {
+            "description": "Date ISO maximale, par exemple `2026-04-30`.",
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Date ISO maximale, par exemple `2026-04-30`.",
+              "title": "Date To"
+            }
+          },
+          {
+            "description": "Ordre de tri local.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "date_asc",
+              "description": "Ordre de tri local.",
+              "enum": [
+                "date_asc",
+                "date_desc",
+                "title_asc",
+                "title_desc"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Nombre maximum d’éléments renvoyés après filtrage.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "description": "Nombre maximum d’éléments renvoyés après filtrage.",
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "cache_expires_at": "2026-04-21T22:10:10+00:00",
+                  "cached": false,
+                  "data": {
+                    "filters": {
+                      "publisher": "Glénat"
+                    },
+                    "items": [
+                      {
+                        "authors": [
+                          "Eiichirô ODA"
+                        ],
+                        "featured": true,
+                        "is_one_shot": false,
+                        "is_special": false,
+                        "number": "112",
+                        "number_int": 112,
+                        "publisher": "Glénat",
+                        "release_date": "2026-05-06",
+                        "series_slug": "One-Piece",
+                        "summary": "Nouveau volume de la série.",
+                        "title": "One Piece Vol.112",
+                        "url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-112",
+                        "volume_slug": "vol-112"
+                      }
+                    ],
+                    "month": 4,
+                    "page": 1,
+                    "section": "manga-vf",
+                    "sort": "date_asc",
+                    "total_items": 1,
+                    "year": 2026
+                  },
+                  "fetched_at": "2026-04-21T10:10:10+00:00",
+                  "fingerprint": "fp-plan",
+                  "found": true,
+                  "ok": true,
+                  "partial": false,
+                  "schema_version": "1.0",
+                  "source": "manga_news",
+                  "source_url": "https://www.manga-news.com/index.php/planning/",
+                  "warnings": []
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningResponse"
+                }
+              }
+            },
+            "description": "Planning envelope."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Manga-News planning pages",
+        "tags": [
+          "Planning"
+        ]
+      }
+    },
+    "/search": {
+      "get": {
+        "description": "Recherche des séries et/ou volumes à partir d’une requête libre. Les résultats sont scorés après normalisation du texte. Quand `enrich`, `include_editions`, `prefer_main_series`, `include_related` ou `include_books` sont absents, la route applique les defaults serveur documentés dans `.env.example`. L'enrichissement peut ajouter `title_vo`, `translated_title`, `source_type`, `media_kind`, `relation_kind`, `root_series_slug` et, quand la série parente est accessible, les compteurs `vf` / `vo`. Les filtres `media_kinds` et `exclude_media_kinds` permettent de restreindre explicitement le périmètre métier (manga, spin-off, roman, essai, guide, cookbook, etc.).",
+        "operationId": "search_search_get",
+        "parameters": [
+          {
+            "description": "Requête libre, par exemple `one piece` ou `Dogs: Bullets & Carnage`.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Requête libre, par exemple `one piece` ou `Dogs: Bullets & Carnage`.",
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Limiter la recherche aux séries, aux volumes, ou aux deux.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "Limiter la recherche aux séries, aux volumes, ou aux deux.",
+              "enum": [
+                "series",
+                "volume",
+                "all"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`all` renvoie par défaut tous les candidats retenus ; `best` limite la réponse au meilleur candidat.",
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "`all` renvoie par défaut tous les candidats retenus ; `best` limite la réponse au meilleur candidat.",
+              "enum": [
+                "best",
+                "all"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Nombre maximum de résultats renvoyés. La valeur par défaut couvre une recherche de franchise complète.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Nombre maximum de résultats renvoyés. La valeur par défaut couvre une recherche de franchise complète.",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.",
+            "in": "query",
+            "name": "enrich",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.",
+              "title": "Enrich"
+            }
+          },
+          {
+            "description": "`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.",
+            "in": "query",
+            "name": "include_editions",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.",
+              "title": "Include Editions"
+            }
+          },
+          {
+            "description": "`true` pour renforcer la priorité donnée à la série mère quand la requête vise une franchise ; `null` applique `SEARCH_DEFAULT_PREFER_MAIN_SERIES`.",
+            "in": "query",
+            "name": "prefer_main_series",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`true` pour renforcer la priorité donnée à la série mère quand la requête vise une franchise ; `null` applique `SEARCH_DEFAULT_PREFER_MAIN_SERIES`.",
+              "title": "Prefer Main Series"
+            }
+          },
+          {
+            "description": "`false` pour retirer les spin-offs et séries liées détectées ; `null` applique `SEARCH_DEFAULT_INCLUDE_RELATED`.",
+            "in": "query",
+            "name": "include_related",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`false` pour retirer les spin-offs et séries liées détectées ; `null` applique `SEARCH_DEFAULT_INCLUDE_RELATED`.",
+              "title": "Include Related"
+            }
+          },
+          {
+            "description": "`false` pour retirer les romans, essais, guides, artbooks, cookbooks et autres livres dérivés ; `null` applique `SEARCH_DEFAULT_INCLUDE_BOOKS`.",
+            "in": "query",
+            "name": "include_books",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`false` pour retirer les romans, essais, guides, artbooks, cookbooks et autres livres dérivés ; `null` applique `SEARCH_DEFAULT_INCLUDE_BOOKS`.",
+              "title": "Include Books"
+            }
+          },
+          {
+            "description": "Liste CSV blanche des `media_kind` à conserver, par exemple `manga,manga_spinoff`.",
+            "in": "query",
+            "name": "media_kinds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste CSV blanche des `media_kind` à conserver, par exemple `manga,manga_spinoff`.",
+              "title": "Media Kinds"
+            }
+          },
+          {
+            "description": "Liste CSV noire des `media_kind` à exclure, par exemple `novel,essay,cookbook`.",
+            "in": "query",
+            "name": "exclude_media_kinds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste CSV noire des `media_kind` à exclure, par exemple `novel,essay,cookbook`.",
+              "title": "Exclude Media Kinds"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "cache_expires_at": "2026-04-22T10:10:10+00:00",
+                  "cached": false,
+                  "data": [
+                    {
+                      "is_one_shot": false,
+                      "is_special": false,
+                      "kind": "volume",
+                      "number": "1",
+                      "number_int": 1,
+                      "score": 100,
+                      "series_slug": "Dogs:-Bullets-Carnage",
+                      "title": "Dogs: Bullets & Carnage Vol.1",
+                      "title_vo": "Dogs: Bullets & Carnage",
+                      "translated_title": "Dogs: Bullets & Carnage",
+                      "url": "https://www.manga-news.com/index.php/manga/Dogs:-Bullets-Carnage/vol-1",
+                      "vf": {
+                        "status": "En cours",
+                        "volumes": 9
+                      },
+                      "vo": {
+                        "status": "En pause",
+                        "volumes": 10
+                      },
+                      "volume_slug": "vol-1"
+                    }
+                  ],
+                  "fetched_at": "2026-04-21T10:10:10+00:00",
+                  "fingerprint": "fp-search-dogs",
+                  "found": true,
+                  "ok": true,
+                  "partial": false,
+                  "schema_version": "1.0",
+                  "source": "manga_news",
+                  "source_url": "https://www.manga-news.com/index.php/recherche/?cat=manga-volume-vf&q=Dogs: Bullets & Carnage",
+                  "warnings": []
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Search results envelope."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Manga-News public pages",
+        "tags": [
+          "Search"
+        ]
+      }
+    },
+    "/search/resolve": {
+      "get": {
+        "description": "Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`. Les flags `enrich`, `include_editions`, `prefer_main_series`, `include_related`, `include_books`, `media_kinds` et `exclude_media_kinds` suivent le même contrat que `/search`.",
+        "operationId": "search_resolve_search_resolve_get",
+        "parameters": [
+          {
+            "description": "Requête libre à résoudre.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Requête libre à résoudre.",
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Type d’objet à résoudre.",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "Type d’objet à résoudre.",
+              "enum": [
+                "series",
+                "volume",
+                "all"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Nombre maximum de candidats inspectés.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Nombre maximum de candidats inspectés.",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.",
+            "in": "query",
+            "name": "enrich",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.",
+              "title": "Enrich"
+            }
+          },
+          {
+            "description": "`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.",
+            "in": "query",
+            "name": "include_editions",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.",
+              "title": "Include Editions"
+            }
+          },
+          {
+            "description": "`true` pour renforcer la priorité donnée à la série mère quand la requête vise une franchise ; `null` applique `SEARCH_DEFAULT_PREFER_MAIN_SERIES`.",
+            "in": "query",
+            "name": "prefer_main_series",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`true` pour renforcer la priorité donnée à la série mère quand la requête vise une franchise ; `null` applique `SEARCH_DEFAULT_PREFER_MAIN_SERIES`.",
+              "title": "Prefer Main Series"
+            }
+          },
+          {
+            "description": "`false` pour retirer les spin-offs et séries liées détectées ; `null` applique `SEARCH_DEFAULT_INCLUDE_RELATED`.",
+            "in": "query",
+            "name": "include_related",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`false` pour retirer les spin-offs et séries liées détectées ; `null` applique `SEARCH_DEFAULT_INCLUDE_RELATED`.",
+              "title": "Include Related"
+            }
+          },
+          {
+            "description": "`false` pour retirer les romans, essais, guides, artbooks, cookbooks et autres livres dérivés ; `null` applique `SEARCH_DEFAULT_INCLUDE_BOOKS`.",
+            "in": "query",
+            "name": "include_books",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`false` pour retirer les romans, essais, guides, artbooks, cookbooks et autres livres dérivés ; `null` applique `SEARCH_DEFAULT_INCLUDE_BOOKS`.",
+              "title": "Include Books"
+            }
+          },
+          {
+            "description": "Liste CSV blanche des `media_kind` à conserver, par exemple `manga,manga_spinoff`.",
+            "in": "query",
+            "name": "media_kinds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste CSV blanche des `media_kind` à conserver, par exemple `manga,manga_spinoff`.",
+              "title": "Media Kinds"
+            }
+          },
+          {
+            "description": "Liste CSV noire des `media_kind` à exclure, par exemple `novel,essay,cookbook`.",
+            "in": "query",
+            "name": "exclude_media_kinds",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste CSV noire des `media_kind` à exclure, par exemple `novel,essay,cookbook`.",
+              "title": "Exclude Media Kinds"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "cache_expires_at": "2026-04-22T10:10:10+00:00",
+                  "cached": false,
+                  "data": {
+                    "best": {
+                      "kind": "series",
+                      "score": 98,
+                      "series_slug": "One-piece-Edition-originale",
+                      "slug": "One-piece-Edition-originale",
+                      "title": "One Piece",
+                      "title_vo": "ワンピース",
+                      "translated_title": "One Piece",
+                      "url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
+                      "vf": {
+                        "status": "En cours",
+                        "volumes": 112
+                      },
+                      "vo": {
+                        "status": "En cours",
+                        "volumes": 114
+                      }
+                    },
+                    "candidates": [],
+                    "confidence": "high",
+                    "kind_requested": "series",
+                    "query": "one piece"
+                  },
+                  "fetched_at": "2026-04-21T10:10:10+00:00",
+                  "fingerprint": "fp-resolve-one-piece",
+                  "found": true,
+                  "ok": true,
+                  "partial": false,
+                  "schema_version": "1.0",
+                  "source": "manga_news",
+                  "source_url": "https://www.manga-news.com/index.php/recherche/?cat=manga-serie-vf&q=one piece",
+                  "warnings": []
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveResponse"
+                }
+              }
+            },
+            "description": "Resolved best candidate."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve the best search candidate",
+        "tags": [
+          "Search"
+        ]
+      }
+    },
+    "/series/by-url": {
+      "get": {
+        "description": "Même comportement que `/series/{slug}`, mais en partant d’une URL directe Manga-News.",
+        "operationId": "get_series_by_url_series_by_url_get",
+        "parameters": [
+          {
+            "description": "URL complète de la fiche série Manga-News.",
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "description": "URL complète de la fiche série Manga-News.",
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "blocks",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blocks"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fields"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_raw_sections",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Raw Sections",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a series payload from a direct Manga-News URL",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
+    "/series/by-url/editions": {
+      "get": {
+        "description": "Même comportement que `/series/{slug}/editions`, mais en partant d’une URL directe Manga-News.",
+        "operationId": "get_series_editions_by_url_series_by_url_editions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "edition",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "vf",
+                "vo"
+              ],
+              "title": "Edition",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesEditionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List series editions from a direct URL",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
+    "/series/by-url/related": {
+      "get": {
+        "description": "Même comportement que `/series/{slug}/related`, mais en partant d’une URL directe Manga-News.",
+        "operationId": "get_series_related_by_url_series_by_url_related_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesRelatedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get related links from a direct series URL",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
+    "/series/{slug}": {
+      "get": {
+        "description": "Lit une fiche série Manga-News, y compris les compteurs d’éditions `vf` / `vo` quand ils sont présents dans `#numberblock`.",
+        "operationId": "get_series_series__slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Liste de blocs séparés par des virgules, par exemple `editions,stats`.",
+            "in": "query",
+            "name": "blocks",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste de blocs séparés par des virgules, par exemple `editions,stats`.",
+              "title": "Blocks"
+            }
+          },
+          {
+            "description": "Liste de chemins de champs séparés par des virgules, par exemple `title,vf.volumes`.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste de chemins de champs séparés par des virgules, par exemple `title,vf.volumes`.",
+              "title": "Fields"
+            }
+          },
+          {
+            "description": "Inclure les sections brutes extraites de la page HTML.",
+            "in": "query",
+            "name": "include_raw_sections",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Inclure les sections brutes extraites de la page HTML.",
+              "title": "Include Raw Sections",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "cache_expires_at": "2026-04-22T10:10:10+00:00",
+                  "cached": false,
+                  "data": {
+                    "genres": [
+                      "Aventure",
+                      "Fantastique"
+                    ],
+                    "last_release_date": "2026-04-08",
+                    "next_release_date": "2026-05-06",
+                    "publisher_fr": "Glénat",
+                    "publisher_vo": "Shûeisha",
+                    "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
+                    "title": "One Piece",
+                    "title_vo": "ワンピース",
+                    "translated_title": "One Piece",
+                    "vf": {
+                      "status": "En cours",
+                      "volumes": 112
+                    },
+                    "vo": {
+                      "status": "En cours",
+                      "volumes": 114
+                    }
+                  },
+                  "fetched_at": "2026-04-21T10:10:10+00:00",
+                  "fingerprint": "fp-series",
+                  "found": true,
+                  "ok": true,
+                  "partial": false,
+                  "schema_version": "1.0",
+                  "source": "manga_news",
+                  "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
+                  "warnings": []
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponse"
+                }
+              }
+            },
+            "description": "Series envelope."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a detailed series payload",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
+    "/series/{slug}/editions": {
+      "get": {
+        "description": "Récupère les pages Éditions VF et/ou VO d’une série.",
+        "operationId": "get_series_editions_series__slug__editions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`all`, `vf` ou `vo`.",
+            "in": "query",
+            "name": "edition",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "`all`, `vf` ou `vo`.",
+              "enum": [
+                "all",
+                "vf",
+                "vo"
+              ],
+              "title": "Edition",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesEditionsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List series editions",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
+    "/series/{slug}/related": {
+      "get": {
+        "description": "Renvoie les liens en relation extraits depuis la fiche série.",
+        "operationId": "get_series_related_series__slug__related_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesRelatedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get related links for a series",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
+    "/volume/by-url": {
+      "get": {
+        "description": "Même comportement que `/volume/{series_slug}/{volume_slug}`, mais en partant d’une URL directe Manga-News.",
+        "operationId": "get_volume_by_url_volume_by_url_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "blocks",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Blocks"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fields"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_raw_sections",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Raw Sections",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_parent_editions",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Include Parent Editions"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolumeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a volume payload from a direct Manga-News URL",
+        "tags": [
+          "Volume"
+        ]
+      }
+    },
+    "/volume/{series_slug}/{volume_slug}": {
+      "get": {
+        "description": "Lit une fiche volume Manga-News. Quand `include_parent_editions` est absent, la route applique `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`. Avec `false`, la réponse reste légère ; avec `true`, elle peut hydrater `vf` / `vo` depuis la série parente.",
+        "operationId": "get_volume_volume__series_slug___volume_slug__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "series_slug",
+            "required": true,
+            "schema": {
+              "title": "Series Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "volume_slug",
+            "required": true,
+            "schema": {
+              "title": "Volume Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Liste de blocs séparés par des virgules, par exemple `release,scores`.",
+            "in": "query",
+            "name": "blocks",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste de blocs séparés par des virgules, par exemple `release,scores`.",
+              "title": "Blocks"
+            }
+          },
+          {
+            "description": "Liste de chemins de champs séparés par des virgules, par exemple `publication_date,isbn_ean`.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste de chemins de champs séparés par des virgules, par exemple `publication_date,isbn_ean`.",
+              "title": "Fields"
+            }
+          },
+          {
+            "description": "Inclure les sections brutes extraites de la page HTML.",
+            "in": "query",
+            "name": "include_raw_sections",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Inclure les sections brutes extraites de la page HTML.",
+              "title": "Include Raw Sections",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "`true` pour hydrater `vf` / `vo` depuis la série parente ; `null` applique `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`.",
+            "in": "query",
+            "name": "include_parent_editions",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`true` pour hydrater `vf` / `vo` depuis la série parente ; `null` applique `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`.",
+              "title": "Include Parent Editions"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "cache_expires_at": "2026-04-28T10:10:10+00:00",
+                  "cached": false,
+                  "data": {
+                    "isbn_ean": "9782344037102",
+                    "number": "91",
+                    "number_int": 91,
+                    "publication_date": "2019-07-03",
+                    "publisher_fr": "Glénat",
+                    "series_title": "One Piece",
+                    "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-91",
+                    "title": "One Piece - Tome 91",
+                    "title_vo": "ワンピース",
+                    "translated_title": "One Piece",
+                    "vf": {
+                      "status": "En cours",
+                      "volumes": 112
+                    },
+                    "vo": {
+                      "status": "En cours",
+                      "volumes": 114
+                    }
+                  },
+                  "fetched_at": "2026-04-21T10:10:10+00:00",
+                  "fingerprint": "fp-volume",
+                  "found": true,
+                  "ok": true,
+                  "partial": false,
+                  "schema_version": "1.0",
+                  "source": "manga_news",
+                  "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-91",
+                  "warnings": []
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/VolumeResponse"
+                }
+              }
+            },
+            "description": "Volume envelope."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a detailed volume payload",
+        "tags": [
+          "Volume"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "Minimal availability checks and runtime observability helpers.",
+      "name": "Health"
+    },
+    {
+      "description": "Request correlation headers, rolling metrics, and cache/runtime inspection.",
+      "name": "Observability"
+    },
+    {
+      "description": "Search Manga-News public pages and resolve the best candidate.",
+      "name": "Search"
+    },
+    {
+      "description": "Detailed series payloads, related links, and edition listings.",
+      "name": "Series"
+    },
+    {
+      "description": "Detailed volume payloads.",
+      "name": "Volume"
+    },
+    {
+      "description": "Global, series-level, and volume-level news feeds.",
+      "name": "News"
+    },
+    {
+      "description": "Upcoming release planning pages.",
+      "name": "Planning"
+    }
+  ]
+}

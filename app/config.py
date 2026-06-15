@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     cache_ttl_news_series_seconds: int = Field(default=12 * 3600, alias='CACHE_TTL_NEWS_SERIES_SECONDS')
     cache_ttl_planning_seconds: int = Field(default=12 * 3600, alias='CACHE_TTL_PLANNING_SECONDS')
     search_score_threshold: int = Field(default=60, alias='SEARCH_SCORE_THRESHOLD')
-    default_limit: int = Field(default=10, alias='DEFAULT_LIMIT')
+    default_limit: int = Field(default=50, alias='DEFAULT_LIMIT')
     max_limit: int = Field(default=50, alias='MAX_LIMIT')
     search_source_concurrency: int = Field(
         default=4,

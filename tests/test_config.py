@@ -5,12 +5,14 @@ def test_v2_defaults_keep_search_light_and_bound_upstream_concurrency(monkeypatc
     monkeypatch.delenv('SEARCH_DEFAULT_ENRICH', raising=False)
     monkeypatch.delenv('SEARCH_DEFAULT_INCLUDE_EDITIONS', raising=False)
     monkeypatch.delenv('REQUEST_MAX_CONCURRENCY', raising=False)
+    monkeypatch.delenv('DEFAULT_LIMIT', raising=False)
 
     settings = Settings(_env_file=None)
 
     assert settings.search_default_enrich is False
     assert settings.search_default_include_editions is False
     assert settings.request_max_concurrency == 6
+    assert settings.default_limit == 50
 
 
 def test_settings_accept_legacy_and_restored_env_knobs(monkeypatch):

@@ -18,6 +18,7 @@ rafraîchie uniquement lorsqu'une requête cliente la demande.
 ## Changements
 
 - `/search` n'enrichit plus les résultats par défaut ;
+- `/search` retourne jusqu'à 50 correspondances par défaut avec `mode=all` ;
 - les compteurs `vf` / `vo` ne sont plus hydratés par défaut ;
 - `mode=best` enrichit au maximum un candidat ;
 - les appels HTTP vers Manga News sont limités globalement à 6 simultanés par
@@ -29,6 +30,19 @@ rafraîchie uniquement lorsqu'une requête cliente la demande.
   dans la file de concurrence via `/health/runtime`.
 
 ## Enrichissement explicite
+
+Une recherche simple couvre une franchise complète, y compris les suites,
+spin-offs et séries dérivées dont le titre correspond :
+
+```text
+GET /search?q=fairy%20tail&kind=series
+```
+
+Les valeurs par défaut V2 sont `mode=all`, `limit=50`,
+`include_related=true` et `include_books=true`.
+
+Le fichier `openapi.json` à la racine est généré depuis le même schéma FastAPI
+que `/openapi.json`. Un test empêche sa publication s'il n'est plus synchronisé.
 
 Pour retrouver le contrat enrichi de la V1 :
 
