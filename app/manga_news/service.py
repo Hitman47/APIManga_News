@@ -64,7 +64,7 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-06-15-v2-parser-performance-1'
+CACHE_SCHEMA_VERSION = '2026-06-18-v2-editions-image-links-1'
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
