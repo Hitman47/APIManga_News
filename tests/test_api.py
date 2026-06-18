@@ -157,14 +157,75 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
     assert response.status_code == 200
     payload = response.json()
     assert '/series/{slug}/editions' in payload['paths']
+    assert '/series/{slug}/release-state' in payload['paths']
     assert '/series/{slug}/related' in payload['paths']
     assert '/search/resolve' in payload['paths']
     assert '/health/runtime' in payload['paths']
     schemas = payload['components']['schemas']
     assert 'SeriesData' in schemas
     assert 'SeriesEditionsData' in schemas
+    assert 'ReleaseStateData' in schemas
     assert 'ResolveResponse' in schemas
     assert 'RuntimeObservabilityResponse' in schemas
+
+
+def test_series_release_state_route_forwards_params():
+    class DummyService:
+        async def get_release_state_by_series(self, **kwargs):
+            assert kwargs == {
+                'slug': 'One-piece-Edition-originale',
+                'include_isbn': True,
+                'include_special': True,
+                'today': '2026-06-18',
+            }
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                'cached': False,
+                'fetched_at': '2026-06-18T10:00:00+00:00',
+                'cache_expires_at': '2026-06-19T10:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-release-state',
+                'data': {
+                    'series': {
+                        'title': 'One Piece',
+                        'slug': 'One-piece-Edition-originale',
+                        'publisher_fr': 'Glénat',
+                        'vf': {'volumes': 111, 'status': 'En cours'},
+                        'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                    },
+                    'last_released': {
+                        'title': 'One Piece Vol.110',
+                        'number': '110',
+                        'number_int': 110,
+                        'publication_date': '2026-04-02',
+                        'isbn_ean': '9782344067985',
+                        'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+                        'series_slug': 'One-Piece',
+                        'volume_slug': 'vol-110',
+                        'is_special': False,
+                        'is_one_shot': False,
+                        'edition_label': None,
+                    },
+                    'next_release': None,
+                    'status': 'FOUND_NO_UPCOMING',
+                    'confidence': 'high',
+                    'warnings': [],
+                },
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/series/One-piece-Edition-originale/release-state?include_isbn=true&include_special=true&today=2026-06-18')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['data']['series']['slug'] == 'One-piece-Edition-originale'
+    assert payload['data']['last_released']['isbn_ean'] == '9782344067985'
+    assert response.headers['X-Data-Fingerprint'] == 'fp-release-state'
 
 
 def test_search_endpoint_exposes_alternate_titles():

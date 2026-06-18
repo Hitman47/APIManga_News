@@ -12,6 +12,7 @@ Ces fichiers servent à montrer des payloads réalistes sans devoir lancer l'API
 - `planning_example.json`
 - `series_related_one_piece.json`
 - `series_editions_one_piece.json`
+- `release_state_one_piece.json`
 - `error_upstream_parse.json`
 
 ## Exemples supplémentaires utiles
@@ -43,6 +44,7 @@ Donne-lui en priorité :
 3. `series_one_piece.json`
 4. `volume_one_piece_110.json`
 5. `planning_example.json`
+6. `release_state_one_piece.json`
 
 ## Important
 

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from app.cache import SQLiteCache
 from app.exceptions import ParseError
 from app.manga_news.service import CACHE_SCHEMA_VERSION, MangaNewsService, versioned_cache_key
+from app.models import Envelope
 
 
 class DummySettings:
@@ -190,6 +192,150 @@ async def test_series_editions_reuses_series_cache_and_block_cache(tmp_path: Pat
     assert fetcher.calls.count(series_url) == 1
     assert fetcher.calls.count(vf_url) == 1
     assert fetcher.calls.count(vo_url) == 1
+
+
+@pytest.mark.asyncio
+async def test_release_state_by_series_uses_vf_editions_and_optional_isbn(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    class DummyEntry:
+        fetched_at = datetime(2026, 6, 18, 10, 0, tzinfo=UTC)
+        expires_at = datetime(2026, 6, 19, 10, 0, tzinfo=UTC)
+
+    async def fake_get_series_payload(**kwargs):
+        assert kwargs == {'slug': 'One-piece-Edition-originale'}
+        return (
+            {
+                'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                'data': {
+                    'title': 'One Piece',
+                    'publisher_fr': 'Glénat',
+                    'vf': {'volumes': 111, 'status': 'En cours'},
+                },
+            },
+            DummyEntry(),
+            True,
+            False,
+            [],
+        )
+
+    async def fake_get_series_editions(**kwargs):
+        assert kwargs == {'slug': 'One-piece-Edition-originale', 'edition': 'vf'}
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url='https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+            cached=True,
+            fetched_at='2026-06-18T10:00:00+00:00',
+            cache_expires_at='2026-06-19T10:00:00+00:00',
+            partial=False,
+            warnings=[],
+            fingerprint='fp-editions',
+            data={
+                'title': 'One Piece',
+                'series_slug': 'One-piece-Edition-originale',
+                'vf': {
+                    'edition': 'vf',
+                    'source_url': 'https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale',
+                    'total': 4,
+                    'items': [
+                        {
+                            'title': 'One Piece Vol.109',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-109',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'vol-109',
+                            'number': '109',
+                            'number_int': 109,
+                            'publication_date': '2026-01-02',
+                            'is_special': False,
+                            'is_one_shot': False,
+                        },
+                        {
+                            'title': 'One Piece Vol.110',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'vol-110',
+                            'number': '110',
+                            'number_int': 110,
+                            'publication_date': '2026-04-02',
+                            'is_special': False,
+                            'is_one_shot': False,
+                        },
+                        {
+                            'title': 'One Piece Vol.111',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-111',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'vol-111',
+                            'number': '111',
+                            'number_int': 111,
+                            'publication_date': '2026-07-02',
+                            'is_special': False,
+                            'is_one_shot': False,
+                        },
+                        {
+                            'title': 'One Piece Special',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/special',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'special',
+                            'number': '999',
+                            'number_int': 999,
+                            'publication_date': '2026-06-01',
+                            'is_special': True,
+                            'is_one_shot': False,
+                        },
+                    ],
+                },
+                'vo': None,
+                'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+            },
+        )
+
+    volume_calls = []
+
+    async def fake_get_volume(**kwargs):
+        volume_calls.append(kwargs)
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url=f"https://www.manga-news.com/index.php/manga/{kwargs['series_slug']}/{kwargs['volume_slug']}",
+            cached=True,
+            fetched_at='2026-06-18T10:00:00+00:00',
+            cache_expires_at='2026-06-19T10:00:00+00:00',
+            partial=False,
+            warnings=[],
+            fingerprint=f"fp-{kwargs['volume_slug']}",
+            data={'isbn_ean': f"9780000000{kwargs['volume_slug'][-3:]}"},
+        )
+
+    service._get_series_payload = fake_get_series_payload
+    service.get_series_editions = fake_get_series_editions
+    service.get_volume = fake_get_volume
+
+    response = await service.get_release_state_by_series(
+        slug='One-piece-Edition-originale',
+        include_isbn=True,
+        today='2026-06-18',
+    )
+
+    assert response.cached is True
+    assert response.partial is False
+    assert response.data['status'] == 'FOUND_CONFIRMED'
+    assert response.data['confidence'] == 'high'
+    assert response.data['last_released']['number'] == '110'
+    assert response.data['last_released']['isbn_ean'] == '9780000000110'
+    assert response.data['next_release']['number'] == '111'
+    assert response.data['next_release']['isbn_ean'] == '9780000000111'
+    assert [call['volume_slug'] for call in volume_calls] == ['vol-110', 'vol-111']
+    assert all(call['fields'] == 'isbn_ean' for call in volume_calls)
+    assert all(call['include_parent_editions'] is False for call in volume_calls)
 
 
 @pytest.mark.asyncio

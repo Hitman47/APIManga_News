@@ -28,6 +28,7 @@ from app.models import (
     SeriesEditionsResponse,
     SeriesRelatedResponse,
     SeriesResponse,
+    ReleaseStateResponse,
     VolumeResponse,
 )
 
@@ -542,6 +543,34 @@ async def get_series_related(request: Request, slug: str, service: MangaNewsServ
 @app.get('/series/by-url/related', dependencies=[Depends(auth_dependency)], response_model=SeriesRelatedResponse, tags=['Series'], summary='Get related links from a direct series URL', description='Même comportement que `/series/{slug}/related`, mais en partant d’une URL directe Manga-News.')
 async def get_series_related_by_url(request: Request, url: str = Query(...), service: MangaNewsService = Depends(get_service)):
     payload = await service.get_series_related(url=url)
+    return _build_envelope_response(payload.model_dump(), request)
+
+
+@app.get(
+    '/series/{slug}/release-state',
+    dependencies=[Depends(auth_dependency)],
+    response_model=ReleaseStateResponse,
+    tags=['Series'],
+    summary='Get latest and next VF manga volume releases',
+    description=(
+        'Calcule le dernier tome VF déjà sorti et le prochain tome VF annoncé pour une série Manga-News. '
+        'Le calcul s’appuie sur la liste des éditions VF et ne charge les fiches volume que si `include_isbn=true`.'
+    ),
+)
+async def get_series_release_state(
+    request: Request,
+    slug: str,
+    include_isbn: bool = Query(default=False, description='Charger uniquement les fiches des tomes dernier/prochain pour ajouter `isbn_ean`.'),
+    include_special: bool = Query(default=False, description='Inclure collectors, coffrets et éditions spéciales dans le calcul.'),
+    today: str | None = Query(default=None, description='Date ISO optionnelle utilisée comme référence, par exemple `2026-06-18`.'),
+    service: MangaNewsService = Depends(get_service),
+):
+    payload = await service.get_release_state_by_series(
+        slug=slug,
+        include_isbn=include_isbn,
+        include_special=include_special,
+        today=today,
+    )
     return _build_envelope_response(payload.model_dump(), request)
 
 

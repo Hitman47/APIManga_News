@@ -682,6 +682,355 @@
         "title": "RelatedLinks",
         "type": "object"
       },
+      "ReleaseStateData": {
+        "properties": {
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              "none"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "last_released": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseStateVolume"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_release": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseStateVolume"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "series": {
+            "$ref": "#/components/schemas/ReleaseStateSeries"
+          },
+          "status": {
+            "enum": [
+              "FOUND_CONFIRMED",
+              "FOUND_NO_UPCOMING",
+              "FOUND_NO_RELEASED",
+              "FOUND_EMPTY_EDITIONS",
+              "FOUND_PARTIAL",
+              "NO_MATCH",
+              "PARSE_ERROR"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "series",
+          "status",
+          "confidence"
+        ],
+        "title": "ReleaseStateData",
+        "type": "object"
+      },
+      "ReleaseStateResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReleaseStateData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "ReleaseStateResponse",
+        "type": "object"
+      },
+      "ReleaseStateSeries": {
+        "properties": {
+          "publisher_fr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publisher Fr"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "vf": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ReleaseStateSeries",
+        "type": "object"
+      },
+      "ReleaseStateVolume": {
+        "properties": {
+          "edition_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Label"
+          },
+          "is_one_shot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is One Shot"
+          },
+          "is_special": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Special"
+          },
+          "isbn_ean": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn Ean"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "number_int": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number Int"
+          },
+          "publication_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Date"
+          },
+          "series_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Slug"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "volume_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Slug"
+          }
+        },
+        "title": "ReleaseStateVolume",
+        "type": "object"
+      },
       "ResolveData": {
         "properties": {
           "best": {
@@ -4482,6 +4831,107 @@
           }
         },
         "summary": "Get related links for a series",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
+    "/series/{slug}/release-state": {
+      "get": {
+        "description": "Calcule le dernier tome VF déjà sorti et le prochain tome VF annoncé pour une série Manga-News. Le calcul s’appuie sur la liste des éditions VF et ne charge les fiches volume que si `include_isbn=true`.",
+        "operationId": "get_series_release_state_series__slug__release_state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Charger uniquement les fiches des tomes dernier/prochain pour ajouter `isbn_ean`.",
+            "in": "query",
+            "name": "include_isbn",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Charger uniquement les fiches des tomes dernier/prochain pour ajouter `isbn_ean`.",
+              "title": "Include Isbn",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Inclure collectors, coffrets et éditions spéciales dans le calcul.",
+            "in": "query",
+            "name": "include_special",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Inclure collectors, coffrets et éditions spéciales dans le calcul.",
+              "title": "Include Special",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Date ISO optionnelle utilisée comme référence, par exemple `2026-06-18`.",
+            "in": "query",
+            "name": "today",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Date ISO optionnelle utilisée comme référence, par exemple `2026-06-18`.",
+              "title": "Today"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get latest and next VF manga volume releases",
         "tags": [
           "Series"
         ]

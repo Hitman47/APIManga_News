@@ -321,6 +321,49 @@ class SeriesEditionsResponse(BaseEnvelope):
     data: SeriesEditionsData | None = None
 
 
+class ReleaseStateSeries(BaseModel):
+    title: str | None = None
+    slug: str | None = None
+    publisher_fr: str | None = None
+    vf: EditionStatus | None = None
+    source_url: str | None = None
+
+
+class ReleaseStateVolume(BaseModel):
+    title: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    publication_date: str | None = None
+    isbn_ean: str | None = None
+    source_url: str | None = None
+    series_slug: str | None = None
+    volume_slug: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
+    edition_label: str | None = None
+
+
+class ReleaseStateData(BaseModel):
+    series: ReleaseStateSeries
+    last_released: ReleaseStateVolume | None = None
+    next_release: ReleaseStateVolume | None = None
+    status: Literal[
+        'FOUND_CONFIRMED',
+        'FOUND_NO_UPCOMING',
+        'FOUND_NO_RELEASED',
+        'FOUND_EMPTY_EDITIONS',
+        'FOUND_PARTIAL',
+        'NO_MATCH',
+        'PARSE_ERROR',
+    ]
+    confidence: Literal['high', 'medium', 'low', 'none']
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ReleaseStateResponse(BaseEnvelope):
+    data: ReleaseStateData | None = None
+
+
 class SeriesRelatedData(BaseModel):
     title: str | None = None
     related: RelatedLinks = Field(default_factory=RelatedLinks)

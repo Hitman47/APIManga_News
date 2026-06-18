@@ -339,6 +339,35 @@ Chaque item d'édition expose notamment :
 - `publication_date`
 - `cover_image`
 
+#### Sorties VF : `GET /series/{slug}/release-state`
+
+Usage : obtenir directement le dernier tome VF sorti et le prochain tome VF
+annonce pour une serie deja identifiee.
+
+Exemple :
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/release-state" \
+  --data-urlencode "today=2026-06-18"
+```
+
+Parametres :
+- `today` : date de reference optionnelle au format `YYYY-MM-DD` ;
+- `include_special` : inclut les volumes detectes comme speciaux ;
+- `include_isbn` : relit uniquement les fiches volume du dernier/prochain tome
+  pour remplir `isbn_ean`.
+
+Structure principale :
+- `data.series` : serie source ;
+- `data.last_released` : dernier volume VF date au plus tard a `today` ;
+- `data.next_release` : premier volume VF date apres `today` ;
+- `data.status` : `FOUND_CONFIRMED`, `FOUND_NO_UPCOMING`,
+  `FOUND_NO_RELEASED`, `FOUND_EMPTY_EDITIONS` ou `FOUND_PARTIAL` ;
+- `data.confidence` : `high`, `medium`, `low` ou `none`.
+
+Par defaut, la route ne relit pas les fiches volume. Elle reutilise la fiche
+serie et la page editions VF pour limiter les appels upstream.
+
 ---
 
 ### 6.10 `GET /volume/{series_slug}/{volume_slug}`

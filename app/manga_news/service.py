@@ -22,11 +22,15 @@ from app.models import (
     Envelope,
     NewsItem,
     RelatedLinks,
+    ReleaseStateData,
+    ReleaseStateSeries,
+    ReleaseStateVolume,
     ResolveData,
     ResolveResult,
     SearchResult,
     SeriesEditionsBlock,
     SeriesEditionsData,
+    SeriesEditionItem,
     SeriesRelatedData,
     SeriesSearchMetaData,
     VolumeSearchMetaData,
@@ -668,6 +672,116 @@ class MangaNewsService:
             data=data,
         )
 
+    def _release_state_volume_from_item(self, item: SeriesEditionItem) -> ReleaseStateVolume:
+        return ReleaseStateVolume(
+            title=item.title,
+            number=item.number,
+            number_int=item.number_int,
+            publication_date=item.publication_date,
+            source_url=item.url,
+            series_slug=item.series_slug,
+            volume_slug=item.volume_slug,
+            is_special=item.is_special,
+            is_one_shot=item.is_one_shot,
+            edition_label=item.edition_label,
+        )
+
+    async def _enrich_release_state_isbn(self, volume: ReleaseStateVolume, warnings: list[str]) -> ReleaseStateVolume:
+        if not volume.series_slug or not volume.volume_slug:
+            warnings.append(f'Unable to enrich ISBN for {volume.title or volume.source_url}: missing volume route.')
+            return volume
+        try:
+            payload = await self.get_volume(
+                series_slug=volume.series_slug,
+                volume_slug=volume.volume_slug,
+                fields='isbn_ean',
+                include_parent_editions=False,
+            )
+        except Exception as exc:  # pragma: no cover - best-effort enrichment
+            warnings.append(f'Unable to enrich ISBN for {volume.title or volume.volume_slug}: {exc}')
+            return volume
+        data = payload.data or {}
+        if isinstance(data, dict):
+            volume.isbn_ean = data.get('isbn_ean')
+        return volume
+
+    def _build_release_state_data(
+        self,
+        *,
+        slug: str,
+        series_data: dict[str, Any],
+        editions_data: SeriesEditionsData,
+        include_special: bool,
+        today_value: date,
+        warnings: list[str],
+    ) -> ReleaseStateData:
+        series = ReleaseStateSeries(
+            title=series_data.get('title') or editions_data.title,
+            slug=slug,
+            publisher_fr=series_data.get('publisher_fr'),
+            vf=series_data.get('vf'),
+            source_url=series_data.get('source_url') or editions_data.source_url,
+        )
+        vf_items = editions_data.vf.items if editions_data.vf else []
+        if not vf_items:
+            warnings.append('No VF edition items were found for this series.')
+
+        candidates: list[SeriesEditionItem] = []
+        for item in vf_items:
+            if not item.publication_date:
+                continue
+            if item.number_int is None:
+                continue
+            if item.is_special and not include_special:
+                continue
+            candidates.append(item)
+
+        released: list[SeriesEditionItem] = []
+        upcoming: list[SeriesEditionItem] = []
+        for item in candidates:
+            try:
+                publication_date = date.fromisoformat(item.publication_date)
+            except ValueError:
+                warnings.append(f'Ignoring invalid publication date for {item.title}: {item.publication_date}')
+                continue
+            if publication_date <= today_value:
+                released.append(item)
+            else:
+                upcoming.append(item)
+
+        last_item = max(released, key=lambda item: (item.number_int or -1, item.publication_date or '')) if released else None
+        next_item = min(upcoming, key=lambda item: (item.publication_date or '9999-99-99', item.number_int or 999999)) if upcoming else None
+        last_volume = self._release_state_volume_from_item(last_item) if last_item else None
+        next_volume = self._release_state_volume_from_item(next_item) if next_item else None
+
+        if last_volume and next_volume:
+            status = 'FOUND_CONFIRMED'
+            confidence = 'high'
+        elif last_volume:
+            status = 'FOUND_NO_UPCOMING'
+            confidence = 'high'
+            if series_data.get('next_release_date'):
+                warnings.append('Series page exposes next_release_date, but no matching upcoming VF volume was found in editions.')
+        elif next_volume:
+            status = 'FOUND_NO_RELEASED'
+            confidence = 'medium'
+        elif series_data.get('last_release_date') or series_data.get('next_release_date'):
+            status = 'FOUND_PARTIAL'
+            confidence = 'medium'
+            warnings.append('Series page exposes release dates, but no dated VF edition item could be matched.')
+        else:
+            status = 'FOUND_EMPTY_EDITIONS'
+            confidence = 'low' if vf_items else 'none'
+
+        return ReleaseStateData(
+            series=series,
+            last_released=last_volume,
+            next_release=next_volume,
+            status=status,
+            confidence=confidence,
+            warnings=warnings,
+        )
+
     async def _enrich_search_results(
         self,
         results: list[Any],
@@ -1201,6 +1315,57 @@ class MangaNewsService:
             source_url=payload.get('source_url'),
         )
         return self._envelope({'data': related_data.model_dump(), 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def get_release_state_by_series(
+        self,
+        *,
+        slug: str,
+        include_isbn: bool = False,
+        include_special: bool = False,
+        today: str | None = None,
+    ) -> Envelope:
+        started = time.perf_counter()
+        today_value = self._parse_iso_date(today, 'today') if today else now_utc().date()
+        series_payload, series_entry, series_cached, series_partial, series_warnings = await self._get_series_payload(slug=slug)
+        editions_envelope = await self.get_series_editions(slug=slug, edition='vf')
+        series_data = dict(series_payload.get('data', {}) or {})
+        series_data['source_url'] = series_payload.get('source_url')
+        editions_data = SeriesEditionsData.model_validate(editions_envelope.data or {})
+        warnings = list(series_warnings) + list(editions_envelope.warnings)
+        release_state = self._build_release_state_data(
+            slug=slug,
+            series_data=series_data,
+            editions_data=editions_data,
+            include_special=include_special,
+            today_value=today_value,
+            warnings=warnings,
+        )
+        if include_isbn:
+            for volume in [release_state.last_released, release_state.next_release]:
+                if volume is not None:
+                    await self._enrich_release_state_isbn(volume, warnings)
+        release_state.warnings = warnings
+        self._record_perf(
+            scope='service.get_release_state_by_series',
+            event='release_state_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            slug=slug,
+            include_isbn=include_isbn,
+            include_special=include_special,
+            today=today_value.isoformat(),
+            cached=series_cached and editions_envelope.cached,
+            partial=series_partial or editions_envelope.partial,
+            status=release_state.status,
+            confidence=release_state.confidence,
+        )
+        return self._envelope(
+            {'data': release_state.model_dump(), 'source_url': series_payload.get('source_url')},
+            series_entry,
+            cached=series_cached and editions_envelope.cached,
+            partial=series_partial or editions_envelope.partial,
+            warnings=warnings,
+            found=True,
+        )
 
     async def get_series_editions(self, *, slug: str | None = None, url: str | None = None, edition: Literal['all', 'vf', 'vo'] = 'all') -> Envelope:
         request_started = time.perf_counter()

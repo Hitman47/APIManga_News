@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale",
+  "cached": true,
+  "fetched_at": "2026-06-18T10:00:00+00:00",
+  "cache_expires_at": "2026-06-19T10:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "fp-release-state-one-piece",
+  "data": {
+    "series": {
+      "title": "One Piece",
+      "slug": "One-piece-Edition-originale",
+      "publisher_fr": "Glenat",
+      "vf": {
+        "volumes": 111,
+        "status": "En cours"
+      },
+      "source_url": "https://www.manga-news.com/index.php/serie/One-piece-Edition-originale"
+    },
+    "last_released": {
+      "title": "One Piece Vol.110",
+      "number": "110",
+      "number_int": 110,
+      "publication_date": "2026-04-02",
+      "isbn_ean": null,
+      "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-110",
+      "series_slug": "One-Piece",
+      "volume_slug": "vol-110",
+      "is_special": false,
+      "is_one_shot": false,
+      "edition_label": null
+    },
+    "next_release": {
+      "title": "One Piece Vol.111",
+      "number": "111",
+      "number_int": 111,
+      "publication_date": "2026-07-02",
+      "isbn_ean": null,
+      "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-111",
+      "series_slug": "One-Piece",
+      "volume_slug": "vol-111",
+      "is_special": false,
+      "is_one_shot": false,
+      "edition_label": null
+    },
+    "status": "FOUND_CONFIRMED",
+    "confidence": "high",
+    "warnings": []
+  }
+}

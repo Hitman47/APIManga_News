@@ -56,6 +56,30 @@ Pour une recherche rapide :
 GET /search?q=one%20piece&kind=series&mode=best&limit=1
 ```
 
+## Etat de sortie d'une serie
+
+La V2 ajoute une route dediee pour obtenir, a partir d'un slug de serie, le
+dernier tome VF sorti et le prochain tome VF annonce :
+
+```text
+GET /series/One-piece-Edition-originale/release-state
+```
+
+Cette route reutilise la fiche serie et la page editions VF. Elle ne relit pas
+les fiches volume par defaut. Pour recuperer aussi l'ISBN/EAN du dernier tome et
+du prochain tome, activer explicitement l'enrichissement :
+
+```text
+GET /series/One-piece-Edition-originale/release-state?include_isbn=true
+```
+
+Parametres utiles :
+
+- `today=YYYY-MM-DD` : force la date de reference, pratique pour les tests ;
+- `include_special=true` : inclut les volumes detectes comme speciaux ;
+- `include_isbn=true` : relit uniquement les fiches volume last/next pour
+  remplir `isbn_ean`.
+
 Le fichier `v2.env.example` contient les réglages recommandés pour un
 conteneur disposant de 2 CPU et 2 Go de RAM.
 
@@ -168,6 +192,7 @@ Le runner V2 couvre plusieurs franchises et plusieurs niveaux de coût :
 - recherches enrichies avec `vf` / `vo` ;
 - projections de fiches série et volume ;
 - enrichissement d'un volume depuis sa série parente ;
+- etat de sortie VF d'une serie, avec et sans enrichissement ISBN ;
 - actualités et planning ;
 - charge concurrente mixte ;
 - comparaison du premier passage et du cache chaud.
