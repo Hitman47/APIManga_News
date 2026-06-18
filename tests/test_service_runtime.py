@@ -489,6 +489,139 @@ async def test_volume_uses_settings_default_include_parent_editions(tmp_path: Pa
     assert payload.data['vo']['volumes'] == 2
 
 
+@pytest.mark.asyncio
+async def test_volume_payload_drops_related_field(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    class DummyEntry:
+        fetched_at = datetime(2026, 6, 18, 10, 0, tzinfo=UTC)
+        expires_at = datetime(2026, 6, 19, 10, 0, tzinfo=UTC)
+
+    async def fake_get_volume_payload(**kwargs):
+        return (
+            {
+                'data': {
+                    'title': 'One Piece Vol.110',
+                    'number': '110',
+                    'related': {'external': [{'title': 'Acheter', 'url': 'https://example.test'}]},
+                },
+                'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+            },
+            DummyEntry(),
+            True,
+            False,
+            [],
+        )
+
+    service._get_volume_payload = fake_get_volume_payload
+
+    payload = await service.get_volume(series_slug='One-Piece', volume_slug='vol-110')
+
+    assert payload.data['title'] == 'One Piece Vol.110'
+    assert 'related' not in payload.data
+
+
+@pytest.mark.asyncio
+async def test_get_volume_by_number_resolves_volume_slug_from_vf_editions(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_editions(**kwargs):
+        assert kwargs == {'slug': 'One-piece-Edition-originale', 'edition': 'vf'}
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url='https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+            cached=True,
+            fetched_at='2026-06-18T10:00:00+00:00',
+            cache_expires_at='2026-06-19T10:00:00+00:00',
+            partial=False,
+            warnings=[],
+            fingerprint='fp-editions',
+            data={
+                'title': 'One Piece',
+                'series_slug': 'One-piece-Edition-originale',
+                'vf': {
+                    'edition': 'vf',
+                    'total': 2,
+                    'items': [
+                        {
+                            'title': 'One Piece Vol.110',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'vol-110',
+                            'number': '110',
+                            'number_int': 110,
+                            'publication_date': '2026-04-02',
+                            'is_special': False,
+                        },
+                        {
+                            'title': 'One Piece Vol.110 Collector',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110-collector',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'vol-110-collector',
+                            'number': '110',
+                            'number_int': 110,
+                            'publication_date': '2026-04-02',
+                            'is_special': True,
+                        },
+                    ],
+                },
+                'vo': None,
+            },
+        )
+
+    volume_calls = []
+
+    async def fake_get_volume(**kwargs):
+        volume_calls.append(kwargs)
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url='https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+            cached=True,
+            fetched_at='2026-06-18T10:00:00+00:00',
+            cache_expires_at='2026-06-19T10:00:00+00:00',
+            partial=False,
+            warnings=[],
+            fingerprint='fp-volume-110',
+            data={'title': 'One Piece Vol.110', 'number': '110'},
+        )
+
+    service.get_series_editions = fake_get_series_editions
+    service.get_volume = fake_get_volume
+
+    payload = await service.get_volume_by_number(
+        series_slug='One-piece-Edition-originale',
+        number=110,
+        fields='title,number',
+        include_parent_editions=False,
+    )
+
+    assert payload.data['number'] == '110'
+    assert volume_calls == [
+        {
+            'series_slug': 'One-Piece',
+            'volume_slug': 'vol-110',
+            'blocks': None,
+            'fields': 'title,number',
+            'include_raw_sections': False,
+            'include_parent_editions': False,
+        }
+    ]
+
+
 
 @pytest.mark.asyncio
 async def test_search_then_get_series_reuses_raw_html_cache(tmp_path: Path):

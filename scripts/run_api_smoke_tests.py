@@ -282,6 +282,7 @@ def main() -> int:
     runner.run("resolve volume", "GET", "/search/resolve", params={"q": "one piece tome 91", "kind": "volume", "limit": 10}, validator=validate_ok("resolve volume", ["data", "best", "volume_slug"], VOLUME_SLUG))
     runner.run("lookup volume", "GET", "/lookup/volume", params={"series": "One Piece", "number": "91", "limit": 10}, validator=validate_lookup)
     runner.run("volume", "GET", f"/volume/{VOLUME_SERIES_SLUG}/{VOLUME_SLUG}", validator=validate_volume)
+    runner.run("volume by number", "GET", f"/volume/{SERIES_SLUG}/number/91", validator=validate_volume)
     runner.run("volume by url", "GET", "/volume/by-url", params={"url": VOLUME_URL}, validator=validate_volume)
     runner.run("news volume", "GET", f"/news/volume/{VOLUME_SERIES_SLUG}/{VOLUME_SLUG}", params={"limit": 10}, validator=validate_ok("news volume", ["ok"], True))
     runner.run("news volume by url", "GET", "/news/volume/by-url", params={"url": VOLUME_URL, "limit": 10}, validator=validate_ok("news volume by url", ["ok"], True))

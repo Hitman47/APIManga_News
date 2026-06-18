@@ -243,7 +243,6 @@ class VolumeData(BaseModel):
     vo: EditionStatus | None = None
     editorial_score: float | None = None
     reader_score: float | None = None
-    related: RelatedLinks | None = None
     raw_sections: dict[str, list[str]] | None = None
     source_url: str | None = None
 

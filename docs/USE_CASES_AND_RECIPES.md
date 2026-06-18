@@ -132,7 +132,20 @@ curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
   --data-urlencode "fields=cover_image"
 ```
 
-## 7. Utiliser une URL Manga News directe
+## 7. Charger une fiche volume par numéro
+
+Quand tu connais le slug série mais pas le slug volume exact, utilise la route
+par numéro. Elle retrouve le volume depuis les éditions VF de la série.
+
+```bash
+curl --get "http://localhost:8017/volume/One-piece-Edition-originale/number/110" \
+  --data-urlencode "fields=title,number,publication_date,isbn_ean"
+```
+
+Les fiches volume n'exposent pas `related`. Ce champ reste utile sur les fiches
+série, mais il alourdissait inutilement les volumes.
+
+## 8. Utiliser une URL Manga News directe
 
 ### Série
 
@@ -156,31 +169,31 @@ curl --get "http://localhost:8017/news/volume/by-url" \
   --data-urlencode "limit=10"
 ```
 
-## 8. Récupérer les liens liés à une série
+## 9. Récupérer les liens liés à une série
 
 ```bash
 curl "http://localhost:8017/series/One-piece-Edition-originale/related"
 ```
 
-## 9. Lister les éditions VF / VO d'une série
+## 10. Lister les éditions VF / VO d'une série
 
 ```bash
 curl "http://localhost:8017/series/One-piece-Edition-originale/editions?edition=all"
 ```
 
-## 10. Lire les news globales
+## 11. Lire les news globales
 
 ```bash
 curl "http://localhost:8017/news/global?limit=5"
 ```
 
-## 11. Lire les news d'une série
+## 12. Lire les news d'une série
 
 ```bash
 curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
 ```
 
-## 12. Lire le planning VF avec filtres
+## 13. Lire le planning VF avec filtres
 
 ```bash
 curl --get "http://localhost:8017/planning" \
@@ -197,7 +210,7 @@ curl --get "http://localhost:8017/planning" \
 
 Rappel important : `total_items` est calculé après filtrage local sur la page chargée.
 
-## 13. Éviter de refetch la même fiche
+## 14. Éviter de refetch la même fiche
 
 Premier appel :
 
@@ -212,7 +225,7 @@ curl -i "http://localhost:8017/series/One-piece-Edition-originale" \
   -H 'If-None-Match: "<fingerprint>"'
 ```
 
-## 14. Exploiter les titres alternatifs
+## 15. Exploiter les titres alternatifs
 
 Cas pratique : tu affiches à la fois le titre principal et le titre VO.
 
@@ -228,7 +241,7 @@ Puis affiche :
 - `title_vo`
 - `translated_title`
 
-## 15. Débugger un parse upstream cassé
+## 16. Débugger un parse upstream cassé
 
 Active dans l'environnement :
 
@@ -243,7 +256,7 @@ Puis rejoue la requête qui casse. Le détail de l'erreur peut inclure :
 Debug HTML saved to /tmp/manga-news-debug-html/...
 ```
 
-## 16. Mauvaises pratiques à éviter
+## 17. Mauvaises pratiques à éviter
 
 ### Mauvaise pratique 1
 Supposer que `title_vo` ou `translated_title` seront toujours présents.

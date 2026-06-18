@@ -191,6 +191,7 @@ Le runner V2 couvre plusieurs franchises et plusieurs niveaux de coût :
 - recherches légères de séries et volumes ;
 - recherches enrichies avec `vf` / `vo` ;
 - projections de fiches série et volume ;
+- résolution d'un volume par numéro via les éditions VF ;
 - enrichissement d'un volume depuis sa série parente ;
 - etat de sortie VF d'une serie, avec et sans enrichissement ISBN ;
 - actualités et planning ;

@@ -2901,16 +2901,6 @@
             ],
             "title": "Reader Score"
           },
-          "related": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RelatedLinks"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "series_title": {
             "anyOf": [
               {
@@ -5049,6 +5039,188 @@
           }
         },
         "summary": "Get a volume payload from a direct Manga-News URL",
+        "tags": [
+          "Volume"
+        ]
+      }
+    },
+    "/volume/{series_slug}/number/{number}": {
+      "get": {
+        "description": "Retrouve le volume VF correspondant à un numéro de tome depuis la page éditions de la série, puis renvoie la même fiche volume que `/volume/{series_slug}/{volume_slug}`.",
+        "operationId": "get_volume_by_number_volume__series_slug__number__number__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "series_slug",
+            "required": true,
+            "schema": {
+              "title": "Series Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Numéro entier du tome VF à retrouver.",
+            "in": "path",
+            "name": "number",
+            "required": true,
+            "schema": {
+              "description": "Numéro entier du tome VF à retrouver.",
+              "minimum": 1,
+              "title": "Number",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Liste de blocs séparés par des virgules, par exemple `release,scores`.",
+            "in": "query",
+            "name": "blocks",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste de blocs séparés par des virgules, par exemple `release,scores`.",
+              "title": "Blocks"
+            }
+          },
+          {
+            "description": "Liste de chemins de champs séparés par des virgules, par exemple `publication_date,isbn_ean`.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Liste de chemins de champs séparés par des virgules, par exemple `publication_date,isbn_ean`.",
+              "title": "Fields"
+            }
+          },
+          {
+            "description": "Inclure les sections brutes extraites de la page HTML.",
+            "in": "query",
+            "name": "include_raw_sections",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Inclure les sections brutes extraites de la page HTML.",
+              "title": "Include Raw Sections",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "`true` pour hydrater `vf` / `vo` depuis la série parente ; `null` applique `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`.",
+            "in": "query",
+            "name": "include_parent_editions",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`true` pour hydrater `vf` / `vo` depuis la série parente ; `null` applique `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`.",
+              "title": "Include Parent Editions"
+            }
+          },
+          {
+            "description": "Inclure les volumes spéciaux si un numéro identique existe.",
+            "in": "query",
+            "name": "include_special",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Inclure les volumes spéciaux si un numéro identique existe.",
+              "title": "Include Special",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "cache_expires_at": "2026-04-28T10:10:10+00:00",
+                  "cached": false,
+                  "data": {
+                    "isbn_ean": "9782344037102",
+                    "number": "91",
+                    "number_int": 91,
+                    "publication_date": "2019-07-03",
+                    "publisher_fr": "Glénat",
+                    "series_title": "One Piece",
+                    "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-91",
+                    "title": "One Piece - Tome 91",
+                    "title_vo": "ワンピース",
+                    "translated_title": "One Piece",
+                    "vf": {
+                      "status": "En cours",
+                      "volumes": 112
+                    },
+                    "vo": {
+                      "status": "En cours",
+                      "volumes": 114
+                    }
+                  },
+                  "fetched_at": "2026-04-21T10:10:10+00:00",
+                  "fingerprint": "fp-volume",
+                  "found": true,
+                  "ok": true,
+                  "partial": false,
+                  "schema_version": "1.0",
+                  "source": "manga_news",
+                  "source_url": "https://www.manga-news.com/index.php/manga/One-Piece/vol-91",
+                  "warnings": []
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/VolumeResponse"
+                }
+              }
+            },
+            "description": "Volume envelope."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get a volume payload by series slug and volume number",
         "tags": [
           "Volume"
         ]

@@ -371,14 +371,24 @@ serie et la page editions VF pour limiter les appels upstream.
 ---
 
 ### 6.10 `GET /volume/{series_slug}/{volume_slug}`
-### 6.11 `GET /volume/by-url`
+### 6.11 `GET /volume/{series_slug}/number/{number}`
+### 6.12 `GET /volume/by-url`
 
 Usage : fiche détaillée d'un volume.
+
+La route par numéro utilise la page éditions VF de la série pour retrouver le
+vrai `volume_slug`, puis renvoie la même fiche volume que la route historique.
+Elle est utile quand tu connais `One-piece-Edition-originale` et `110`, mais pas
+forcément `vol-110`.
 
 Paramètres communs :
 - `blocks`
 - `fields`
 - `include_raw_sections`
+- `include_parent_editions`
+
+Paramètre spécifique à la route par numéro :
+- `include_special` : inclut les volumes spéciaux si un numéro identique existe.
 
 #### Blocs volume disponibles
 - `identity`
@@ -387,7 +397,6 @@ Paramètres communs :
 - `presentation`
 - `release`
 - `scores`
-- `related`
 - `raw` / `raw_sections`
 
 #### Champs métier importants de la fiche volume
@@ -420,10 +429,9 @@ Paramètres communs :
 - `cover_image`
 - `editorial_score`
 - `reader_score`
-- `related`
 - `raw_sections` si demandé
 
-Exemple :
+Exemple par slug volume :
 
 ```bash
 curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
@@ -431,9 +439,19 @@ curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
   --data-urlencode "fields=cover_image"
 ```
 
+Exemple par numéro de tome :
+
+```bash
+curl --get "http://localhost:8017/volume/One-piece-Edition-originale/number/110" \
+  --data-urlencode "fields=title,number,publication_date,isbn_ean"
+```
+
+Important : `related` n'est pas exposé sur les fiches volume. Ce champ reste
+utile sur les fiches série, mais il alourdissait inutilement les volumes.
+
 ---
 
-### 6.12 `GET /news/global`
+### 6.13 `GET /news/global`
 
 Usage : flux RSS global Manga News, normalisé en JSON.
 
@@ -450,7 +468,7 @@ Chaque item expose :
 
 ---
 
-### 6.13 `GET /news/series/{slug}`
+### 6.14 `GET /news/series/{slug}`
 
 Usage : news liées à une série.
 
@@ -459,8 +477,8 @@ Paramètre :
 
 ---
 
-### 6.14 `GET /news/volume/{series_slug}/{volume_slug}`
-### 6.15 `GET /news/volume/by-url`
+### 6.15 `GET /news/volume/{series_slug}/{volume_slug}`
+### 6.16 `GET /news/volume/by-url`
 
 Usage : news liées à un volume.
 
@@ -471,7 +489,7 @@ Le endpoint `by-url` est utile quand tu n'as qu'une URL Manga News complète.
 
 ---
 
-### 6.16 `GET /planning`
+### 6.17 `GET /planning`
 
 Usage : récupérer une page de planning VF ou VO, puis filtrer localement.
 
@@ -519,6 +537,10 @@ Chaque item du planning expose notamment :
 1. `GET /search/resolve?q=<titre>&kind=volume`
 2. récupérer `series_slug` et `volume_slug`
 3. `GET /volume/{series_slug}/{volume_slug}`
+
+### 7.2 bis À partir d'une série et d'un numéro de tome
+1. récupérer le slug série, par exemple via `/search/resolve?q=<titre>&kind=series`
+2. appeler `GET /volume/{series_slug}/number/{number}`
 
 ### 7.3 UI légère
 - utilise `fields=` ou `blocks=` pour éviter les payloads complets ;

@@ -609,7 +609,6 @@ def parse_volume_page(html: str, page_url: str) -> VolumeData:
         cover_image=_find_cover_image(soup),
         editorial_score=_extract_score_after(lines, 'Rédaction', normalized_lines),
         reader_score=_extract_score_after(lines, 'Lecteurs', normalized_lines),
-        related=_extract_related_links(soup, _base_url_from_page(page_url), page_url),
         raw_sections=_extract_raw_sections(lines, normalized_lines) or None,
         source_url=page_url,
     )

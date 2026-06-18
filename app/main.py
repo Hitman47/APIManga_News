@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Depends, FastAPI, Header, Path as ApiPath, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 
@@ -593,6 +593,41 @@ async def get_series_editions_by_url(
     service: MangaNewsService = Depends(get_service),
 ):
     payload = await service.get_series_editions(url=url, edition=edition)
+    return _build_envelope_response(payload.model_dump(), request)
+
+
+@app.get(
+    '/volume/{series_slug}/number/{number}',
+    dependencies=[Depends(auth_dependency)],
+    response_model=VolumeResponse,
+    tags=['Volume'],
+    summary='Get a volume payload by series slug and volume number',
+    description=(
+        'Retrouve le volume VF correspondant à un numéro de tome depuis la page éditions de la série, '
+        'puis renvoie la même fiche volume que `/volume/{series_slug}/{volume_slug}`.'
+    ),
+    responses={200: {'description': 'Volume envelope.', 'content': {'application/json': {'example': VOLUME_RESPONSE_EXAMPLE}}}},
+)
+async def get_volume_by_number(
+    request: Request,
+    series_slug: str,
+    number: int = ApiPath(..., ge=1, description='Numéro entier du tome VF à retrouver.'),
+    blocks: str | None = Query(default=None, description='Liste de blocs séparés par des virgules, par exemple `release,scores`.'),
+    fields: str | None = Query(default=None, description='Liste de chemins de champs séparés par des virgules, par exemple `publication_date,isbn_ean`.'),
+    include_raw_sections: bool = Query(default=False, description='Inclure les sections brutes extraites de la page HTML.'),
+    include_parent_editions: bool | None = Query(default=None, description='`true` pour hydrater `vf` / `vo` depuis la série parente ; `null` applique `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`.'),
+    include_special: bool = Query(default=False, description='Inclure les volumes spéciaux si un numéro identique existe.'),
+    service: MangaNewsService = Depends(get_service),
+):
+    payload = await service.get_volume_by_number(
+        series_slug=series_slug,
+        number=number,
+        blocks=blocks,
+        fields=fields,
+        include_raw_sections=include_raw_sections,
+        include_parent_editions=include_parent_editions,
+        include_special=include_special,
+    )
     return _build_envelope_response(payload.model_dump(), request)
 
 

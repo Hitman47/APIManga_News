@@ -282,6 +282,7 @@ def test_openapi_exposes_search_and_volume_edition_counters():
     assert 'root_series_slug' in search_result
     assert 'vf' in volume_data
     assert 'vo' in volume_data
+    assert 'related' not in volume_data
     assert payload['info']['description']
     assert payload['paths']['/search']['get']['description']
     assert payload['paths']['/search/resolve']['get']['description']
@@ -292,6 +293,7 @@ def test_openapi_exposes_search_and_volume_edition_counters():
     assert search_parameters['mode']['schema']['default'] == 'all'
     assert search_parameters['limit']['schema']['default'] == 50
     assert payload['paths']['/series/{slug}']['get']['description']
+    assert payload['paths']['/volume/{series_slug}/number/{number}']['get']['description']
     assert payload['paths']['/volume/{series_slug}/{volume_slug}']['get']['description']
     assert payload['paths']['/planning']['get']['description']
 
@@ -385,6 +387,46 @@ def test_volume_route_forwards_include_parent_editions():
         app.state.service = DummyService()
         response = client.get('/volume/One-Piece/vol-1?include_parent_editions=true')
     assert response.status_code == 200
+
+
+def test_volume_by_number_route_forwards_lookup_params():
+    class DummyService:
+        async def get_volume_by_number(self, **kwargs):
+            assert kwargs == {
+                'series_slug': 'One-piece-Edition-originale',
+                'number': 110,
+                'blocks': 'release',
+                'fields': 'title,isbn_ean',
+                'include_raw_sections': True,
+                'include_parent_editions': False,
+                'include_special': True,
+            }
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-volume-number',
+                'data': {
+                    'title': 'One Piece Vol.110',
+                    'number': '110',
+                    'isbn_ean': '9782344068762',
+                },
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/volume/One-piece-Edition-originale/number/110?blocks=release&fields=title,isbn_ean&include_raw_sections=true&include_parent_editions=false&include_special=true')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['data']['number'] == '110'
+    assert response.headers['X-Data-Fingerprint'] == 'fp-volume-number'
 
 
 def test_request_id_header_round_trips():

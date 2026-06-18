@@ -60,6 +60,7 @@ SCENARIOS = [
     Scenario('series_naruto_projection', 'series_projection', '/series/Naruto', {'fields': 'title,title_vo,publisher_fr,vf.volumes,next_release_date'}, frozenset({'standard', 'stress'})),
     Scenario('series_berserk_projection', 'series_projection', '/series/Berserk-2Ed', {'fields': 'title,title_vo,publisher_fr,vf.volumes,next_release_date'}, frozenset({'standard', 'stress'})),
     Scenario('volume_one_piece_91_projection', 'volume_projection', '/volume/One-Piece/vol-91', {'fields': 'title,number,publication_date,isbn_ean,publisher_fr'}, frozenset({'quick', 'standard', 'stress'})),
+    Scenario('volume_one_piece_110_by_number', 'volume_projection', '/volume/One-piece-Edition-originale/number/110', {'fields': 'title,number,publication_date,isbn_ean,publisher_fr'}, frozenset({'quick', 'standard', 'stress'})),
     Scenario('volume_naruto_72_projection', 'volume_projection', '/volume/Naruto/vol-72', {'fields': 'title,number,publication_date,isbn_ean,publisher_fr'}, frozenset({'standard', 'stress'})),
     Scenario('volume_berserk_42_projection', 'volume_projection', '/volume/Berserk/vol-42', {'fields': 'title,number,publication_date,isbn_ean,publisher_fr'}, frozenset({'standard', 'stress'})),
     Scenario('volume_one_piece_91_parent_editions', 'volume_enriched', '/volume/One-Piece/vol-91', {'include_parent_editions': 'true', 'fields': 'title,number,vf.volumes,vo.volumes'}, frozenset({'standard', 'stress'})),

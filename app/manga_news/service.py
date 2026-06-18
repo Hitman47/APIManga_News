@@ -85,7 +85,6 @@ VOLUME_BLOCKS = {
     'editions': ['vf', 'vo'],
     'release': ['publication_date', 'isbn_ean', 'price_code'],
     'scores': ['editorial_score', 'reader_score'],
-    'related': ['related'],
     'raw': ['raw_sections'],
     'raw_sections': ['raw_sections'],
 }
@@ -1272,6 +1271,7 @@ class MangaNewsService:
         )
         target_series_slug = series_slug or self._extract_series_slug_from_volume_url(payload.get('source_url') or url or '')
         parent_enrichment_ms = 0.0
+        data.pop('related', None)
         if resolved_include_parent_editions and target_series_slug:
             try:
                 parent_started = time.perf_counter()
@@ -1305,6 +1305,61 @@ class MangaNewsService:
             partial=partial,
         )
         return self._envelope({'data': projected, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def get_volume_by_number(
+        self,
+        *,
+        series_slug: str,
+        number: int,
+        blocks: str | None = None,
+        fields: str | None = None,
+        include_raw_sections: bool = False,
+        include_parent_editions: bool | None = None,
+        include_special: bool = False,
+    ) -> Envelope:
+        started = time.perf_counter()
+        editions_envelope = await self.get_series_editions(slug=series_slug, edition='vf')
+        editions_data = SeriesEditionsData.model_validate(editions_envelope.data or {})
+        vf_items = editions_data.vf.items if editions_data.vf else []
+        candidates = [
+            item
+            for item in vf_items
+            if item.number_int == number and item.volume_slug and (include_special or not item.is_special)
+        ]
+        if not candidates:
+            raise ResourceNotFound(f'No VF volume number {number} found for series {series_slug}.')
+        selected = sorted(
+            candidates,
+            key=lambda item: (
+                bool(item.is_special),
+                item.publication_date or '',
+                item.volume_slug or '',
+            ),
+        )[0]
+        volume_response = await self.get_volume(
+            series_slug=selected.series_slug or series_slug,
+            volume_slug=selected.volume_slug,
+            blocks=blocks,
+            fields=fields,
+            include_raw_sections=include_raw_sections,
+            include_parent_editions=include_parent_editions,
+        )
+        volume_response.cached = editions_envelope.cached and volume_response.cached
+        volume_response.partial = editions_envelope.partial or volume_response.partial
+        volume_response.warnings = list(editions_envelope.warnings) + list(volume_response.warnings)
+        self._record_perf(
+            scope='service.get_volume_by_number',
+            event='volume_by_number_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            series_slug=series_slug,
+            number=number,
+            resolved_series_slug=selected.series_slug,
+            resolved_volume_slug=selected.volume_slug,
+            include_special=include_special,
+            cached=volume_response.cached,
+            partial=volume_response.partial,
+        )
+        return volume_response
 
     async def get_series_related(self, *, slug: str | None = None, url: str | None = None) -> Envelope:
         payload, entry, cached, partial, warnings = await self._get_series_payload(slug=slug, url=url)

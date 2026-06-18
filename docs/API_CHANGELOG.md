@@ -1,3 +1,9 @@
+## 2026-06-18 — route volume par numéro et payload volume allégé
+
+- Ajout de `GET /volume/{series_slug}/number/{number}` pour charger un tome VF depuis le slug série et le numéro de tome.
+- Retrait de `related` des fiches volume exposées par l'API ; les liens liés restent disponibles sur les fiches série.
+- Documentation et exemples volume alignés avec le nouveau contrat.
+
 ## 2026-04-22 — clarification documentaire de la recherche
 
 - Documentation détaillée de la sémantique réelle de `/search` et `/search/resolve` : pages source interrogées, enrichissement détaillé, coût relatif et cas d'usage.

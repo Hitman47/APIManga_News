@@ -179,7 +179,6 @@ def test_parse_volume_page():
     assert parsed.isbn_ean == '9782344064092'
     assert parsed.editorial_score == 16.0
     assert parsed.illustration_details and parsed.illustration_details.pages == 208
-    assert parsed.related and parsed.related.external[0].title == 'Acheter'
 
 
 
