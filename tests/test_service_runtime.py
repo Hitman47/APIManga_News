@@ -555,24 +555,24 @@ async def test_get_volume_by_number_resolves_volume_slug_from_vf_editions(tmp_pa
                     'total': 2,
                     'items': [
                         {
-                            'title': 'One Piece Vol.110',
-                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
-                            'series_slug': 'One-Piece',
-                            'volume_slug': 'vol-110',
-                            'number': '110',
-                            'number_int': 110,
-                            'publication_date': '2026-04-02',
-                            'is_special': False,
-                        },
-                        {
                             'title': 'One Piece Vol.110 Collector',
-                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110-collector',
-                            'series_slug': 'One-Piece',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece-Collector/vol-110',
+                            'series_slug': 'One-Piece-Collector',
                             'volume_slug': 'vol-110-collector',
                             'number': '110',
                             'number_int': 110,
                             'publication_date': '2026-04-02',
                             'is_special': True,
+                        },
+                        {
+                            'title': 'One Piece Vol.110',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-piece-Edition-originale/vol-110',
+                            'series_slug': 'One-piece-Edition-originale',
+                            'volume_slug': 'vol-110',
+                            'number': '110',
+                            'number_int': 110,
+                            'publication_date': '2026-04-02',
+                            'is_special': False,
                         },
                     ],
                 },
@@ -612,7 +612,7 @@ async def test_get_volume_by_number_resolves_volume_slug_from_vf_editions(tmp_pa
     assert payload.data['number'] == '110'
     assert volume_calls == [
         {
-            'series_slug': 'One-Piece',
+            'series_slug': 'One-piece-Edition-originale',
             'volume_slug': 'vol-110',
             'blocks': None,
             'fields': 'title,number',

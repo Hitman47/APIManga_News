@@ -872,6 +872,28 @@ def _guess_volume_number(title: str, volume_slug: str | None) -> str | None:
     return extract_volume_number(title, volume_slug)
 
 
+def _edition_item_title(anchor, container_text: str, volume_slug: str | None) -> str | None:
+    candidates: list[str | None] = [
+        anchor.get_text(' ', strip=True),
+        anchor.get('title'),
+        anchor.get('aria-label'),
+    ]
+    image = anchor.find('img')
+    if image is not None:
+        candidates.extend([image.get('alt'), image.get('title')])
+    candidates.append(container_text)
+
+    for candidate in candidates:
+        cleaned = clean_ws(candidate)
+        if cleaned and normalize_text(cleaned) not in GENERIC_ANCHOR_TEXTS:
+            return cleaned
+
+    number = extract_volume_number(volume_slug)
+    if number:
+        return f'Vol.{number}'
+    return volume_slug
+
+
 
 def _extract_publication_date_from_text(text: str) -> str | None:
     match = re.search(r'(\d{2}/\d{2}/\d{4})', text)
@@ -903,16 +925,16 @@ def parse_series_editions_page(html: str, page_url: str, base_url: str, edition:
             continue
         if any(excluded in url for excluded in ['/manga/news/', '/manga/critique/', '/manga/avis/', '/manga/extrait/']):
             continue
-        title = clean_ws(anchor.get_text(' ', strip=True))
-        if not title or normalize_text(title) in GENERIC_ANCHOR_TEXTS:
-            continue
         parsed_path = [part for part in urlparse(url).path.split('/') if part]
         if len(parsed_path) < 4:
             continue
         series_slug = parsed_path[-2]
         volume_slug = parsed_path[-1]
         container = anchor.find_parent(['article', 'li', 'div', 'tr']) or anchor.parent
-        container_text = clean_ws(container.get_text(' ', strip=True)) if container else title
+        container_text = clean_ws(container.get_text(' ', strip=True)) if container else ''
+        title = _edition_item_title(anchor, container_text, volume_slug)
+        if not title:
+            continue
         publication_date = _extract_publication_date_from_text(container_text)
         cover_image = None
         if container:

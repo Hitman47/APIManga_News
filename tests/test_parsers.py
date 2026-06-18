@@ -337,6 +337,40 @@ def test_parse_series_editions_page():
     assert parsed.items[1].cover_image.endswith('one-piece-110.jpg')
 
 
+def test_parse_series_editions_page_handles_image_only_volume_links():
+    html = '''
+    <html>
+      <body>
+        <div class="volume-card">
+          <a href="/index.php/manga/One-piece-Edition-originale/vol-1">
+            <img src="/public/images/covers/one-piece-1.jpg" alt="" />
+          </a>
+        </div>
+        <div class="volume-card">
+          <a href="/index.php/manga/One-piece-Edition-originale/vol-2">
+            <img src="/public/images/covers/one-piece-2.jpg" alt="One Piece Vol.2" />
+          </a>
+          <span>Vol.2</span>
+        </div>
+      </body>
+    </html>
+    '''
+
+    parsed = parse_series_editions_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale',
+        'https://www.manga-news.com',
+        'vf',
+    )
+
+    assert parsed.total == 2
+    assert parsed.items[0].title == 'Vol.1'
+    assert parsed.items[0].number_int == 1
+    assert parsed.items[0].series_slug == 'One-piece-Edition-originale'
+    assert parsed.items[1].title == 'One Piece Vol.2'
+    assert parsed.items[1].number_int == 2
+
+
 def test_parse_series_page_numberblock_markup():
     html = '''
     <html>

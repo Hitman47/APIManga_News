@@ -1328,9 +1328,11 @@ class MangaNewsService:
         ]
         if not candidates:
             raise ResourceNotFound(f'No VF volume number {number} found for series {series_slug}.')
+        requested_slug = normalize_text(series_slug.replace('-', ' '))
         selected = sorted(
             candidates,
             key=lambda item: (
+                normalize_text((item.series_slug or '').replace('-', ' ')) != requested_slug,
                 bool(item.is_special),
                 item.publication_date or '',
                 item.volume_slug or '',
