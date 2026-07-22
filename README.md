@@ -33,6 +33,7 @@ Fonctions utiles déjà en place :
 - titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées **et** dans les résultats de recherche quand l'enrichissement réussit ;
 - compteurs d'éditions `vf` / `vo` sur les fiches série, sur les fiches volume enrichies depuis la série parente, et dans les résultats de recherche enrichis ;
 - normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning, les éditions de série, et les résultats de recherche enrichis ;
+- extraction DOM des métadonnées de fiches avec compatibilité pour l’ancien HTML en ligne ;
 - projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
 - cache SQLite persistant avec stale cache et negative cache ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
@@ -59,6 +60,8 @@ Pour un humain ou une IA, l'ordre utile est :
 5. [`docs/USE_CASES_AND_RECIPES.md`](docs/USE_CASES_AND_RECIPES.md) ;
 6. [`docs/DEPLOYMENT_AND_OPERATIONS.md`](docs/DEPLOYMENT_AND_OPERATIONS.md) si tu déploies ;
 7. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) si tu veux comprendre les choix internes.
+8. [`docs/METADATA_PARSING.md`](docs/METADATA_PARSING.md) pour le fonctionnement complet du parseur de fiches.
+9. [`docs/METADATA_PARSER_DIFF_2026-07-22.md`](docs/METADATA_PARSER_DIFF_2026-07-22.md) pour le diff de la correction `type` / `genres`.
 
 ## Démarrage rapide
 

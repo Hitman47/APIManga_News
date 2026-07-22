@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from app.cache import SQLiteCache
-from app.manga_news.service import MangaNewsService, project_resource_payload, versioned_cache_key
+from app.manga_news.service import MangaNewsService, parsed_detail_cache_key, project_resource_payload
 
 
 SERIES_PAYLOAD = {
@@ -411,7 +411,7 @@ async def test_get_series_ignores_incompatible_cached_payload_and_refetches(tmp_
     series_url = f'{base_url}/index.php/serie/One-piece-Edition-originale'
     cache = SQLiteCache(tmp_path / 'cache.sqlite3')
     cache.set(
-        cache_key=versioned_cache_key('series', series_url),
+        cache_key=parsed_detail_cache_key('series', series_url),
         payload={
             '_schema_version': 'outdated-cache-version',
             'data': {

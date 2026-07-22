@@ -85,12 +85,10 @@ GENERIC_ANCHOR_TEXTS = {
     'partie 3', 'mot de la fin', 's inscrire', 'connexion', 'j ai oublié mes identifiants !',
 }
 NORMALIZED_RAW_SECTION_HEADINGS = frozenset(normalize_text(heading) for heading in RAW_SECTION_HEADINGS)
-NORMALIZED_VALUE_PREFIXES = tuple(
-    dict.fromkeys(
-        normalize_text(prefix)
-        for prefix_list in VALUE_LABELS.values()
-        for prefix in prefix_list
-    )
+NORMALIZED_VALUE_LABELS = frozenset(
+    normalize_text(label)
+    for labels in VALUE_LABELS.values()
+    for label in labels
 )
 
 HEADING_CATEGORY_MAP = {
@@ -116,11 +114,48 @@ def _soup(html: str) -> BeautifulSoup:
 
 class _TextLines(list[str]):
     normalized: list[str] | None = None
+    metadata: dict[str, str] | None = None
+
+
+def _value_after_dom_label(container_text: str, label_text: str) -> str | None:
+    canonical_label = clean_ws(clean_ws(label_text).rstrip(':'))
+    pattern = re.compile(
+        rf'^\s*{re.escape(canonical_label)}\s*:?\s*(?P<value>.+)$',
+        flags=re.IGNORECASE,
+    )
+    match = pattern.match(clean_ws(container_text))
+    return clean_ws(match.group('value')) if match else None
+
+
+def _extract_dom_metadata(soup: BeautifulSoup) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for label_node in soup.find_all(['strong', 'dt', 'th']):
+        label_text = clean_ws(label_node.get_text(' ', strip=True))
+        normalized_label = normalize_text(label_text)
+        if normalized_label not in NORMALIZED_VALUE_LABELS or normalized_label in metadata:
+            continue
+
+        if label_node.name == 'dt':
+            value_node = label_node.find_next_sibling('dd')
+            value = clean_ws(value_node.get_text(' ', strip=True)) if value_node else None
+        else:
+            container = label_node.find_parent(['li', 'tr']) or label_node.parent
+            value = (
+                _value_after_dom_label(container.get_text(' ', strip=True), label_text)
+                if container is not None
+                else None
+            )
+
+        if value:
+            metadata[normalized_label] = value
+    return metadata
 
 
 def _lines(soup: BeautifulSoup) -> list[str]:
     raw_lines = soup.get_text('\n', strip=True).splitlines()
-    return _TextLines(clean_ws(line) for line in raw_lines if clean_ws(line))
+    lines = _TextLines(clean_ws(line) for line in raw_lines if clean_ws(line))
+    lines.metadata = _extract_dom_metadata(soup)
+    return lines
 
 
 def _normalized_lines(lines: list[str]) -> list[str]:
@@ -145,16 +180,40 @@ def _extract_line_value(
     normalized_lines: list[str] | None = None,
 ) -> str | None:
     normalized_lines = normalized_lines or _normalized_lines(lines)
-    normalized_labels = [(label, normalize_text(label)) for label in labels]
+    canonical_labels = tuple(dict.fromkeys(clean_ws(clean_ws(label).rstrip(':')) for label in labels))
+    normalized_labels = tuple(dict.fromkeys(normalize_text(label) for label in canonical_labels))
+
+    if isinstance(lines, _TextLines) and lines.metadata:
+        for normalized_label in normalized_labels:
+            value = lines.metadata.get(normalized_label)
+            if value:
+                return value
+
     for line, normalized_line in zip(lines, normalized_lines):
-        for label, normalized_label in normalized_labels:
-            if normalized_line.startswith(normalized_label):
-                if ':' in line:
-                    value = clean_ws(line.split(':', 1)[1])
-                else:
-                    value = clean_ws(re.sub(re.escape(label), '', line, flags=re.IGNORECASE))
-                return value or None
+        for label, normalized_label in zip(canonical_labels, normalized_labels):
+            if ':' in line:
+                inline_label, inline_value = line.split(':', 1)
+                if normalize_text(inline_label) == normalized_label:
+                    return clean_ws(inline_value) or None
+            if normalized_line == normalized_label:
+                continue
+            if not normalized_line.startswith(f'{normalized_label} '):
+                continue
+            match = re.match(
+                rf'^\s*{re.escape(label)}(?:\s*:\s*|\s+)(?P<value>.+)$',
+                line,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                return clean_ws(match.group('value')) or None
     return None
+
+
+def _is_value_label_line(line: str, normalized_line: str | None = None) -> bool:
+    normalized_line = normalized_line or normalize_text(line)
+    if normalized_line in NORMALIZED_VALUE_LABELS:
+        return True
+    return any(normalized_line.startswith(f'{label} ') for label in NORMALIZED_VALUE_LABELS)
 
 
 def _extract_number_after(
@@ -215,7 +274,7 @@ def _extract_section(
         for candidate, normalized_candidate in zip(lines[index + 1:], normalized_lines[index + 1:]):
             if normalized_candidate in NORMALIZED_RAW_SECTION_HEADINGS and normalized_candidate != normalized_heading:
                 break
-            if normalized_candidate.startswith(NORMALIZED_VALUE_PREFIXES):
+            if _is_value_label_line(candidate, normalized_candidate):
                 break
             collected.append(candidate)
         text = clean_ws(' '.join(collected))
@@ -236,7 +295,7 @@ def _extract_raw_sections(
         for candidate, normalized_candidate in zip(lines[index + 1:], normalized_lines[index + 1:]):
             if normalized_candidate in NORMALIZED_RAW_SECTION_HEADINGS and normalized_candidate != normalized_line:
                 break
-            if normalized_candidate.startswith(NORMALIZED_VALUE_PREFIXES):
+            if _is_value_label_line(candidate, normalized_candidate):
                 break
             collected.append(candidate)
         key = slugify(normalized_line).replace('-', '_')
@@ -331,11 +390,7 @@ def _extract_page_title(soup: BeautifulSoup, lines: list[str], *, kind: str) -> 
 
     fallback = clean_ws(lines[0] if lines else '')
     normalized_fallback = normalize_text(fallback)
-    looks_like_value_line = any(
-        normalized_fallback.startswith(normalize_text(prefix))
-        for prefix_list in VALUE_LABELS.values()
-        for prefix in prefix_list
-    ) or ':' in fallback
+    looks_like_value_line = _is_value_label_line(fallback, normalized_fallback) or ':' in fallback
     if (
         fallback
         and normalized_fallback not in RAW_SECTION_HEADINGS

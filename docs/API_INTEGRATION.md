@@ -291,6 +291,17 @@ curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
   --data-urlencode "fields=cover_image"
 ```
 
+Exemple de métadonnées éditoriales avec la structure Manga-News actuelle :
+
+```bash
+curl --get "http://localhost:8017/series/Blue-Giant-Momentum" \
+  --data-urlencode "fields=title,type,genres"
+```
+
+La valeur attendue dans `data` est `type="Seinen"` avec `genres=["Drame", "Tranche-de-vie"]`. Le parseur lit les libellés structurés dans le DOM et n’assimile plus `Genres Manga` au champ `Genre`.
+
+Le fonctionnement complet et les règles de compatibilité sont décrits dans [`METADATA_PARSING.md`](METADATA_PARSING.md).
+
 ---
 
 ### 6.6 `GET /series/{slug}/related`
@@ -572,4 +583,4 @@ Tu peux donner ces règles à un agent consommateur :
 
 ## Note de cache importante
 
-Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Les résultats dépendants du parseur utilisent une révision dédiée : après une évolution, les anciens JSON sont ignorés tandis que le HTML encore frais peut être reparsé localement. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données sans vider les caches d'actualités ou de planning. Supprimer le fichier SQLite reste possible, mais n'est pas nécessaire pour la correction du 2026-07-22.

@@ -1,3 +1,14 @@
+## 2026-07-22 — parsing DOM des métadonnées de fiches
+
+- Lecture prioritaire des libellés structurés et de leurs valeurs dans le DOM Manga-News actuel.
+- Correction de `type=null` lorsque le libellé et sa valeur sont dans des nœuds distincts.
+- Correction de la collision entre le champ `Genre` et le texte de navigation `Genres Manga`.
+- Conservation du fallback compatible avec l’ancien HTML en ligne et des valeurs non latines.
+- Invalidation ciblée des résultats parsés tout en conservant le HTML frais et les caches indépendants.
+- Contrat public et schéma OpenAPI inchangés.
+- Documentation complète : [`METADATA_PARSING.md`](METADATA_PARSING.md).
+- Diff de cette livraison : [`METADATA_PARSER_DIFF_2026-07-22.md`](METADATA_PARSER_DIFF_2026-07-22.md).
+
 ## 2026-06-18 — route volume par numéro et payload volume allégé
 
 - Invalidation des anciens caches métier pour forcer la relecture des pages éditions VF après correction des liens de volumes sans texte.

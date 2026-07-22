@@ -6,7 +6,12 @@ import pytest
 
 from app.cache import SQLiteCache
 from app.exceptions import ParseError
-from app.manga_news.service import CACHE_SCHEMA_VERSION, MangaNewsService, versioned_cache_key
+from app.manga_news.service import (
+    CACHE_SCHEMA_VERSION,
+    MangaNewsService,
+    parsed_detail_cache_key,
+    versioned_cache_key,
+)
 from app.models import Envelope
 
 
@@ -74,7 +79,7 @@ async def test_negative_cache_prevents_second_fetch_after_parse_error(tmp_path: 
 async def test_fresh_negative_cache_keeps_serving_usable_stale_payload(tmp_path: Path):
     cache = SQLiteCache(tmp_path / 'cache.sqlite3')
     series_url = 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale'
-    cache_key = versioned_cache_key('series', series_url)
+    cache_key = parsed_detail_cache_key('series', series_url)
     cache.set(
         cache_key,
         {
@@ -104,6 +109,52 @@ async def test_fresh_negative_cache_keeps_serving_usable_stale_payload(tmp_path:
     assert response.partial is True
     assert response.data['title'] == 'One Piece'
     assert 'negatively cached' in response.warnings[0]
+    assert fetcher.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_parser_cache_revision_reuses_fresh_html_without_upstream_fetch(tmp_path: Path):
+    cache = SQLiteCache(tmp_path / 'cache.sqlite3')
+    series_url = 'https://www.manga-news.com/index.php/serie/Blue-Giant-Momentum'
+    html = (Path(__file__).parent / 'fixtures' / 'series_blue_giant_momentum_current.html').read_text(encoding='utf-8')
+
+    cache.set(
+        versioned_cache_key('series', series_url),
+        {
+            '_schema_version': CACHE_SCHEMA_VERSION,
+            'data': {
+                'title': 'Blue Giant Momentum',
+                'type': None,
+                'genres': ['s Manga'],
+                'source_url': series_url,
+            },
+            'source_url': series_url,
+        },
+        ttl_seconds=3600,
+        stale_grace_seconds=3600,
+        namespace='series',
+        resource_url=series_url,
+    )
+    cache.set(
+        versioned_cache_key('page-html', series_url),
+        {
+            '_schema_version': CACHE_SCHEMA_VERSION,
+            'data': {'html': html},
+            'source_url': series_url,
+        },
+        ttl_seconds=3600,
+        stale_grace_seconds=3600,
+        namespace='series-html',
+        resource_url=series_url,
+    )
+    fetcher = CountingFetcher(html)
+    service = MangaNewsService(settings=DummySettings(tmp_path), fetcher=fetcher, cache=cache)
+
+    response = await service.get_series(slug='Blue-Giant-Momentum')
+
+    assert response.cached is False
+    assert response.data['type'] == 'Seinen'
+    assert response.data['genres'] == ['Drame', 'Tranche-de-vie']
     assert fetcher.calls == 0
 
 

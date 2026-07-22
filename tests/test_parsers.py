@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from app.manga_news.parsers import (
     parse_news_page,
     parse_planning_page,
@@ -8,6 +10,9 @@ from app.manga_news.parsers import (
     parse_volume_page,
     parse_volume_search_meta_page,
 )
+
+
+FIXTURES_DIR = Path(__file__).parent / 'fixtures'
 
 
 SERIES_HTML = '''
@@ -168,6 +173,78 @@ def test_parse_series_page():
     assert parsed.illustration_details and parsed.illustration_details.has_color_pages is True
     assert parsed.related and parsed.related.series[0].title == 'Monster Perfect Edition'
     assert parsed.raw_sections and parsed.raw_sections['resume'][0] == 'Résumé principal de la série.'
+
+
+def test_parse_series_page_uses_current_dom_metadata_without_genre_prefix_collision():
+    html = (FIXTURES_DIR / 'series_blue_giant_momentum_current.html').read_text(encoding='utf-8')
+
+    parsed = parse_series_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/Blue-Giant-Momentum',
+    )
+
+    assert parsed.title == 'Blue Giant Momentum'
+    assert parsed.type == 'Seinen'
+    assert parsed.genres == ['Drame', 'Tranche-de-vie']
+    assert parsed.authors_art == ['Shinichi ISHIZUKA']
+    assert parsed.authors_story == ['NUMBER 8']
+    assert parsed.publisher_fr == 'Glénat'
+    assert parsed.publisher_vo == 'Shôgakukan'
+    assert parsed.origin == 'Japon - 2023'
+
+
+def test_parse_series_search_meta_page_uses_current_dom_type():
+    html = (FIXTURES_DIR / 'series_blue_giant_momentum_current.html').read_text(encoding='utf-8')
+
+    parsed = parse_series_search_meta_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/Blue-Giant-Momentum',
+    )
+
+    assert parsed.source_type == 'Seinen'
+    assert parsed.media_kind == 'manga'
+
+
+def test_parse_volume_page_uses_nested_dom_metadata():
+    html = '''
+    <html><body>
+      <nav>Genres Manga</nav>
+      <h1>Blue Giant Momentum Vol.1</h1>
+      <ul>
+        <li class="book-type"><strong>Type</strong>: <a>Seinen</a></li>
+        <li class="book-genre">
+          <strong>Genre</strong>: <a>Drame</a>, <a>Tranche-de-vie</a>
+        </li>
+        <li class="book-publication"><strong>Date de publication</strong>: 05 Juin 2024</li>
+        <li class="book-isbn"><strong>Code EAN</strong>: 9782344062463</li>
+      </ul>
+    </body></html>
+    '''
+
+    parsed = parse_volume_page(
+        html,
+        'https://www.manga-news.com/index.php/manga/Blue-Giant-Momentum/vol-1',
+    )
+
+    assert parsed.type == 'Seinen'
+    assert parsed.genres == ['Drame', 'Tranche-de-vie']
+    assert parsed.publication_date == '2024-06-05'
+    assert parsed.isbn_ean == '9782344062463'
+
+
+def test_legacy_line_metadata_requires_a_label_boundary():
+    html = '''
+    <html><body>
+      <nav>Genres Manga</nav>
+      <h1>Legacy</h1>
+      <ul><li>Type: Shonen</li><li>Genre: Aventure, Fantastique</li></ul>
+    </body></html>
+    '''
+
+    parsed = parse_series_page(html, 'https://www.manga-news.com/index.php/serie/Legacy')
+
+    assert parsed.type == 'Shonen'
+    assert parsed.genres == ['Aventure', 'Fantastique']
 
 
 

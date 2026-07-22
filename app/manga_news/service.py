@@ -65,6 +65,7 @@ from app.utils import (
 logger = logging.getLogger(__name__)
 
 CACHE_SCHEMA_VERSION = '2026-06-18-v2-editions-image-links-1'
+DETAIL_PARSER_CACHE_VERSION = '2026-07-22-dom-metadata-1'
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
@@ -181,6 +182,10 @@ def slugify_block_name(block: str) -> str:
 
 def versioned_cache_key(*parts: str) -> str:
     return make_cache_key(CACHE_SCHEMA_VERSION, *parts)
+
+
+def parsed_detail_cache_key(*parts: str) -> str:
+    return versioned_cache_key(DETAIL_PARSER_CACHE_VERSION, *parts)
 
 
 class MangaNewsService:
@@ -562,7 +567,7 @@ class MangaNewsService:
 
     async def _get_series_search_meta(self, *, slug: str | None = None, url: str | None = None):
         target_url = self._resolve_series_url(slug=slug, url=url)
-        cache_key = versioned_cache_key('series-search-meta', target_url)
+        cache_key = parsed_detail_cache_key('series-search-meta', target_url)
 
         async def loader():
             html_payload, *_ = await self._get_cached_html_payload(
@@ -597,7 +602,7 @@ class MangaNewsService:
 
     async def _get_volume_search_meta(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        cache_key = versioned_cache_key('volume-search-meta', target_url)
+        cache_key = parsed_detail_cache_key('volume-search-meta', target_url)
 
         async def loader():
             html_payload, *_ = await self._get_cached_html_payload(
@@ -1019,7 +1024,7 @@ class MangaNewsService:
             exclude_media_kinds=resolved_exclude_media_kinds,
         )
         search_urls = self._search_urls(query, kind)
-        cache_key = versioned_cache_key(
+        cache_key = parsed_detail_cache_key(
             'search',
             query,
             kind,
@@ -1152,7 +1157,7 @@ class MangaNewsService:
 
     async def _get_series_payload(self, *, slug: str | None = None, url: str | None = None):
         target_url = self._resolve_series_url(slug=slug, url=url)
-        cache_key = versioned_cache_key('series', target_url)
+        cache_key = parsed_detail_cache_key('series', target_url)
 
         async def loader():
             html_payload, *_ = await self._get_cached_html_payload(
@@ -1184,7 +1189,7 @@ class MangaNewsService:
 
     async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        cache_key = versioned_cache_key('volume', target_url)
+        cache_key = parsed_detail_cache_key('volume', target_url)
 
         async def loader():
             html_payload, *_ = await self._get_cached_html_payload(
