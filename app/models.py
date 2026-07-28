@@ -154,6 +154,20 @@ class RelatedLinks(BaseModel):
     misc: list[LinkItem] = Field(default_factory=list)
 
 
+class SeriesReleaseVolume(BaseModel):
+    title: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    publication_date: str | None = None
+    source_url: str | None = None
+    series_slug: str | None = None
+    volume_slug: str | None = None
+    cover_image: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
+    edition_label: str | None = None
+
+
 class SeriesData(BaseModel):
     title: str | None = None
     title_vo: str | None = None
@@ -177,6 +191,8 @@ class SeriesData(BaseModel):
     vo: EditionStatus | None = None
     last_release_date: str | None = None
     next_release_date: str | None = None
+    last_release_volume: SeriesReleaseVolume | None = None
+    next_release_volume: SeriesReleaseVolume | None = None
     stats: SeriesStats | None = None
     themes: list[str] = Field(default_factory=list)
     strengths: str | None = None

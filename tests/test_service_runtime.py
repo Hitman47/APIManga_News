@@ -390,6 +390,120 @@ async def test_release_state_by_series_uses_vf_editions_and_optional_isbn(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_release_state_prefers_explicit_atom_series_cards_over_stale_vf_count(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    class DummyEntry:
+        fetched_at = datetime(2026, 7, 29, 8, 0, tzinfo=UTC)
+        expires_at = datetime(2026, 7, 30, 8, 0, tzinfo=UTC)
+
+    async def fake_get_series_payload(**kwargs):
+        assert kwargs == {'slug': 'Atom-The-Beginning'}
+        return (
+            {
+                'source_url': 'https://www.manga-news.com/index.php/serie/Atom-The-Beginning',
+                'data': {
+                    'title': 'Atom - The Beginning',
+                    'publisher_fr': 'Kana',
+                    'vf': {'volumes': 20, 'status': 'En cours'},
+                    'last_release_date': '2025-10-17',
+                    'next_release_date': '2026-10-02',
+                    'last_release_volume': {
+                        'title': 'Atom - The Beginning Vol.21',
+                        'number': '21',
+                        'number_int': 21,
+                        'publication_date': '2025-10-17',
+                        'source_url': 'https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-21',
+                        'series_slug': 'Atom-The-Beginning',
+                        'volume_slug': 'vol-21',
+                        'is_special': False,
+                        'is_one_shot': False,
+                    },
+                    'next_release_volume': {
+                        'title': 'Atom - The Beginning Vol.22',
+                        'number': '22',
+                        'number_int': 22,
+                        'publication_date': '2026-10-02',
+                        'source_url': 'https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-22',
+                        'series_slug': 'Atom-The-Beginning',
+                        'volume_slug': 'vol-22',
+                        'is_special': False,
+                        'is_one_shot': False,
+                    },
+                },
+            },
+            DummyEntry(),
+            False,
+            False,
+            [],
+        )
+
+    async def fake_get_series_editions(**kwargs):
+        assert kwargs == {'slug': 'Atom-The-Beginning', 'edition': 'vf'}
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url='https://www.manga-news.com/index.php/serie/editions/Atom-The-Beginning',
+            cached=False,
+            partial=False,
+            warnings=[],
+            data={
+                'title': 'Atom - The Beginning',
+                'series_slug': 'Atom-The-Beginning',
+                'vf': {
+                    'edition': 'vf',
+                    'source_url': 'https://www.manga-news.com/index.php/serie/editions/Atom-The-Beginning',
+                    'total': 2,
+                    'items': [
+                        {
+                            'title': 'Atom - The Beginning Vol.21',
+                            'url': 'https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-21',
+                            'series_slug': 'Atom-The-Beginning',
+                            'volume_slug': 'vol-21',
+                            'number': '21',
+                            'number_int': 21,
+                            'publication_date': None,
+                        },
+                        {
+                            'title': 'Atom - The Beginning Vol.22',
+                            'url': 'https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-22',
+                            'series_slug': 'Atom-The-Beginning',
+                            'volume_slug': 'vol-22',
+                            'number': '22',
+                            'number_int': 22,
+                            'publication_date': None,
+                        },
+                    ],
+                },
+            },
+        )
+
+    service._get_series_payload = fake_get_series_payload
+    service.get_series_editions = fake_get_series_editions
+
+    response = await service.get_release_state_by_series(
+        slug='Atom-The-Beginning',
+        include_isbn=False,
+        today='2026-07-29',
+    )
+
+    assert response.data['series']['vf']['volumes'] == 20
+    assert response.data['status'] == 'FOUND_CONFIRMED'
+    assert response.data['confidence'] == 'high'
+    assert response.data['last_released']['number'] == '21'
+    assert response.data['last_released']['publication_date'] == '2025-10-17'
+    assert response.data['next_release']['number'] == '22'
+    assert response.data['next_release']['publication_date'] == '2026-10-02'
+    assert response.data['next_release']['volume_slug'] == 'vol-22'
+
+
+@pytest.mark.asyncio
 async def test_search_uses_settings_defaults_for_optional_flags(tmp_path: Path):
     class SearchDefaultsSettings(DummySettings):
         def __init__(self, tmp_path: Path):

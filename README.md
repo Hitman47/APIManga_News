@@ -250,6 +250,15 @@ curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
   --data-urlencode "fields=title,vf.volumes,next_release_date"
 ```
 
+La route `GET /series/{slug}/release-state` associe les dates aux volumes a
+partir des liens explicites des cartes `#lastvol` et `#nextvol` de la fiche
+serie, puis complete avec la page editions VF. Elle ne deduit jamais un numero
+avec `vf.volumes + 1`. Si Manga News publie seulement une date sans lien de
+volume exploitable, la reponse reste partielle et `next_release` vaut `null`.
+
+Exemple Atom : le lien `/manga/Atom-The-Beginning/vol-22` associe explicitement
+le tome 22 a la date `2026-10-02`, meme si le compteur VF affiche encore 20.
+
 Exemple sur un volume :
 
 ```bash

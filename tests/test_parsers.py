@@ -465,3 +465,27 @@ def test_parse_series_page_numberblock_markup():
     assert parsed.vf.status == 'En cours'
     assert parsed.vo and parsed.vo.volumes == 114
     assert parsed.vo.status == 'En cours'
+
+
+def test_parse_series_page_extracts_explicit_atom_release_cards():
+    html = (FIXTURES_DIR / 'series_atom_release_cards.html').read_text(encoding='utf-8')
+
+    parsed = parse_series_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/Atom-The-Beginning',
+    )
+
+    assert parsed.vf and parsed.vf.volumes == 20
+    assert parsed.last_release_date == '2025-10-17'
+    assert parsed.next_release_date == '2026-10-02'
+    assert parsed.last_release_volume is not None
+    assert parsed.last_release_volume.number == '21'
+    assert parsed.last_release_volume.number_int == 21
+    assert parsed.last_release_volume.publication_date == '2025-10-17'
+    assert parsed.last_release_volume.volume_slug == 'vol-21'
+    assert parsed.next_release_volume is not None
+    assert parsed.next_release_volume.number == '22'
+    assert parsed.next_release_volume.number_int == 22
+    assert parsed.next_release_volume.publication_date == '2026-10-02'
+    assert parsed.next_release_volume.volume_slug == 'vol-22'
+    assert parsed.next_release_volume.source_url.endswith('/Atom-The-Beginning/vol-22')

@@ -1795,6 +1795,16 @@
             ],
             "title": "Last Release Date"
           },
+          "last_release_volume": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesReleaseVolume"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "next_release_date": {
             "anyOf": [
               {
@@ -1805,6 +1815,16 @@
               }
             ],
             "title": "Next Release Date"
+          },
+          "next_release_volume": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesReleaseVolume"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "origin": {
             "anyOf": [
@@ -2443,6 +2463,133 @@
           }
         },
         "title": "SeriesRelatedResponse",
+        "type": "object"
+      },
+      "SeriesReleaseVolume": {
+        "properties": {
+          "cover_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image"
+          },
+          "edition_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edition Label"
+          },
+          "is_one_shot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is One Shot"
+          },
+          "is_special": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Special"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "number_int": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number Int"
+          },
+          "publication_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publication Date"
+          },
+          "series_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Slug"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "volume_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Slug"
+          }
+        },
+        "title": "SeriesReleaseVolume",
         "type": "object"
       },
       "SeriesResponse": {

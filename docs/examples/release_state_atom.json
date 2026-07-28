@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/serie/Atom-The-Beginning",
+  "cached": false,
+  "partial": false,
+  "warnings": [],
+  "data": {
+    "series": {
+      "title": "Atom - The Beginning",
+      "slug": "Atom-The-Beginning",
+      "publisher_fr": "Kana",
+      "vf": {
+        "volumes": 20,
+        "status": "En cours"
+      },
+      "source_url": "https://www.manga-news.com/index.php/serie/Atom-The-Beginning"
+    },
+    "last_released": {
+      "title": "Atom - The Beginning Vol.21",
+      "number": "21",
+      "number_int": 21,
+      "publication_date": "2025-10-17",
+      "isbn_ean": null,
+      "source_url": "https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-21",
+      "series_slug": "Atom-The-Beginning",
+      "volume_slug": "vol-21",
+      "is_special": false,
+      "is_one_shot": false,
+      "edition_label": "edition_originale"
+    },
+    "next_release": {
+      "title": "Atom - The Beginning Vol.22",
+      "number": "22",
+      "number_int": 22,
+      "publication_date": "2026-10-02",
+      "isbn_ean": null,
+      "source_url": "https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-22",
+      "series_slug": "Atom-The-Beginning",
+      "volume_slug": "vol-22",
+      "is_special": false,
+      "is_one_shot": false,
+      "edition_label": "edition_originale"
+    },
+    "status": "FOUND_CONFIRMED",
+    "confidence": "high",
+    "warnings": []
+  }
+}

@@ -20,6 +20,7 @@ from app.models import (
     SeriesData,
     SeriesEditionItem,
     SeriesEditionsBlock,
+    SeriesReleaseVolume,
     SeriesSearchMetaData,
     SeriesStats,
     VolumeData,
@@ -371,6 +372,62 @@ def _extract_vf_vo(
     return vf_status, vo_status, last_release, next_release
 
 
+def _extract_series_release_volume(
+    soup: BeautifulSoup,
+    element_id: str,
+    page_url: str,
+) -> SeriesReleaseVolume | None:
+    container = soup.find(id=element_id)
+    if container is None:
+        return None
+
+    base_url = _base_url_from_page(page_url)
+    for anchor in container.find_all('a', href=True):
+        source_url = ensure_absolute_url(base_url, anchor.get('href', ''))
+        if not source_url or '/index.php/manga/' not in source_url:
+            continue
+        parsed_path = [part for part in urlparse(source_url).path.split('/') if part]
+        if len(parsed_path) < 4:
+            continue
+        series_slug = parsed_path[-2]
+        volume_slug = parsed_path[-1]
+        image = anchor.find('img')
+        title = clean_ws(
+            anchor.get('title')
+            or anchor.get('aria-label')
+            or (image.get('alt') if image is not None else None)
+            or ''
+        )
+        number = _guess_volume_number(title, volume_slug)
+        publication_date = _extract_publication_date_from_text(
+            clean_ws(anchor.get_text(' ', strip=True))
+            or clean_ws(container.get_text(' ', strip=True))
+        )
+        if not number or not publication_date:
+            continue
+        if not title:
+            title = f'Vol.{number}'
+        edition_label = infer_volume_edition_label(title)
+        is_special, is_one_shot = infer_volume_flags(title)
+        cover_image = None
+        if image is not None and image.get('src'):
+            cover_image = ensure_absolute_url(base_url, image.get('src'))
+        return SeriesReleaseVolume(
+            title=title,
+            number=number,
+            number_int=parse_volume_number_int(number),
+            publication_date=publication_date,
+            source_url=source_url,
+            series_slug=series_slug,
+            volume_slug=volume_slug,
+            cover_image=cover_image,
+            is_special=is_special,
+            is_one_shot=is_one_shot,
+            edition_label=edition_label,
+        )
+    return None
+
+
 def _find_cover_image(soup: BeautifulSoup) -> str | None:
     return _meta(soup, 'og:image', 'twitter:image')
 
@@ -515,6 +572,8 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
             value = value.split(' ', 1)[1]
         themes.extend(unique_list(value.split('   ')))
     vf, vo, last_release_date, next_release_date = _extract_vf_vo(soup, lines, normalized_lines)
+    last_release_volume = _extract_series_release_volume(soup, 'lastvol', page_url)
+    next_release_volume = _extract_series_release_volume(soup, 'nextvol', page_url)
     stats = SeriesStats(
         likes=_extract_number_after(lines, "J'aime", normalized_lines),
         in_collection=_extract_number_after(lines, 'Dans ma collection', normalized_lines),
@@ -548,6 +607,8 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
         vo=vo,
         last_release_date=last_release_date,
         next_release_date=next_release_date,
+        last_release_volume=last_release_volume,
+        next_release_volume=next_release_volume,
         stats=stats,
         themes=unique_list(themes),
         strengths=strengths,

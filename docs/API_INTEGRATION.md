@@ -376,8 +376,39 @@ Structure principale :
   `FOUND_NO_RELEASED`, `FOUND_EMPTY_EDITIONS` ou `FOUND_PARTIAL` ;
 - `data.confidence` : `high`, `medium`, `low` ou `none`.
 
+Ordre de resolution :
+
+1. cartes explicites `#lastvol` et `#nextvol` de la fiche serie ;
+2. liste des editions VF ;
+3. date seule sans lien de volume, exposee comme resultat partiel.
+
+Les cartes de la fiche serie contiennent le lien du volume, par exemple
+`/manga/Atom-The-Beginning/vol-22`, ainsi que sa date. Ce lien est prioritaire
+car il associe explicitement le numero et la date. Le compteur `vf.volumes`
+n'est jamais utilise pour inventer le numero suivant.
+
 Par defaut, la route ne relit pas les fiches volume. Elle reutilise la fiche
-serie et la page editions VF pour limiter les appels upstream.
+serie et la page editions VF pour limiter les appels upstream. Une date sans
+numero explicite ne produit jamais de `data.next_release` applicable.
+
+Exemple de regression Atom attendu avec `today=2026-07-29` :
+
+```json
+{
+  "last_released": {
+    "number": "21",
+    "publication_date": "2025-10-17",
+    "volume_slug": "vol-21"
+  },
+  "next_release": {
+    "number": "22",
+    "publication_date": "2026-10-02",
+    "volume_slug": "vol-22"
+  },
+  "status": "FOUND_CONFIRMED",
+  "confidence": "high"
+}
+```
 
 ---
 

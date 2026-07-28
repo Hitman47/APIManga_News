@@ -31,6 +31,7 @@ from app.models import (
     SeriesEditionsBlock,
     SeriesEditionsData,
     SeriesEditionItem,
+    SeriesReleaseVolume,
     SeriesRelatedData,
     SeriesSearchMetaData,
     VolumeSearchMetaData,
@@ -64,7 +65,7 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-06-18-v2-editions-image-links-1'
+CACHE_SCHEMA_VERSION = '2026-07-29-v2-series-release-cards-1'
 DETAIL_PARSER_CACHE_VERSION = '2026-07-22-dom-metadata-1'
 
 SERIES_BLOCKS = {
@@ -72,7 +73,7 @@ SERIES_BLOCKS = {
     'staff': ['authors_story', 'authors_art', 'translators'],
     'publishing': ['publisher_fr', 'publisher_vo', 'collection', 'type', 'genres', 'prepublication', 'origin', 'advisory_age'],
     'presentation': ['summary', 'illustration', 'illustration_details', 'cover_image', 'themes', 'strengths'],
-    'editions': ['vf', 'vo', 'last_release_date', 'next_release_date'],
+    'editions': ['vf', 'vo', 'last_release_date', 'next_release_date', 'last_release_volume', 'next_release_volume'],
     'stats': ['stats'],
     'related': ['related'],
     'raw': ['raw_sections'],
@@ -690,6 +691,24 @@ class MangaNewsService:
             edition_label=item.edition_label,
         )
 
+    @staticmethod
+    def _series_release_volume_to_item(volume: SeriesReleaseVolume) -> SeriesEditionItem | None:
+        if not volume.title or not volume.source_url:
+            return None
+        return SeriesEditionItem(
+            title=volume.title,
+            url=volume.source_url,
+            series_slug=volume.series_slug,
+            volume_slug=volume.volume_slug,
+            number=volume.number,
+            number_int=volume.number_int,
+            edition_label=volume.edition_label,
+            is_special=volume.is_special,
+            is_one_shot=volume.is_one_shot,
+            publication_date=volume.publication_date,
+            cover_image=volume.cover_image,
+        )
+
     async def _enrich_release_state_isbn(self, volume: ReleaseStateVolume, warnings: list[str]) -> ReleaseStateVolume:
         if not volume.series_slug or not volume.volume_slug:
             warnings.append(f'Unable to enrich ISBN for {volume.title or volume.source_url}: missing volume route.')
@@ -726,12 +745,33 @@ class MangaNewsService:
             vf=series_data.get('vf'),
             source_url=series_data.get('source_url') or editions_data.source_url,
         )
-        vf_items = editions_data.vf.items if editions_data.vf else []
-        if not vf_items:
+        vf_items = list(editions_data.vf.items) if editions_data.vf else []
+        explicit_items: list[SeriesEditionItem] = []
+        for field_name in ('last_release_volume', 'next_release_volume'):
+            raw_volume = series_data.get(field_name)
+            if not raw_volume:
+                continue
+            try:
+                release_volume = SeriesReleaseVolume.model_validate(raw_volume)
+            except Exception as exc:
+                warnings.append(f'Ignoring invalid {field_name}: {exc}')
+                continue
+            item = self._series_release_volume_to_item(release_volume)
+            if item is None:
+                warnings.append(f'Ignoring incomplete {field_name}: missing title or source URL.')
+                continue
+            explicit_items.append(item)
+
+        if not vf_items and not explicit_items:
             warnings.append('No VF edition items were found for this series.')
 
+        merged_items: dict[str, SeriesEditionItem] = {}
+        for item in [*vf_items, *explicit_items]:
+            key = item.volume_slug or item.url or item.number or item.title
+            merged_items[key] = item
+
         candidates: list[SeriesEditionItem] = []
-        for item in vf_items:
+        for item in merged_items.values():
             if not item.publication_date:
                 continue
             if item.number_int is None:
@@ -765,14 +805,14 @@ class MangaNewsService:
             status = 'FOUND_NO_UPCOMING'
             confidence = 'high'
             if series_data.get('next_release_date'):
-                warnings.append('Series page exposes next_release_date, but no matching upcoming VF volume was found in editions.')
+                warnings.append('Series page exposes next_release_date, but no explicit upcoming VF volume could be matched.')
         elif next_volume:
             status = 'FOUND_NO_RELEASED'
             confidence = 'medium'
         elif series_data.get('last_release_date') or series_data.get('next_release_date'):
             status = 'FOUND_PARTIAL'
             confidence = 'medium'
-            warnings.append('Series page exposes release dates, but no dated VF edition item could be matched.')
+            warnings.append('Series page exposes release dates, but no explicit dated VF volume could be matched.')
         else:
             status = 'FOUND_EMPTY_EDITIONS'
             confidence = 'low' if vf_items else 'none'

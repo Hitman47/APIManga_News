@@ -33,6 +33,7 @@ EXAMPLE_MODEL_MAP = {
     'series_related_one_piece.json': SeriesRelatedResponse,
     'series_editions_one_piece.json': SeriesEditionsResponse,
     'release_state_one_piece.json': ReleaseStateResponse,
+    'release_state_atom.json': ReleaseStateResponse,
     'error_resource_not_found.json': ApiErrorResponse,
     'error_upstream_parse.json': ApiErrorResponse,
 }
