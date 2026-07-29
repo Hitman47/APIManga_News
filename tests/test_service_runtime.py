@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -12,7 +12,7 @@ from app.manga_news.service import (
     parsed_detail_cache_key,
     versioned_cache_key,
 )
-from app.models import Envelope
+from app.models import Envelope, SeriesEditionsData
 
 
 class DummySettings:
@@ -785,6 +785,228 @@ async def test_get_volume_by_number_resolves_volume_slug_from_vf_editions(tmp_pa
             'include_parent_editions': False,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_series_edition_groups_reuses_full_cached_parse_for_compact_response(tmp_path: Path):
+    html = Path('tests/fixtures/series_eden_editions_current.html').read_text(encoding='utf-8')
+    fetcher = CountingFetcher(html)
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    compact = await service.get_series_edition_groups(slug='Eden')
+    full = await service.get_series_edition_groups(slug='Eden', include_volumes=True)
+
+    assert fetcher.calls == 1
+    assert compact.data['groups'][1]['volume_count'] == 9
+    assert compact.data['groups'][1]['items'] == []
+    assert len(full.data['groups'][1]['items']) == 9
+    assert full.cached is True
+
+
+@pytest.mark.asyncio
+async def test_get_volume_by_number_selects_requested_edition_group(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_edition_groups(**kwargs):
+        assert kwargs == {'slug': 'Eden', 'include_volumes': True}
+        return Envelope(
+            source_url='https://www.manga-news.com/index.php/serie/editions/Eden',
+            cached=True,
+            data={
+                'title': 'Eden',
+                'series_slug': 'Eden',
+                'groups': [{
+                    'edition_label': 'perfect',
+                    'display_name': 'Edition Perfect',
+                    'raw_heading': 'Edition Perfect',
+                    'series_slug': 'Eden-Perfect-Edition',
+                    'volume_count': 9,
+                    'items': [{
+                        'title': 'Eden - Perfect Edition Vol.1',
+                        'url': 'https://www.manga-news.com/index.php/manga/Eden-Perfect-Edition/vol-1',
+                        'series_slug': 'Eden-Perfect-Edition',
+                        'volume_slug': 'vol-1',
+                        'number': '1',
+                        'number_int': 1,
+                        'edition_label': 'perfect',
+                        'is_special': False,
+                    }],
+                }],
+            },
+        )
+
+    volume_calls = []
+
+    async def fake_get_volume(**kwargs):
+        volume_calls.append(kwargs)
+        return Envelope(cached=True, data={'title': 'Eden - Perfect Edition Vol.1', 'number': '1'})
+
+    service.get_series_edition_groups = fake_get_series_edition_groups
+    service.get_volume = fake_get_volume
+
+    payload = await service.get_volume_by_number(
+        series_slug='Eden',
+        number=1,
+        edition_label='perfect',
+        fields='title,number',
+    )
+
+    assert payload.data['title'] == 'Eden - Perfect Edition Vol.1'
+    assert volume_calls == [{
+        'series_slug': 'Eden-Perfect-Edition',
+        'volume_slug': 'vol-1',
+        'blocks': None,
+        'fields': 'title,number',
+        'include_raw_sections': False,
+        'include_parent_editions': None,
+    }]
+
+
+def test_release_state_edition_filter_does_not_let_original_volume_overwrite_selected_group(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+    editions = SeriesEditionsData.model_validate({
+        'title': 'Eden',
+        'series_slug': 'Eden',
+        'vf': {
+            'edition': 'vf',
+            'total': 1,
+            'items': [{
+                'title': 'Eden - Perfect Edition Vol.1',
+                'url': 'https://www.manga-news.com/index.php/manga/Eden-Perfect-Edition/vol-1',
+                'series_slug': 'Eden-Perfect-Edition',
+                'volume_slug': 'vol-1',
+                'number': '1',
+                'number_int': 1,
+                'edition_label': 'perfect',
+                'publication_date': '2026-01-02',
+            }],
+        },
+    })
+    series_data = {
+        'title': 'Eden',
+        'last_release_volume': {
+            'title': 'Eden Vol.1',
+            'source_url': 'https://www.manga-news.com/index.php/manga/Eden/vol-1',
+            'series_slug': 'Eden',
+            'volume_slug': 'vol-1',
+            'number': '1',
+            'number_int': 1,
+            'edition_label': 'edition_originale',
+            'publication_date': '1997-01-01',
+        },
+    }
+
+    result = service._build_release_state_data(
+        slug='Eden',
+        series_data=series_data,
+        editions_data=editions,
+        include_special=False,
+        edition_label='perfect',
+        today_value=date(2026, 7, 29),
+        warnings=[],
+    )
+
+    assert result.last_released is not None
+    assert result.last_released.series_slug == 'Eden-Perfect-Edition'
+    assert result.last_released.edition_label == 'perfect'
+
+
+@pytest.mark.asyncio
+async def test_search_editions_fetches_only_search_sources_and_best_edition_page(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    search_vf = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q=eden'
+    search_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q=eden'
+    editions_url = f'{base_url}/index.php/serie/editions/Eden'
+
+    class MappingFetcher:
+        def __init__(self):
+            self.calls = []
+
+        async def get_text(self, url: str, params: dict | None = None):
+            self.calls.append(url)
+            if url == search_vf:
+                return DummyFetchResult(
+                    '<html><body><a href="/index.php/serie/Eden">Eden</a></body></html>',
+                    url,
+                )
+            if url == search_vo:
+                return DummyFetchResult('<html><body></body></html>', url)
+            if url == editions_url:
+                html = Path('tests/fixtures/series_eden_editions_current.html').read_text(encoding='utf-8')
+                return DummyFetchResult(html, url)
+            raise AssertionError(f'Unexpected URL: {url}')
+
+    fetcher = MappingFetcher()
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    payload = await service.search_editions(query='eden', mode='best', limit=1)
+
+    assert fetcher.calls == [search_vf, search_vo, editions_url]
+    assert payload.data['results'][0]['slug'] == 'Eden'
+    assert payload.data['results'][0]['edition_groups'][1]['volume_count'] == 9
+    assert payload.data['results'][0]['edition_groups'][1]['items'] == []
+
+
+@pytest.mark.asyncio
+async def test_search_editions_keeps_valid_candidates_when_one_group_page_cannot_be_parsed(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_search(**kwargs):
+        return Envelope(
+            cached=True,
+            data=[
+                {'title': 'Eden', 'url': 'https://example.test/Eden', 'kind': 'series', 'score': 100, 'slug': 'Eden'},
+                {'title': 'Unknown', 'url': 'https://example.test/Unknown', 'kind': 'series', 'score': 80, 'slug': 'Unknown'},
+            ],
+        )
+
+    async def fake_groups(*, slug: str, include_volumes: bool):
+        if slug == 'Unknown':
+            raise ParseError('No sectioned edition block.')
+        return Envelope(
+            cached=True,
+            data={
+                'title': 'Eden',
+                'series_slug': 'Eden',
+                'groups': [{
+                    'edition_label': 'edition_originale',
+                    'display_name': 'Edition originale',
+                    'raw_heading': 'Les volumes de la serie',
+                    'series_slug': 'Eden',
+                    'volume_count': 18,
+                }],
+            },
+        )
+
+    service.search = fake_search
+    service.get_series_edition_groups = fake_groups
+
+    payload = await service.search_editions(query='eden', mode='all', limit=2)
+
+    assert payload.partial is True
+    assert payload.cached is False
+    assert [item['slug'] for item in payload.data['results']] == ['Eden']
+    assert 'Unknown' in payload.warnings[0]
 
 
 

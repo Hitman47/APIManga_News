@@ -12,6 +12,7 @@ Ces fichiers servent à montrer des payloads réalistes sans devoir lancer l'API
 - `planning_example.json`
 - `series_related_one_piece.json`
 - `series_editions_one_piece.json`
+- `edition_groups_eden.json`
 - `release_state_one_piece.json`
 - `release_state_atom.json`
 - `error_upstream_parse.json`

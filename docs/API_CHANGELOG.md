@@ -1,3 +1,15 @@
+## 2026-07-29 - groupes d'editions VF
+
+- Ajout de `GET /series/{slug}/edition-groups` et `GET /search/editions`.
+- Ajout de `edition_label` facultatif sur la recherche de volume par numero et
+  sur le calcul dernier/prochain tome.
+- Separation entre tomes listes, total final, statut et provenance du statut.
+- Parsing par sections pour exclure les recommandations presentes sur la page.
+- Contrats historiques inchanges lorsque les nouveaux parametres sont absents.
+- Documentation complete : [`EDITION_GROUPS.md`](EDITION_GROUPS.md).
+- Diff de cette livraison :
+  [`EDITION_GROUPS_DIFF_2026-07-29.md`](EDITION_GROUPS_DIFF_2026-07-29.md).
+
 ## 2026-07-22 — parsing DOM des métadonnées de fiches
 
 - Lecture prioritaire des libellés structurés et de leurs valeurs dans le DOM Manga-News actuel.

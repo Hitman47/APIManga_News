@@ -4,6 +4,7 @@ from app.manga_news.parsers import (
     parse_news_page,
     parse_planning_page,
     parse_search_page,
+    parse_series_edition_groups_page,
     parse_series_editions_page,
     parse_series_page,
     parse_series_search_meta_page,
@@ -446,6 +447,37 @@ def test_parse_series_editions_page_handles_image_only_volume_links():
     assert parsed.items[0].series_slug == 'One-piece-Edition-originale'
     assert parsed.items[1].title == 'One Piece Vol.2'
     assert parsed.items[1].number_int == 2
+
+
+def test_parse_series_edition_groups_page_scopes_sections_and_reports_status_provenance():
+    html = (FIXTURES_DIR / 'series_eden_editions_current.html').read_text(encoding='utf-8')
+
+    parsed = parse_series_edition_groups_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/Eden',
+        'https://www.manga-news.com',
+        'Eden',
+    )
+
+    assert parsed.title == 'Eden'
+    assert [group.edition_label for group in parsed.groups] == ['edition_originale', 'perfect']
+    original, perfect = parsed.groups
+    assert original.series_slug == 'Eden'
+    assert original.volume_count == 18
+    assert original.total_volumes == 18
+    assert original.status == 'completed'
+    assert original.status_source == 'explicit'
+    assert original.status_confidence == 'high'
+    assert perfect.series_slug == 'Eden-Perfect-Edition'
+    assert perfect.volume_count == 9
+    assert perfect.total_volumes == 9
+    assert perfect.highest_volume_number == 9
+    assert perfect.available_numbers == list(range(1, 10))
+    assert perfect.status == 'completed'
+    assert perfect.status_source == 'inferred'
+    assert perfect.status_confidence == 'medium'
+    assert all('Baki' not in item.url for group in parsed.groups for item in group.items)
+    assert all('Please-save-my-earth' not in item.url for group in parsed.groups for item in group.items)
 
 
 def test_parse_series_page_numberblock_markup():

@@ -350,6 +350,32 @@ Chaque item d'édition expose notamment :
 - `publication_date`
 - `cover_image`
 
+#### Groupes d'editions : `GET /series/{slug}/edition-groups`
+
+Cette route additive regroupe les tomes VF selon les sections de la page
+Manga-News. Elle expose `volume_count`, `total_volumes`,
+`highest_volume_number`, `available_numbers`, puis un statut qualifie par
+`status_source`, `status_confidence` et `status_reason`.
+
+```bash
+curl --get "http://localhost:8017/series/Eden/edition-groups"
+curl --get "http://localhost:8017/search/editions" \
+  --data-urlencode "q=eden" \
+  --data-urlencode "mode=best"
+```
+
+`include_volumes=true` remplit les items; `false` reste la valeur compacte par
+defaut. Pour cibler ensuite un tome de l'edition Perfect :
+
+```bash
+curl --get "http://localhost:8017/volume/Eden/number/1" \
+  --data-urlencode "edition_label=perfect"
+```
+
+Sans `edition_label`, le comportement historique des routes existantes reste
+inchange. Le contrat detaille et les limites d'inference sont documentes dans
+[`EDITION_GROUPS.md`](EDITION_GROUPS.md).
+
 #### Sorties VF : `GET /series/{slug}/release-state`
 
 Usage : obtenir directement le dernier tome VF sorti et le prochain tome VF
@@ -366,7 +392,8 @@ Parametres :
 - `today` : date de reference optionnelle au format `YYYY-MM-DD` ;
 - `include_special` : inclut les volumes detectes comme speciaux ;
 - `include_isbn` : relit uniquement les fiches volume du dernier/prochain tome
-  pour remplir `isbn_ean`.
+  pour remplir `isbn_ean` ;
+- `edition_label` : filtre facultatif sur un groupe, par exemple `perfect`.
 
 Structure principale :
 - `data.series` : serie source ;

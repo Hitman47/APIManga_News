@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "ok": true,
+  "found": true,
+  "source": "manga_news",
+  "source_url": "https://www.manga-news.com/index.php/serie/editions/Eden",
+  "cached": true,
+  "fetched_at": "2026-07-29T10:00:00+00:00",
+  "cache_expires_at": "2026-07-30T10:00:00+00:00",
+  "partial": false,
+  "warnings": [],
+  "fingerprint": "fp-edition-groups-eden",
+  "data": {
+    "title": "Eden",
+    "series_slug": "Eden",
+    "source_url": "https://www.manga-news.com/index.php/serie/editions/Eden",
+    "groups": [
+      {
+        "edition_label": "edition_originale",
+        "display_name": "Edition originale",
+        "raw_heading": "Les volumes de la serie",
+        "series_slug": "Eden",
+        "volume_count": 18,
+        "total_volumes": 18,
+        "highest_volume_number": 18,
+        "available_numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
+        "status": "completed",
+        "status_source": "explicit",
+        "status_confidence": "high",
+        "status_reason": "Series metadata reports VF status \"Termine\".",
+        "items": []
+      },
+      {
+        "edition_label": "perfect",
+        "display_name": "Edition Perfect",
+        "raw_heading": "Edition Perfect",
+        "series_slug": "Eden-Perfect-Edition",
+        "volume_count": 9,
+        "total_volumes": 9,
+        "highest_volume_number": 9,
+        "available_numbers": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "status": "completed",
+        "status_source": "inferred",
+        "status_confidence": "medium",
+        "status_reason": "The completed original edition has 18 volumes and this compiled edition has 9, an exact 2:1 ratio.",
+        "items": []
+      }
+    ]
+  }
+}

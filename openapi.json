@@ -1,6 +1,174 @@
 {
   "components": {
     "schemas": {
+      "EditionSearchData": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "best",
+              "all"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "query": {
+            "title": "Query",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/EditionSearchResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "query",
+          "mode"
+        ],
+        "title": "EditionSearchData",
+        "type": "object"
+      },
+      "EditionSearchResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EditionSearchData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "EditionSearchResponse",
+        "type": "object"
+      },
+      "EditionSearchResult": {
+        "properties": {
+          "edition_groups": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesEditionGroup"
+            },
+            "title": "Edition Groups",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "slug",
+          "score"
+        ],
+        "title": "EditionSearchResult",
+        "type": "object"
+      },
       "EditionStatus": {
         "properties": {
           "status": {
@@ -2020,6 +2188,263 @@
           }
         },
         "title": "SeriesData",
+        "type": "object"
+      },
+      "SeriesEditionGroup": {
+        "properties": {
+          "available_numbers": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Available Numbers",
+            "type": "array"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "edition_label": {
+            "title": "Edition Label",
+            "type": "string"
+          },
+          "highest_volume_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Highest Volume Number"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesEditionItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "raw_heading": {
+            "title": "Raw Heading",
+            "type": "string"
+          },
+          "series_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Series Slug"
+          },
+          "status": {
+            "default": "unknown",
+            "enum": [
+              "completed",
+              "ongoing",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "status_confidence": {
+            "default": "none",
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              "none"
+            ],
+            "title": "Status Confidence",
+            "type": "string"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          },
+          "status_source": {
+            "default": "unknown",
+            "enum": [
+              "explicit",
+              "inferred",
+              "unknown"
+            ],
+            "title": "Status Source",
+            "type": "string"
+          },
+          "total_volumes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Volumes"
+          },
+          "volume_count": {
+            "default": 0,
+            "title": "Volume Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "edition_label",
+          "display_name",
+          "raw_heading"
+        ],
+        "title": "SeriesEditionGroup",
+        "type": "object"
+      },
+      "SeriesEditionGroupsData": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesEditionGroup"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "series_slug": {
+            "title": "Series Slug",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "series_slug"
+        ],
+        "title": "SeriesEditionGroupsData",
+        "type": "object"
+      },
+      "SeriesEditionGroupsResponse": {
+        "properties": {
+          "cache_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Expires At"
+          },
+          "cached": {
+            "default": false,
+            "title": "Cached",
+            "type": "boolean"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesEditionGroupsData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "found": {
+            "default": true,
+            "title": "Found",
+            "type": "boolean"
+          },
+          "ok": {
+            "default": true,
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "partial": {
+            "default": false,
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "schema_version": {
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "source": {
+            "const": "manga_news",
+            "default": "manga_news",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "title": "SeriesEditionGroupsResponse",
         "type": "object"
       },
       "SeriesEditionItem": {
@@ -4204,6 +4629,110 @@
         ]
       }
     },
+    "/search/editions": {
+      "get": {
+        "description": "Recherche des series, puis analyse chaque page Editions VF par section. Cette route est additive et ne change pas le contrat de `/search`.",
+        "operationId": "search_editions_search_editions_get",
+        "parameters": [
+          {
+            "description": "Titre de serie a rechercher.",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Titre de serie a rechercher.",
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "`best` pour la meilleure serie, `all` pour plusieurs candidates.",
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "best",
+              "description": "`best` pour la meilleure serie, `all` pour plusieurs candidates.",
+              "enum": [
+                "best",
+                "all"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Nombre maximal de series a analyser.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 10,
+              "description": "Nombre maximal de series a analyser.",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Inclure les fiches legeres de tous les tomes dans chaque groupe.",
+            "in": "query",
+            "name": "include_volumes",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Inclure les fiches legeres de tous les tomes dans chaque groupe.",
+              "title": "Include Volumes",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EditionSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search series and list their edition groups",
+        "tags": [
+          "Search"
+        ]
+      }
+    },
     "/search/resolve": {
       "get": {
         "description": "Construit sur `/search`, puis renvoie le meilleur candidat et un niveau de confiance `high`, `medium`, `low` ou `none`. Les flags `enrich`, `include_editions`, `prefer_main_series`, `include_related`, `include_books`, `media_kinds` et `exclude_media_kinds` suivent le même contrat que `/search`.",
@@ -4838,6 +5367,77 @@
         ]
       }
     },
+    "/series/{slug}/edition-groups": {
+      "get": {
+        "description": "Regroupe les tomes par section de la page Editions VF. Le nombre de tomes listes, le total certain, le statut et la provenance du statut sont exposes separement.",
+        "operationId": "get_series_edition_groups_series__slug__edition_groups_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Inclure les tomes de chaque edition; `false` garde une reponse compacte.",
+            "in": "query",
+            "name": "include_volumes",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Inclure les tomes de chaque edition; `false` garde une reponse compacte.",
+              "title": "Include Volumes",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesEditionGroupsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List distinct VF edition groups for a series",
+        "tags": [
+          "Series"
+        ]
+      }
+    },
     "/series/{slug}/editions": {
       "get": {
         "description": "Récupère les pages Éditions VF et/ou VO d’une série.",
@@ -4985,6 +5585,24 @@
             "schema": {
               "title": "Slug",
               "type": "string"
+            }
+          },
+          {
+            "description": "Filtrer sur un groupe d edition, par exemple `perfect`; absent, le comportement historique est conserve.",
+            "in": "query",
+            "name": "edition_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filtrer sur un groupe d edition, par exemple `perfect`; absent, le comportement historique est conserve.",
+              "title": "Edition Label"
             }
           },
           {
@@ -5215,6 +5833,24 @@
               "minimum": 1,
               "title": "Number",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Selectionner un groupe d edition, par exemple `perfect`; absent, la resolution historique est conservee.",
+            "in": "query",
+            "name": "edition_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Selectionner un groupe d edition, par exemple `perfect`; absent, la resolution historique est conservee.",
+              "title": "Edition Label"
             }
           },
           {

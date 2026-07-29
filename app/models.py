@@ -336,6 +336,51 @@ class SeriesEditionsResponse(BaseEnvelope):
     data: SeriesEditionsData | None = None
 
 
+class SeriesEditionGroup(BaseModel):
+    edition_label: str
+    display_name: str
+    raw_heading: str
+    series_slug: str | None = None
+    volume_count: int = 0
+    total_volumes: int | None = None
+    highest_volume_number: int | None = None
+    available_numbers: list[int] = Field(default_factory=list)
+    status: Literal['completed', 'ongoing', 'unknown'] = 'unknown'
+    status_source: Literal['explicit', 'inferred', 'unknown'] = 'unknown'
+    status_confidence: Literal['high', 'medium', 'low', 'none'] = 'none'
+    status_reason: str | None = None
+    items: list[SeriesEditionItem] = Field(default_factory=list)
+
+
+class SeriesEditionGroupsData(BaseModel):
+    title: str | None = None
+    series_slug: str
+    source_url: str | None = None
+    groups: list[SeriesEditionGroup] = Field(default_factory=list)
+
+
+class SeriesEditionGroupsResponse(BaseEnvelope):
+    data: SeriesEditionGroupsData | None = None
+
+
+class EditionSearchResult(BaseModel):
+    title: str
+    slug: str
+    score: int
+    source_url: str | None = None
+    edition_groups: list[SeriesEditionGroup] = Field(default_factory=list)
+
+
+class EditionSearchData(BaseModel):
+    query: str
+    mode: Literal['best', 'all']
+    results: list[EditionSearchResult] = Field(default_factory=list)
+
+
+class EditionSearchResponse(BaseEnvelope):
+    data: EditionSearchData | None = None
+
+
 class ReleaseStateSeries(BaseModel):
     title: str | None = None
     slug: str | None = None

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Iterable
 from urllib.parse import urlparse
 
@@ -18,6 +18,8 @@ from app.models import (
     RelatedLinks,
     SearchResult,
     SeriesData,
+    SeriesEditionGroup,
+    SeriesEditionGroupsData,
     SeriesEditionItem,
     SeriesEditionsBlock,
     SeriesReleaseVolume,
@@ -1080,3 +1082,159 @@ def parse_series_editions_page(html: str, page_url: str, base_url: str, edition:
         raise ParseError('Unable to parse the editions list.')
     items.sort(key=lambda item: (int(item.number) if item.number and item.number.isdigit() else 999999, normalize_text(item.title)))
     return SeriesEditionsBlock(edition='vf' if edition == 'vf' else 'vo', source_url=page_url, total=len(items), items=items)
+
+
+def _edition_group_label(raw_heading: str) -> tuple[str, str]:
+    normalized = normalize_text(raw_heading)
+    if normalized.startswith('volumes de la serie') or normalized == 'volumes':
+        return 'edition_originale', 'Edition originale'
+    inferred = infer_volume_edition_label(raw_heading)
+    if inferred != 'edition_originale':
+        return inferred, clean_ws(raw_heading)
+    fallback = slugify(normalized).replace('-', '_') or 'inconnue'
+    return f'edition_{fallback}', clean_ws(raw_heading)
+
+
+def _edition_group_explicit_status(text: str) -> tuple[str, str, str, str | None]:
+    normalized = normalize_text(text)
+    if re.search(r'\b(termine|terminee|complete|acheve|achevee)\b', normalized):
+        return 'completed', 'explicit', 'high', 'The edition section explicitly reports a completed status.'
+    if re.search(r'\b(en cours|ongoing)\b', normalized):
+        return 'ongoing', 'explicit', 'high', 'The edition section explicitly reports an ongoing status.'
+    return 'unknown', 'unknown', 'none', None
+
+
+def _edition_group_items(container, *, base_url: str, edition_label: str) -> list[SeriesEditionItem]:
+    seen: set[str] = set()
+    items: list[SeriesEditionItem] = []
+    for anchor in container.find_all('a', href=True):
+        url = ensure_absolute_url(base_url, anchor.get('href', ''))
+        if not url or url in seen or '/index.php/manga/' not in url:
+            continue
+        if any(excluded in url for excluded in ['/manga/news/', '/manga/critique/', '/manga/avis/', '/manga/extrait/']):
+            continue
+        parsed_path = [part for part in urlparse(url).path.split('/') if part]
+        if len(parsed_path) < 4:
+            continue
+        series_slug = parsed_path[-2]
+        volume_slug = parsed_path[-1]
+        item_container = anchor.find_parent(['article', 'li', 'div', 'tr']) or anchor.parent
+        container_text = clean_ws(item_container.get_text(' ', strip=True)) if item_container else ''
+        title = _edition_item_title(anchor, container_text, volume_slug)
+        if not title:
+            continue
+        cover_image = None
+        if item_container:
+            image = item_container.find('img')
+            if image and image.get('src'):
+                cover_image = ensure_absolute_url(base_url, image['src'])
+        number = _guess_volume_number(title, volume_slug)
+        is_special, is_one_shot = infer_volume_flags(title)
+        seen.add(url)
+        items.append(
+            SeriesEditionItem(
+                title=title,
+                url=url,
+                series_slug=series_slug,
+                volume_slug=volume_slug,
+                number=number,
+                number_int=parse_volume_number_int(number),
+                edition_label=edition_label,
+                is_special=is_special,
+                is_one_shot=is_one_shot,
+                publication_date=_extract_publication_date_from_text(container_text),
+                cover_image=cover_image,
+            )
+        )
+    items.sort(key=lambda item: (item.number_int if item.number_int is not None else 999999, normalize_text(item.title)))
+    return items
+
+
+def _apply_edition_group_statuses(groups: list[SeriesEditionGroup], vf_status: EditionStatus | None) -> None:
+    original = next((group for group in groups if group.edition_label == 'edition_originale'), None)
+    if original and vf_status and vf_status.status:
+        status, source, confidence, reason = _edition_group_explicit_status(vf_status.status)
+        if status != 'unknown':
+            original.status = status
+            original.status_source = source
+            original.status_confidence = confidence
+            original.status_reason = f'Series metadata reports VF status "{vf_status.status}".'
+
+    consolidated_labels = {'perfect', 'deluxe', 'ultimate', 'kanzenban', 'double', 'triple', 'grand_format'}
+    if original and original.status == 'completed' and original.volume_count:
+        for group in groups:
+            if group.status != 'unknown' or group.edition_label not in consolidated_labels or not group.volume_count:
+                continue
+            ratio = original.volume_count / group.volume_count
+            expected_ratio = 2 if group.edition_label == 'double' else 3 if group.edition_label == 'triple' else None
+            ratio_is_supported = ratio in {2, 3} and (expected_ratio is None or ratio == expected_ratio)
+            if not ratio_is_supported:
+                continue
+            group.status = 'completed'
+            group.status_source = 'inferred'
+            group.status_confidence = 'medium'
+            group.status_reason = (
+                f'The completed original edition has {original.volume_count} volumes and this compiled edition '
+                f'has {group.volume_count}, an exact {int(ratio)}:1 ratio.'
+            )
+
+    for group in groups:
+        if group.status == 'completed':
+            group.total_volumes = group.volume_count
+
+
+def parse_series_edition_groups_page(
+    html: str,
+    page_url: str,
+    base_url: str,
+    series_slug: str,
+) -> SeriesEditionGroupsData:
+    soup = _soup(html)
+    lines = _lines(soup)
+    vf_status, _, _, _ = _extract_vf_vo(soup, lines, _normalized_lines(lines))
+    groups: list[SeriesEditionGroup] = []
+
+    for wrapper in soup.select('.boxedTitleWrapper'):
+        heading = wrapper.find(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+        raw_heading = clean_ws(heading.get_text(' ', strip=True)) if heading else ''
+        if not raw_heading:
+            continue
+        content = wrapper.find_next_sibling()
+        if content is None or 'boxedContent' not in (content.get('class') or []):
+            continue
+        edition_label, display_name = _edition_group_label(raw_heading)
+        items = _edition_group_items(content, base_url=base_url, edition_label=edition_label)
+        if not items:
+            continue
+        slug_counts = Counter(item.series_slug for item in items if item.series_slug)
+        dominant_slug = slug_counts.most_common(1)[0][0] if slug_counts else None
+        available_numbers = sorted({item.number_int for item in items if item.number_int is not None})
+        status, status_source, status_confidence, status_reason = _edition_group_explicit_status(
+            content.get_text(' ', strip=True)
+        )
+        groups.append(
+            SeriesEditionGroup(
+                edition_label=edition_label,
+                display_name=display_name,
+                raw_heading=raw_heading,
+                series_slug=dominant_slug,
+                volume_count=len(items),
+                highest_volume_number=max(available_numbers) if available_numbers else None,
+                available_numbers=available_numbers,
+                status=status,
+                status_source=status_source,
+                status_confidence=status_confidence,
+                status_reason=status_reason,
+                items=items,
+            )
+        )
+
+    if not groups:
+        raise ParseError('Unable to parse edition groups from the editions page.')
+    _apply_edition_group_statuses(groups, vf_status)
+    return SeriesEditionGroupsData(
+        title=_extract_page_title(soup, lines, kind='series'),
+        series_slug=series_slug,
+        source_url=page_url,
+        groups=groups,
+    )
