@@ -666,7 +666,7 @@ class MangaNewsService:
 
     async def _get_series_edition_groups_payload(self, *, series_slug: str):
         current_url = f'{self.base_url}/index.php/serie/editions/{series_slug}'
-        cache_key = versioned_cache_key('series-edition-groups-v1', series_slug)
+        cache_key = versioned_cache_key('series-edition-groups-v2', series_slug)
 
         async def loader():
             result = await self.fetcher.get_text(current_url)

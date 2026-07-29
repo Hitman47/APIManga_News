@@ -480,6 +480,42 @@ def test_parse_series_edition_groups_page_scopes_sections_and_reports_status_pro
     assert all('Please-save-my-earth' not in item.url for group in parsed.groups for item in group.items)
 
 
+def test_parse_series_edition_groups_page_infers_fullmetal_perfect_from_three_to_two_ratio():
+    original_links = ''.join(
+        f'<div><a href="/index.php/manga/FullMetal-Alchemist/vol-{number}">Vol.{number}</a></div>'
+        for number in range(1, 28)
+    )
+    perfect_links = ''.join(
+        f'<div><a href="/index.php/manga/FullMetal-Alchemist-Edition-Perfect/vol-{number}">Perfect Vol.{number}</a></div>'
+        for number in range(1, 19)
+    )
+    html = f'''
+    <html><body>
+      <h1>FullMetal Alchemist</h1>
+      <div id="numberblock"><div><span class="version">VF</span>: 27 (Termine)</div></div>
+      <div class="boxedTitleWrapper"><h2>Les volumes de la serie</h2></div>
+      <div class="boxedContent">{original_links}</div>
+      <div class="boxedTitleWrapper"><h2>Edition Perfect</h2></div>
+      <div class="boxedContent">{perfect_links}</div>
+    </body></html>
+    '''
+
+    parsed = parse_series_edition_groups_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/FullMetal-Alchemist',
+        'https://www.manga-news.com',
+        'FullMetal-Alchemist',
+    )
+
+    perfect = next(group for group in parsed.groups if group.edition_label == 'perfect')
+    assert perfect.volume_count == 18
+    assert perfect.total_volumes == 18
+    assert perfect.status == 'completed'
+    assert perfect.status_source == 'inferred'
+    assert perfect.status_confidence == 'medium'
+    assert perfect.status_reason and 'exact 3:2 ratio' in perfect.status_reason
+
+
 def test_parse_series_page_numberblock_markup():
     html = '''
     <html>

@@ -1,5 +1,9 @@
 ## 2026-07-29 - groupes d'editions VF
 
+- Correction de FullMetal Alchemist Perfect : le ratio compile exact 3:2
+  (`27 / 18`) produit desormais `completed/inferred` avec confiance `medium`.
+- Invalidation ciblee du cache des groupes d'editions pour appliquer la regle
+  immediatement apres mise a jour.
 - Ajout de `GET /series/{slug}/edition-groups` et `GET /search/editions`.
 - Ajout de `edition_label` facultatif sur la recherche de volume par numero et
   sur le calcul dernier/prochain tome.

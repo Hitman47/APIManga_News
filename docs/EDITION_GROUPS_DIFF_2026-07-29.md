@@ -34,3 +34,11 @@ l'edition Perfect 9 tomes. Le statut original est explicite; celui de la Perfect
 est marque `inferred` avec sa justification, jamais comme une source explicite.
 
 La documentation complete est dans [EDITION_GROUPS.md](EDITION_GROUPS.md).
+
+## Correctif FullMetal Alchemist Perfect
+
+- ajout du ratio compile exact 3:2 aux deductions autorisees ;
+- `27 / 18` produit maintenant `completed`, `inferred`, `medium` ;
+- les ratios `double=2:1` et `triple=3:1` restent stricts ;
+- versionnement de la cle de cache pour ne pas reutiliser l'ancien statut
+  `unknown` apres deploiement.

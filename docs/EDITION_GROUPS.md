@@ -98,7 +98,13 @@ Manga-News.
 Une inference de fin n'est appliquee qu'aux editions compilees connues
 (`perfect`, `deluxe`, `ultimate`, `kanzenban`, `double`, `triple`,
 `grand_format`), lorsque l'edition originale est explicitement terminee et que
-le ratio observe vaut exactement 2:1 ou 3:1. Sinon, le statut reste `unknown`.
+le ratio observe vaut exactement 3:2, 2:1 ou 3:1. Les groupes `double` et
+`triple` exigent respectivement 2:1 et 3:1. Sinon, le statut reste `unknown`.
+
+Exemples couverts : Eden Perfect utilise 18/9, soit 2:1; FullMetal Alchemist
+Perfect utilise 27/18, soit 3:2. Dans les deux cas, le statut est
+`completed/inferred` avec une confiance `medium`, et non une declaration
+explicite de Manga-News.
 
 ## Selectionner une edition par numero
 

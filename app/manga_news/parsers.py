@@ -1165,17 +1165,22 @@ def _apply_edition_group_statuses(groups: list[SeriesEditionGroup], vf_status: E
         for group in groups:
             if group.status != 'unknown' or group.edition_label not in consolidated_labels or not group.volume_count:
                 continue
-            ratio = original.volume_count / group.volume_count
-            expected_ratio = 2 if group.edition_label == 'double' else 3 if group.edition_label == 'triple' else None
-            ratio_is_supported = ratio in {2, 3} and (expected_ratio is None or ratio == expected_ratio)
-            if not ratio_is_supported:
+            ratio_label = None
+            if original.volume_count * 2 == group.volume_count * 3:
+                ratio_label = '3:2'
+            elif original.volume_count == group.volume_count * 2:
+                ratio_label = '2:1'
+            elif original.volume_count == group.volume_count * 3:
+                ratio_label = '3:1'
+            expected_ratio = '2:1' if group.edition_label == 'double' else '3:1' if group.edition_label == 'triple' else None
+            if ratio_label is None or (expected_ratio is not None and ratio_label != expected_ratio):
                 continue
             group.status = 'completed'
             group.status_source = 'inferred'
             group.status_confidence = 'medium'
             group.status_reason = (
                 f'The completed original edition has {original.volume_count} volumes and this compiled edition '
-                f'has {group.volume_count}, an exact {int(ratio)}:1 ratio.'
+                f'has {group.volume_count}, an exact {ratio_label} ratio.'
             )
 
     for group in groups:
