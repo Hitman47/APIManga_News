@@ -449,6 +449,81 @@ def test_parse_series_editions_page_handles_image_only_volume_links():
     assert parsed.items[1].number_int == 2
 
 
+def test_parse_series_editions_page_ignores_sidebar_volumes_and_keeps_unnumbered_integral():
+    html = '''<html><body>
+      <aside><a href="/index.php/manga/Baptism-Perfect-Edition/vol-1">Baptism Vol.1</a></aside>
+      <div class="boxedTitleWrapper"><h2>Intégrale</h2></div>
+      <div class="boxedContent"><div class="serieVolumesImgBlock">
+        <a href="/index.php/manga/Amo-Chasseuse-de-Dieux-Integrale" title="Amo - Chasseuse de Dieux - Intégrale">
+          <img src="/covers/amo.jpg" /></a>
+      </div></div>
+    </body></html>'''
+
+    parsed = parse_series_editions_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/Amo-Chasseuse-de-Dieux',
+        'https://www.manga-news.com',
+        'vf',
+    )
+
+    assert parsed.total == 1
+    assert parsed.items[0].series_slug == 'Amo-Chasseuse-de-Dieux-Integrale'
+    assert parsed.items[0].volume_slug is None
+    assert parsed.items[0].number_int is None
+
+
+def test_parse_series_editions_page_legacy_links_require_matching_series():
+    html = '''<html><body>
+      <a href="/index.php/manga/Baptism-Perfect-Edition/vol-1">Recommendation</a>
+      <a href="/index.php/manga/One-Piece/vol-1">One Piece Vol.1</a>
+    </body></html>'''
+    parsed = parse_series_editions_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale',
+        'https://www.manga-news.com',
+        'vf',
+    )
+    assert parsed.total == 1
+    assert parsed.items[0].series_slug == 'One-Piece'
+
+
+def test_parse_series_editions_page_preserves_vo_with_a_different_slug():
+    html = '''<html><body>
+      <div class="boxedTitleWrapper"><h2>Original edition</h2></div>
+      <div class="boxedContent"><a href="/index.php/manga/Japanese-Original-Title/vol-1">Vol.1</a></div>
+    </body></html>'''
+    parsed = parse_series_editions_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editionsVo/French-Series-Title',
+        'https://www.manga-news.com',
+        'vo',
+    )
+    assert parsed.total == 1
+    assert parsed.items[0].series_slug == 'Japanese-Original-Title'
+
+
+def test_parse_series_edition_groups_page_accepts_direct_integral_and_rejects_other_series():
+    html = '''<html><body>
+      <h1>Amo - Chasseuse de Dieux</h1>
+      <aside><a href="/index.php/manga/Baptism-Perfect-Edition/vol-1">Baptism Vol.1</a></aside>
+      <div class="boxedTitleWrapper"><h2>Intégrale</h2></div>
+      <div class="boxedContent">
+        <a href="/index.php/manga/Amo-Chasseuse-de-Dieux-Integrale" title="Amo - Chasseuse de Dieux - Intégrale">Amo</a>
+        <a href="/index.php/manga/Baptism-Perfect-Edition/vol-1">Baptism Vol.1</a>
+      </div>
+    </body></html>'''
+    parsed = parse_series_edition_groups_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/Amo-Chasseuse-de-Dieux',
+        'https://www.manga-news.com',
+        'Amo-Chasseuse-de-Dieux',
+    )
+    assert len(parsed.groups) == 1
+    assert parsed.groups[0].volume_count == 1
+    assert parsed.groups[0].items[0].series_slug == 'Amo-Chasseuse-de-Dieux-Integrale'
+    assert parsed.groups[0].items[0].volume_slug is None
+
+
 def test_parse_series_edition_groups_page_scopes_sections_and_reports_status_provenance():
     html = (FIXTURES_DIR / 'series_eden_editions_current.html').read_text(encoding='utf-8')
 

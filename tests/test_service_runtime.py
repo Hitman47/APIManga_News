@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.cache import SQLiteCache
-from app.exceptions import ParseError
+from app.exceptions import ParseError, ResourceNotFound
 from app.manga_news.service import (
     CACHE_SCHEMA_VERSION,
     MangaNewsService,
@@ -788,6 +788,67 @@ async def test_get_volume_by_number_resolves_volume_slug_from_vf_editions(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_get_volume_by_number_rejects_unrelated_cached_volume(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_editions(**kwargs):
+        return Envelope(data={
+            'title': 'Amo - Chasseuse de Dieux',
+            'series_slug': 'Amo-Chasseuse-de-Dieux',
+            'vf': {'edition': 'vf', 'total': 1, 'items': [{
+                'title': 'Vol.1 Baptism - Perfect Edition',
+                'url': 'https://www.manga-news.com/index.php/manga/Baptism-Perfect-Edition/vol-1',
+                'series_slug': 'Baptism-Perfect-Edition',
+                'volume_slug': 'vol-1',
+                'number': '1', 'number_int': 1,
+            }]},
+        })
+
+    async def unexpected_get_volume(**kwargs):
+        raise AssertionError('An unrelated volume must never be fetched.')
+
+    service.get_series_editions = fake_get_series_editions
+    service.get_volume = unexpected_get_volume
+    with pytest.raises(ResourceNotFound):
+        await service.get_volume_by_number(series_slug='Amo-Chasseuse-de-Dieux', number=1)
+
+
+@pytest.mark.asyncio
+async def test_get_volume_by_number_resolves_sole_unnumbered_integral(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_editions(**kwargs):
+        return Envelope(data={
+            'title': 'Amo - Chasseuse de Dieux',
+            'series_slug': 'Amo-Chasseuse-de-Dieux',
+            'vf': {'edition': 'vf', 'total': 1, 'items': [{
+                'title': 'Amo - Chasseuse de Dieux - Intégrale',
+                'url': 'https://www.manga-news.com/index.php/manga/Amo-Chasseuse-de-Dieux-Integrale',
+                'series_slug': 'Amo-Chasseuse-de-Dieux-Integrale',
+                'volume_slug': None, 'number': None, 'number_int': None,
+            }]},
+        })
+
+    async def fake_get_volume(**kwargs):
+        assert kwargs['url'].endswith('/Amo-Chasseuse-de-Dieux-Integrale')
+        return Envelope(data={'title': 'Amo - Chasseuse de Dieux - Intégrale', 'number': None})
+
+    service.get_series_editions = fake_get_series_editions
+    service.get_volume = fake_get_volume
+    payload = await service.get_volume_by_number(series_slug='Amo-Chasseuse-de-Dieux', number=1)
+    assert payload.data['number'] == '1'
+    assert any('inferred' in warning for warning in payload.warnings)
+
+
+@pytest.mark.asyncio
 async def test_get_series_edition_groups_reuses_full_cached_parse_for_compact_response(tmp_path: Path):
     html = Path('tests/fixtures/series_eden_editions_current.html').read_text(encoding='utf-8')
     fetcher = CountingFetcher(html)
@@ -868,6 +929,41 @@ async def test_get_volume_by_number_selects_requested_edition_group(tmp_path: Pa
         'include_raw_sections': False,
         'include_parent_editions': None,
     }]
+
+
+@pytest.mark.asyncio
+async def test_get_volume_by_number_rejects_unrelated_requested_edition_group_item(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_edition_groups(**kwargs):
+        return Envelope(data={
+            'title': 'Amo - Chasseuse de Dieux',
+            'series_slug': 'Amo-Chasseuse-de-Dieux',
+            'groups': [{
+                'edition_label': 'perfect', 'display_name': 'Edition Perfect',
+                'raw_heading': 'Edition Perfect', 'series_slug': 'Baptism-Perfect-Edition',
+                'volume_count': 1, 'items': [{
+                    'title': 'Vol.1 Baptism - Perfect Edition',
+                    'url': 'https://www.manga-news.com/index.php/manga/Baptism-Perfect-Edition/vol-1',
+                    'series_slug': 'Baptism-Perfect-Edition', 'volume_slug': 'vol-1',
+                    'number': '1', 'number_int': 1, 'edition_label': 'perfect',
+                }],
+            }],
+        })
+
+    async def unexpected_get_volume(**kwargs):
+        raise AssertionError('An unrelated volume must never be fetched.')
+
+    service.get_series_edition_groups = fake_get_series_edition_groups
+    service.get_volume = unexpected_get_volume
+    with pytest.raises(ResourceNotFound):
+        await service.get_volume_by_number(
+            series_slug='Amo-Chasseuse-de-Dieux', number=1, edition_label='perfect',
+        )
 
 
 def test_release_state_edition_filter_does_not_let_original_volume_overwrite_selected_group(tmp_path: Path):
