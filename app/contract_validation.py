@@ -11,8 +11,10 @@ from app.models import (
     HealthResponse,
     NewsResponse,
     PlanningResponse,
+    ReleaseStateResponse,
     ResolveResponse,
     SearchResponse,
+    SeriesEditionGroupsResponse,
     SeriesEditionsResponse,
     SeriesRelatedResponse,
     SeriesResponse,
@@ -31,6 +33,9 @@ EXAMPLE_MODEL_MAP = {
     'planning_example.json': PlanningResponse,
     'series_related_one_piece.json': SeriesRelatedResponse,
     'series_editions_one_piece.json': SeriesEditionsResponse,
+    'edition_groups_eden.json': SeriesEditionGroupsResponse,
+    'release_state_one_piece.json': ReleaseStateResponse,
+    'release_state_atom.json': ReleaseStateResponse,
     'error_resource_not_found.json': ApiErrorResponse,
     'error_upstream_parse.json': ApiErrorResponse,
 }
@@ -61,13 +66,17 @@ def validate_openapi_schema(schema: dict[str, Any] | None = None) -> list[str]:
     required_paths = {
         '/health',
         '/search',
+        '/search/editions',
         '/search/resolve',
         '/series/{slug}',
         '/series/by-url',
         '/series/{slug}/related',
         '/series/by-url/related',
         '/series/{slug}/editions',
+        '/series/{slug}/edition-groups',
+        '/series/{slug}/release-state',
         '/series/by-url/editions',
+        '/volume/{series_slug}/number/{number}',
         '/volume/{series_slug}/{volume_slug}',
         '/volume/by-url',
         '/news/global',
@@ -87,7 +96,7 @@ def validate_openapi_schema(schema: dict[str, Any] | None = None) -> list[str]:
     if not info.get('description'):
         errors.append('OpenAPI info.description is empty.')
 
-    for path in ['/search', '/search/resolve', '/series/{slug}', '/volume/{series_slug}/{volume_slug}', '/planning']:
+    for path in ['/search', '/search/editions', '/search/resolve', '/series/{slug}', '/series/{slug}/edition-groups', '/series/{slug}/release-state', '/volume/{series_slug}/number/{number}', '/volume/{series_slug}/{volume_slug}', '/planning']:
         operation = (paths.get(path) or {}).get('get') or {}
         if not operation.get('summary'):
             errors.append(f'OpenAPI summary missing for {path}')

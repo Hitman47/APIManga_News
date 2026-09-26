@@ -1,0 +1,9 @@
+services:
+  manga-news-api-v2:
+    image: manga-news-api:v2-local
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.12-slim}

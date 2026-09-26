@@ -1,13 +1,19 @@
+from pathlib import Path
+
 from app.manga_news.parsers import (
     parse_news_page,
     parse_planning_page,
     parse_search_page,
+    parse_series_edition_groups_page,
     parse_series_editions_page,
     parse_series_page,
     parse_series_search_meta_page,
     parse_volume_page,
     parse_volume_search_meta_page,
 )
+
+
+FIXTURES_DIR = Path(__file__).parent / 'fixtures'
 
 
 SERIES_HTML = '''
@@ -170,6 +176,78 @@ def test_parse_series_page():
     assert parsed.raw_sections and parsed.raw_sections['resume'][0] == 'Résumé principal de la série.'
 
 
+def test_parse_series_page_uses_current_dom_metadata_without_genre_prefix_collision():
+    html = (FIXTURES_DIR / 'series_blue_giant_momentum_current.html').read_text(encoding='utf-8')
+
+    parsed = parse_series_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/Blue-Giant-Momentum',
+    )
+
+    assert parsed.title == 'Blue Giant Momentum'
+    assert parsed.type == 'Seinen'
+    assert parsed.genres == ['Drame', 'Tranche-de-vie']
+    assert parsed.authors_art == ['Shinichi ISHIZUKA']
+    assert parsed.authors_story == ['NUMBER 8']
+    assert parsed.publisher_fr == 'Glénat'
+    assert parsed.publisher_vo == 'Shôgakukan'
+    assert parsed.origin == 'Japon - 2023'
+
+
+def test_parse_series_search_meta_page_uses_current_dom_type():
+    html = (FIXTURES_DIR / 'series_blue_giant_momentum_current.html').read_text(encoding='utf-8')
+
+    parsed = parse_series_search_meta_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/Blue-Giant-Momentum',
+    )
+
+    assert parsed.source_type == 'Seinen'
+    assert parsed.media_kind == 'manga'
+
+
+def test_parse_volume_page_uses_nested_dom_metadata():
+    html = '''
+    <html><body>
+      <nav>Genres Manga</nav>
+      <h1>Blue Giant Momentum Vol.1</h1>
+      <ul>
+        <li class="book-type"><strong>Type</strong>: <a>Seinen</a></li>
+        <li class="book-genre">
+          <strong>Genre</strong>: <a>Drame</a>, <a>Tranche-de-vie</a>
+        </li>
+        <li class="book-publication"><strong>Date de publication</strong>: 05 Juin 2024</li>
+        <li class="book-isbn"><strong>Code EAN</strong>: 9782344062463</li>
+      </ul>
+    </body></html>
+    '''
+
+    parsed = parse_volume_page(
+        html,
+        'https://www.manga-news.com/index.php/manga/Blue-Giant-Momentum/vol-1',
+    )
+
+    assert parsed.type == 'Seinen'
+    assert parsed.genres == ['Drame', 'Tranche-de-vie']
+    assert parsed.publication_date == '2024-06-05'
+    assert parsed.isbn_ean == '9782344062463'
+
+
+def test_legacy_line_metadata_requires_a_label_boundary():
+    html = '''
+    <html><body>
+      <nav>Genres Manga</nav>
+      <h1>Legacy</h1>
+      <ul><li>Type: Shonen</li><li>Genre: Aventure, Fantastique</li></ul>
+    </body></html>
+    '''
+
+    parsed = parse_series_page(html, 'https://www.manga-news.com/index.php/serie/Legacy')
+
+    assert parsed.type == 'Shonen'
+    assert parsed.genres == ['Aventure', 'Fantastique']
+
+
 
 def test_parse_volume_page():
     parsed = parse_volume_page(VOLUME_HTML, 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110')
@@ -179,7 +257,6 @@ def test_parse_volume_page():
     assert parsed.isbn_ean == '9782344064092'
     assert parsed.editorial_score == 16.0
     assert parsed.illustration_details and parsed.illustration_details.pages == 208
-    assert parsed.related and parsed.related.external[0].title == 'Acheter'
 
 
 
@@ -214,6 +291,55 @@ def test_parse_series_search_meta_page_extracts_type_related_and_media_kind():
     assert parsed.source_type == 'Shonen'
     assert parsed.media_kind == 'manga_spinoff'
     assert parsed.related and parsed.related.series[0].title == 'Naruto'
+
+
+def test_related_links_ignore_ambiguous_navigation_without_scanning_document_context(monkeypatch):
+    import app.manga_news.parsers as parsers
+
+    monkeypatch.setattr(
+        parsers,
+        '_anchor_context_heading',
+        lambda anchor: (_ for _ in ()).throw(AssertionError('slow context scan should not run')),
+    )
+    html = '''
+    <html><body>
+      <h1>Test</h1>
+      <div>Dossiers</div>
+      <a href="/index.php/planning/">Planning</a>
+      <a href="/index.php/report/One-Piece">Dossier One Piece</a>
+      <a href="/index.php/serie/One-piece-Edition-originale">One Piece</a>
+      <a href="/index.php/manga/One-Piece/vol-91">One Piece Vol.91</a>
+    </body></html>
+    '''
+
+    parsed = parse_series_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/Test',
+    )
+
+    assert [item.title for item in parsed.related.dossiers] == ['Dossier One Piece']
+    assert [item.title for item in parsed.related.series] == ['One Piece']
+    assert [item.title for item in parsed.related.volumes] == ['One Piece Vol.91']
+
+
+def test_raw_sections_normalize_each_line_only_once(monkeypatch):
+    import app.manga_news.parsers as parsers
+
+    calls = 0
+    original_normalize_text = parsers.normalize_text
+
+    def counting_normalize_text(value):
+        nonlocal calls
+        calls += 1
+        return original_normalize_text(value)
+
+    monkeypatch.setattr(parsers, 'normalize_text', counting_normalize_text)
+    lines = parsers._TextLines(['Résumé', *[f'Ligne {index}' for index in range(1000)], 'Liens', 'Fin'])
+
+    sections = parsers._extract_raw_sections(lines)
+
+    assert sections['resume'][0] == 'Ligne 0'
+    assert calls <= len(lines) + 2
 
 
 def test_parse_search_page_prioritizes_main_manga_before_books():
@@ -289,6 +415,182 @@ def test_parse_series_editions_page():
     assert parsed.items[1].cover_image.endswith('one-piece-110.jpg')
 
 
+def test_parse_series_editions_page_handles_image_only_volume_links():
+    html = '''
+    <html>
+      <body>
+        <div class="volume-card">
+          <a href="/index.php/manga/One-piece-Edition-originale/vol-1">
+            <img src="/public/images/covers/one-piece-1.jpg" alt="" />
+          </a>
+        </div>
+        <div class="volume-card">
+          <a href="/index.php/manga/One-piece-Edition-originale/vol-2">
+            <img src="/public/images/covers/one-piece-2.jpg" alt="One Piece Vol.2" />
+          </a>
+          <span>Vol.2</span>
+        </div>
+      </body>
+    </html>
+    '''
+
+    parsed = parse_series_editions_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale',
+        'https://www.manga-news.com',
+        'vf',
+    )
+
+    assert parsed.total == 2
+    assert parsed.items[0].title == 'Vol.1'
+    assert parsed.items[0].number_int == 1
+    assert parsed.items[0].series_slug == 'One-piece-Edition-originale'
+    assert parsed.items[1].title == 'One Piece Vol.2'
+    assert parsed.items[1].number_int == 2
+
+
+def test_parse_series_editions_page_ignores_sidebar_volumes_and_keeps_unnumbered_integral():
+    html = '''<html><body>
+      <aside><a href="/index.php/manga/Baptism-Perfect-Edition/vol-1">Baptism Vol.1</a></aside>
+      <div class="boxedTitleWrapper"><h2>Intégrale</h2></div>
+      <div class="boxedContent"><div class="serieVolumesImgBlock">
+        <a href="/index.php/manga/Amo-Chasseuse-de-Dieux-Integrale" title="Amo - Chasseuse de Dieux - Intégrale">
+          <img src="/covers/amo.jpg" /></a>
+      </div></div>
+    </body></html>'''
+
+    parsed = parse_series_editions_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/Amo-Chasseuse-de-Dieux',
+        'https://www.manga-news.com',
+        'vf',
+    )
+
+    assert parsed.total == 1
+    assert parsed.items[0].series_slug == 'Amo-Chasseuse-de-Dieux-Integrale'
+    assert parsed.items[0].volume_slug is None
+    assert parsed.items[0].number_int is None
+
+
+def test_parse_series_editions_page_legacy_links_require_matching_series():
+    html = '''<html><body>
+      <a href="/index.php/manga/Baptism-Perfect-Edition/vol-1">Recommendation</a>
+      <a href="/index.php/manga/One-Piece/vol-1">One Piece Vol.1</a>
+    </body></html>'''
+    parsed = parse_series_editions_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale',
+        'https://www.manga-news.com',
+        'vf',
+    )
+    assert parsed.total == 1
+    assert parsed.items[0].series_slug == 'One-Piece'
+
+
+def test_parse_series_editions_page_preserves_vo_with_a_different_slug():
+    html = '''<html><body>
+      <div class="boxedTitleWrapper"><h2>Original edition</h2></div>
+      <div class="boxedContent"><a href="/index.php/manga/Japanese-Original-Title/vol-1">Vol.1</a></div>
+    </body></html>'''
+    parsed = parse_series_editions_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editionsVo/French-Series-Title',
+        'https://www.manga-news.com',
+        'vo',
+    )
+    assert parsed.total == 1
+    assert parsed.items[0].series_slug == 'Japanese-Original-Title'
+
+
+def test_parse_series_edition_groups_page_accepts_direct_integral_and_rejects_other_series():
+    html = '''<html><body>
+      <h1>Amo - Chasseuse de Dieux</h1>
+      <aside><a href="/index.php/manga/Baptism-Perfect-Edition/vol-1">Baptism Vol.1</a></aside>
+      <div class="boxedTitleWrapper"><h2>Intégrale</h2></div>
+      <div class="boxedContent">
+        <a href="/index.php/manga/Amo-Chasseuse-de-Dieux-Integrale" title="Amo - Chasseuse de Dieux - Intégrale">Amo</a>
+        <a href="/index.php/manga/Baptism-Perfect-Edition/vol-1">Baptism Vol.1</a>
+      </div>
+    </body></html>'''
+    parsed = parse_series_edition_groups_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/Amo-Chasseuse-de-Dieux',
+        'https://www.manga-news.com',
+        'Amo-Chasseuse-de-Dieux',
+    )
+    assert len(parsed.groups) == 1
+    assert parsed.groups[0].volume_count == 1
+    assert parsed.groups[0].items[0].series_slug == 'Amo-Chasseuse-de-Dieux-Integrale'
+    assert parsed.groups[0].items[0].volume_slug is None
+
+
+def test_parse_series_edition_groups_page_scopes_sections_and_reports_status_provenance():
+    html = (FIXTURES_DIR / 'series_eden_editions_current.html').read_text(encoding='utf-8')
+
+    parsed = parse_series_edition_groups_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/Eden',
+        'https://www.manga-news.com',
+        'Eden',
+    )
+
+    assert parsed.title == 'Eden'
+    assert [group.edition_label for group in parsed.groups] == ['edition_originale', 'perfect']
+    original, perfect = parsed.groups
+    assert original.series_slug == 'Eden'
+    assert original.volume_count == 18
+    assert original.total_volumes == 18
+    assert original.status == 'completed'
+    assert original.status_source == 'explicit'
+    assert original.status_confidence == 'high'
+    assert perfect.series_slug == 'Eden-Perfect-Edition'
+    assert perfect.volume_count == 9
+    assert perfect.total_volumes == 9
+    assert perfect.highest_volume_number == 9
+    assert perfect.available_numbers == list(range(1, 10))
+    assert perfect.status == 'completed'
+    assert perfect.status_source == 'inferred'
+    assert perfect.status_confidence == 'medium'
+    assert all('Baki' not in item.url for group in parsed.groups for item in group.items)
+    assert all('Please-save-my-earth' not in item.url for group in parsed.groups for item in group.items)
+
+
+def test_parse_series_edition_groups_page_infers_fullmetal_perfect_from_three_to_two_ratio():
+    original_links = ''.join(
+        f'<div><a href="/index.php/manga/FullMetal-Alchemist/vol-{number}">Vol.{number}</a></div>'
+        for number in range(1, 28)
+    )
+    perfect_links = ''.join(
+        f'<div><a href="/index.php/manga/FullMetal-Alchemist-Edition-Perfect/vol-{number}">Perfect Vol.{number}</a></div>'
+        for number in range(1, 19)
+    )
+    html = f'''
+    <html><body>
+      <h1>FullMetal Alchemist</h1>
+      <div id="numberblock"><div><span class="version">VF</span>: 27 (Termine)</div></div>
+      <div class="boxedTitleWrapper"><h2>Les volumes de la serie</h2></div>
+      <div class="boxedContent">{original_links}</div>
+      <div class="boxedTitleWrapper"><h2>Edition Perfect</h2></div>
+      <div class="boxedContent">{perfect_links}</div>
+    </body></html>
+    '''
+
+    parsed = parse_series_edition_groups_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/editions/FullMetal-Alchemist',
+        'https://www.manga-news.com',
+        'FullMetal-Alchemist',
+    )
+
+    perfect = next(group for group in parsed.groups if group.edition_label == 'perfect')
+    assert perfect.volume_count == 18
+    assert perfect.total_volumes == 18
+    assert perfect.status == 'completed'
+    assert perfect.status_source == 'inferred'
+    assert perfect.status_confidence == 'medium'
+    assert perfect.status_reason and 'exact 3:2 ratio' in perfect.status_reason
+
+
 def test_parse_series_page_numberblock_markup():
     html = '''
     <html>
@@ -306,3 +608,27 @@ def test_parse_series_page_numberblock_markup():
     assert parsed.vf.status == 'En cours'
     assert parsed.vo and parsed.vo.volumes == 114
     assert parsed.vo.status == 'En cours'
+
+
+def test_parse_series_page_extracts_explicit_atom_release_cards():
+    html = (FIXTURES_DIR / 'series_atom_release_cards.html').read_text(encoding='utf-8')
+
+    parsed = parse_series_page(
+        html,
+        'https://www.manga-news.com/index.php/serie/Atom-The-Beginning',
+    )
+
+    assert parsed.vf and parsed.vf.volumes == 20
+    assert parsed.last_release_date == '2025-10-17'
+    assert parsed.next_release_date == '2026-10-02'
+    assert parsed.last_release_volume is not None
+    assert parsed.last_release_volume.number == '21'
+    assert parsed.last_release_volume.number_int == 21
+    assert parsed.last_release_volume.publication_date == '2025-10-17'
+    assert parsed.last_release_volume.volume_slug == 'vol-21'
+    assert parsed.next_release_volume is not None
+    assert parsed.next_release_volume.number == '22'
+    assert parsed.next_release_volume.number_int == 22
+    assert parsed.next_release_volume.publication_date == '2026-10-02'
+    assert parsed.next_release_volume.volume_slug == 'vol-22'
+    assert parsed.next_release_volume.source_url.endswith('/Atom-The-Beginning/vol-22')

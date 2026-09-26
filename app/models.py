@@ -154,6 +154,20 @@ class RelatedLinks(BaseModel):
     misc: list[LinkItem] = Field(default_factory=list)
 
 
+class SeriesReleaseVolume(BaseModel):
+    title: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    publication_date: str | None = None
+    source_url: str | None = None
+    series_slug: str | None = None
+    volume_slug: str | None = None
+    cover_image: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
+    edition_label: str | None = None
+
+
 class SeriesData(BaseModel):
     title: str | None = None
     title_vo: str | None = None
@@ -177,6 +191,8 @@ class SeriesData(BaseModel):
     vo: EditionStatus | None = None
     last_release_date: str | None = None
     next_release_date: str | None = None
+    last_release_volume: SeriesReleaseVolume | None = None
+    next_release_volume: SeriesReleaseVolume | None = None
     stats: SeriesStats | None = None
     themes: list[str] = Field(default_factory=list)
     strengths: str | None = None
@@ -243,7 +259,6 @@ class VolumeData(BaseModel):
     vo: EditionStatus | None = None
     editorial_score: float | None = None
     reader_score: float | None = None
-    related: RelatedLinks | None = None
     raw_sections: dict[str, list[str]] | None = None
     source_url: str | None = None
 
@@ -319,6 +334,94 @@ class SeriesEditionsData(BaseModel):
 
 class SeriesEditionsResponse(BaseEnvelope):
     data: SeriesEditionsData | None = None
+
+
+class SeriesEditionGroup(BaseModel):
+    edition_label: str
+    display_name: str
+    raw_heading: str
+    series_slug: str | None = None
+    volume_count: int = 0
+    total_volumes: int | None = None
+    highest_volume_number: int | None = None
+    available_numbers: list[int] = Field(default_factory=list)
+    status: Literal['completed', 'ongoing', 'unknown'] = 'unknown'
+    status_source: Literal['explicit', 'inferred', 'unknown'] = 'unknown'
+    status_confidence: Literal['high', 'medium', 'low', 'none'] = 'none'
+    status_reason: str | None = None
+    items: list[SeriesEditionItem] = Field(default_factory=list)
+
+
+class SeriesEditionGroupsData(BaseModel):
+    title: str | None = None
+    series_slug: str
+    source_url: str | None = None
+    groups: list[SeriesEditionGroup] = Field(default_factory=list)
+
+
+class SeriesEditionGroupsResponse(BaseEnvelope):
+    data: SeriesEditionGroupsData | None = None
+
+
+class EditionSearchResult(BaseModel):
+    title: str
+    slug: str
+    score: int
+    source_url: str | None = None
+    edition_groups: list[SeriesEditionGroup] = Field(default_factory=list)
+
+
+class EditionSearchData(BaseModel):
+    query: str
+    mode: Literal['best', 'all']
+    results: list[EditionSearchResult] = Field(default_factory=list)
+
+
+class EditionSearchResponse(BaseEnvelope):
+    data: EditionSearchData | None = None
+
+
+class ReleaseStateSeries(BaseModel):
+    title: str | None = None
+    slug: str | None = None
+    publisher_fr: str | None = None
+    vf: EditionStatus | None = None
+    source_url: str | None = None
+
+
+class ReleaseStateVolume(BaseModel):
+    title: str | None = None
+    number: str | None = None
+    number_int: int | None = None
+    publication_date: str | None = None
+    isbn_ean: str | None = None
+    source_url: str | None = None
+    series_slug: str | None = None
+    volume_slug: str | None = None
+    is_special: bool | None = None
+    is_one_shot: bool | None = None
+    edition_label: str | None = None
+
+
+class ReleaseStateData(BaseModel):
+    series: ReleaseStateSeries
+    last_released: ReleaseStateVolume | None = None
+    next_release: ReleaseStateVolume | None = None
+    status: Literal[
+        'FOUND_CONFIRMED',
+        'FOUND_NO_UPCOMING',
+        'FOUND_NO_RELEASED',
+        'FOUND_EMPTY_EDITIONS',
+        'FOUND_PARTIAL',
+        'NO_MATCH',
+        'PARSE_ERROR',
+    ]
+    confidence: Literal['high', 'medium', 'low', 'none']
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ReleaseStateResponse(BaseEnvelope):
+    data: ReleaseStateData | None = None
 
 
 class SeriesRelatedData(BaseModel):

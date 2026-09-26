@@ -46,6 +46,12 @@ flowchart LR
    - extraient les champs normalisés ;
    - lèvent `ParseError` quand la page n'est pas exploitable.
 
+### Métadonnées de fiches
+
+Les fiches série et volume construisent un index des métadonnées en un parcours des libellés DOM structurés. Les correspondances sont exactes, puis un fallback texte à frontière stricte prend en charge l’ancien format `Libellé: valeur`.
+
+Cette approche évite les collisions de préfixe comme `Genre` / `Genres Manga` et reconstitue les valeurs réparties dans plusieurs nœuds HTML. Voir [`METADATA_PARSING.md`](METADATA_PARSING.md) pour le fonctionnement détaillé.
+
 ## Flux de cache
 
 ```mermaid
@@ -63,6 +69,8 @@ flowchart TD
     K -- Oui --> L[Retour stale + warning]
     K -- Non --> M[Erreur]
 ```
+
+Les clés des JSON dépendants du parseur contiennent une révision supplémentaire. Une nouvelle révision recalcule les fiches et recherches agrégées, mais conserve le cache du HTML source afin de limiter les appels upstream.
 
 ## Search vs search/resolve
 

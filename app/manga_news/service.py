@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from copy import deepcopy
 from datetime import date
@@ -19,22 +20,34 @@ from app.logging_utils import log_event
 from app.http import AsyncFetcher
 from app.metrics import MetricsStore
 from app.models import (
+    EditionSearchData,
+    EditionSearchResult,
+    EditionStatus,
     Envelope,
     NewsItem,
     RelatedLinks,
+    ReleaseStateData,
+    ReleaseStateSeries,
+    ReleaseStateVolume,
     ResolveData,
     ResolveResult,
     SearchResult,
+    SeriesEditionGroup,
+    SeriesEditionGroupsData,
     SeriesEditionsBlock,
     SeriesEditionsData,
+    SeriesEditionItem,
+    SeriesReleaseVolume,
     SeriesRelatedData,
     SeriesSearchMetaData,
     VolumeSearchMetaData,
 )
 from app.manga_news.parsers import (
+    edition_series_key,
     parse_news_page,
     parse_planning_page,
     parse_search_page,
+    parse_series_edition_groups_page,
     parse_series_editions_page,
     parse_series_page,
     parse_series_search_meta_page,
@@ -60,14 +73,15 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-04-22-search-franchise-filters-1'
+CACHE_SCHEMA_VERSION = '2026-09-26-scoped-series-editions-2'
+DETAIL_PARSER_CACHE_VERSION = '2026-07-22-dom-metadata-1'
 
 SERIES_BLOCKS = {
     'identity': ['title', 'title_vo', 'translated_title', 'source_url'],
     'staff': ['authors_story', 'authors_art', 'translators'],
     'publishing': ['publisher_fr', 'publisher_vo', 'collection', 'type', 'genres', 'prepublication', 'origin', 'advisory_age'],
     'presentation': ['summary', 'illustration', 'illustration_details', 'cover_image', 'themes', 'strengths'],
-    'editions': ['vf', 'vo', 'last_release_date', 'next_release_date'],
+    'editions': ['vf', 'vo', 'last_release_date', 'next_release_date', 'last_release_volume', 'next_release_volume'],
     'stats': ['stats'],
     'related': ['related'],
     'raw': ['raw_sections'],
@@ -81,7 +95,6 @@ VOLUME_BLOCKS = {
     'editions': ['vf', 'vo'],
     'release': ['publication_date', 'isbn_ean', 'price_code'],
     'scores': ['editorial_score', 'reader_score'],
-    'related': ['related'],
     'raw': ['raw_sections'],
     'raw_sections': ['raw_sections'],
 }
@@ -178,6 +191,10 @@ def slugify_block_name(block: str) -> str:
 
 def versioned_cache_key(*parts: str) -> str:
     return make_cache_key(CACHE_SCHEMA_VERSION, *parts)
+
+
+def parsed_detail_cache_key(*parts: str) -> str:
+    return versioned_cache_key(DETAIL_PARSER_CACHE_VERSION, *parts)
 
 
 class MangaNewsService:
@@ -411,6 +428,11 @@ class MangaNewsService:
             negative_entry = self.cache.get_negative(cache_key)
             if negative_entry and negative_entry.is_fresh:
                 self._metrics_increment('negative_cache_hits')
+                if entry and entry.is_stale_usable:
+                    warning = f'Using stale cached data while a recent upstream failure is negatively cached: {negative_entry.detail}'
+                    self._metrics_increment('cache_stale_fallbacks')
+                    logger.warning(warning)
+                    return entry.payload, entry, True, True, [warning]
                 raise self._negative_cache_exception(negative_entry)
 
         try:
@@ -554,7 +576,7 @@ class MangaNewsService:
 
     async def _get_series_search_meta(self, *, slug: str | None = None, url: str | None = None):
         target_url = self._resolve_series_url(slug=slug, url=url)
-        cache_key = versioned_cache_key('series-search-meta', target_url)
+        cache_key = parsed_detail_cache_key('series-search-meta', target_url)
 
         async def loader():
             html_payload, *_ = await self._get_cached_html_payload(
@@ -589,7 +611,7 @@ class MangaNewsService:
 
     async def _get_volume_search_meta(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        cache_key = versioned_cache_key('volume-search-meta', target_url)
+        cache_key = parsed_detail_cache_key('volume-search-meta', target_url)
 
         async def loader():
             html_payload, *_ = await self._get_cached_html_payload(
@@ -644,6 +666,49 @@ class MangaNewsService:
         )
         return SeriesEditionsBlock.model_validate(payload.get('data', {}) or {})
 
+    async def _get_series_edition_groups_payload(self, *, series_slug: str):
+        current_url = f'{self.base_url}/index.php/serie/editions/{series_slug}'
+        cache_key = versioned_cache_key('series-edition-groups-v2', series_slug)
+
+        async def loader():
+            result = await self.fetcher.get_text(current_url)
+            try:
+                parsed = parse_series_edition_groups_page(
+                    result.text,
+                    result.url,
+                    self.base_url,
+                    series_slug,
+                )
+            except ParseError as exc:
+                raise self._with_debug_dump(
+                    error=exc,
+                    html=result.text,
+                    source_url=result.url,
+                    cache_key=cache_key,
+                    resource_kind='series-edition-groups',
+                ) from exc
+            return parsed.model_dump(), result.url
+
+        return await self._cached_payload(
+            cache_key=cache_key,
+            ttl_seconds=self.settings.cache_ttl_series_seconds,
+            loader=loader,
+            namespace='series-edition-groups',
+            resource_url=current_url,
+        )
+
+    @staticmethod
+    def _find_edition_group(data: SeriesEditionGroupsData, edition_label: str) -> SeriesEditionGroup | None:
+        requested = normalize_text(edition_label.replace('_', ' ').replace('-', ' '))
+        for group in data.groups:
+            candidates = [group.edition_label, group.display_name, group.raw_heading, group.series_slug]
+            if requested in {
+                normalize_text((candidate or '').replace('_', ' ').replace('-', ' '))
+                for candidate in candidates
+            }:
+                return group
+        return None
+
     def _envelope(self, payload: dict, entry, *, cached: bool, partial: bool, warnings: list[str], found: bool | None = None) -> Envelope:
         data = payload.get('data')
         if found is None:
@@ -661,6 +726,164 @@ class MangaNewsService:
             warnings=warnings,
             fingerprint=fingerprint_data(data),
             data=data,
+        )
+
+    def _release_state_volume_from_item(self, item: SeriesEditionItem) -> ReleaseStateVolume:
+        return ReleaseStateVolume(
+            title=item.title,
+            number=item.number,
+            number_int=item.number_int,
+            publication_date=item.publication_date,
+            source_url=item.url,
+            series_slug=item.series_slug,
+            volume_slug=item.volume_slug,
+            is_special=item.is_special,
+            is_one_shot=item.is_one_shot,
+            edition_label=item.edition_label,
+        )
+
+    @staticmethod
+    def _series_release_volume_to_item(volume: SeriesReleaseVolume) -> SeriesEditionItem | None:
+        if not volume.title or not volume.source_url:
+            return None
+        return SeriesEditionItem(
+            title=volume.title,
+            url=volume.source_url,
+            series_slug=volume.series_slug,
+            volume_slug=volume.volume_slug,
+            number=volume.number,
+            number_int=volume.number_int,
+            edition_label=volume.edition_label,
+            is_special=volume.is_special,
+            is_one_shot=volume.is_one_shot,
+            publication_date=volume.publication_date,
+            cover_image=volume.cover_image,
+        )
+
+    async def _enrich_release_state_isbn(self, volume: ReleaseStateVolume, warnings: list[str]) -> ReleaseStateVolume:
+        if not volume.series_slug or not volume.volume_slug:
+            warnings.append(f'Unable to enrich ISBN for {volume.title or volume.source_url}: missing volume route.')
+            return volume
+        try:
+            payload = await self.get_volume(
+                series_slug=volume.series_slug,
+                volume_slug=volume.volume_slug,
+                fields='isbn_ean',
+                include_parent_editions=False,
+            )
+        except Exception as exc:  # pragma: no cover - best-effort enrichment
+            warnings.append(f'Unable to enrich ISBN for {volume.title or volume.volume_slug}: {exc}')
+            return volume
+        data = payload.data or {}
+        if isinstance(data, dict):
+            volume.isbn_ean = data.get('isbn_ean')
+        return volume
+
+    def _build_release_state_data(
+        self,
+        *,
+        slug: str,
+        series_data: dict[str, Any],
+        editions_data: SeriesEditionsData,
+        include_special: bool,
+        edition_label: str | None,
+        today_value: date,
+        warnings: list[str],
+    ) -> ReleaseStateData:
+        series = ReleaseStateSeries(
+            title=series_data.get('title') or editions_data.title,
+            slug=slug,
+            publisher_fr=series_data.get('publisher_fr'),
+            vf=series_data.get('vf'),
+            source_url=series_data.get('source_url') or editions_data.source_url,
+        )
+        vf_items = list(editions_data.vf.items) if editions_data.vf else []
+        explicit_items: list[SeriesEditionItem] = []
+        for field_name in ('last_release_volume', 'next_release_volume'):
+            raw_volume = series_data.get(field_name)
+            if not raw_volume:
+                continue
+            try:
+                release_volume = SeriesReleaseVolume.model_validate(raw_volume)
+            except Exception as exc:
+                warnings.append(f'Ignoring invalid {field_name}: {exc}')
+                continue
+            item = self._series_release_volume_to_item(release_volume)
+            if item is None:
+                warnings.append(f'Ignoring incomplete {field_name}: missing title or source URL.')
+                continue
+            explicit_items.append(item)
+
+        if not vf_items and not explicit_items:
+            warnings.append('No VF edition items were found for this series.')
+
+        merged_items: dict[str, SeriesEditionItem] = {}
+        for item in [*vf_items, *explicit_items]:
+            if edition_label:
+                key = f'{item.edition_label}:{item.series_slug}:{item.volume_slug or item.url or item.number or item.title}'
+            else:
+                key = item.volume_slug or item.url or item.number or item.title
+            merged_items[key] = item
+
+        candidates: list[SeriesEditionItem] = []
+        for item in merged_items.values():
+            if edition_label:
+                item_label = normalize_text((item.edition_label or '').replace('_', ' ').replace('-', ' '))
+                requested_label = normalize_text(edition_label.replace('_', ' ').replace('-', ' '))
+                if item_label != requested_label:
+                    continue
+            if not item.publication_date:
+                continue
+            if item.number_int is None:
+                continue
+            if item.is_special and not include_special and not edition_label:
+                continue
+            candidates.append(item)
+
+        released: list[SeriesEditionItem] = []
+        upcoming: list[SeriesEditionItem] = []
+        for item in candidates:
+            try:
+                publication_date = date.fromisoformat(item.publication_date)
+            except ValueError:
+                warnings.append(f'Ignoring invalid publication date for {item.title}: {item.publication_date}')
+                continue
+            if publication_date <= today_value:
+                released.append(item)
+            else:
+                upcoming.append(item)
+
+        last_item = max(released, key=lambda item: (item.number_int or -1, item.publication_date or '')) if released else None
+        next_item = min(upcoming, key=lambda item: (item.publication_date or '9999-99-99', item.number_int or 999999)) if upcoming else None
+        last_volume = self._release_state_volume_from_item(last_item) if last_item else None
+        next_volume = self._release_state_volume_from_item(next_item) if next_item else None
+
+        if last_volume and next_volume:
+            status = 'FOUND_CONFIRMED'
+            confidence = 'high'
+        elif last_volume:
+            status = 'FOUND_NO_UPCOMING'
+            confidence = 'high'
+            if series_data.get('next_release_date'):
+                warnings.append('Series page exposes next_release_date, but no explicit upcoming VF volume could be matched.')
+        elif next_volume:
+            status = 'FOUND_NO_RELEASED'
+            confidence = 'medium'
+        elif series_data.get('last_release_date') or series_data.get('next_release_date'):
+            status = 'FOUND_PARTIAL'
+            confidence = 'medium'
+            warnings.append('Series page exposes release dates, but no explicit dated VF volume could be matched.')
+        else:
+            status = 'FOUND_EMPTY_EDITIONS'
+            confidence = 'low' if vf_items else 'none'
+
+        return ReleaseStateData(
+            series=series,
+            last_released=last_volume,
+            next_release=next_volume,
+            status=status,
+            confidence=confidence,
+            warnings=warnings,
         )
 
     async def _enrich_search_results(
@@ -901,7 +1124,7 @@ class MangaNewsService:
             exclude_media_kinds=resolved_exclude_media_kinds,
         )
         search_urls = self._search_urls(query, kind)
-        cache_key = versioned_cache_key(
+        cache_key = parsed_detail_cache_key(
             'search',
             query,
             kind,
@@ -938,7 +1161,7 @@ class MangaNewsService:
                 deduped.values(),
                 key=lambda item: search_result_sort_key(query, item, prefer_main_series=resolved_prefer_main_series),
             )
-            candidate_limit = limit if mode == 'all' else max(limit, 10)
+            candidate_limit = limit if mode == 'all' else 1
             results = results[:candidate_limit]
             enrichment_started = time.perf_counter()
             enriched = await self._enrich_search_results(
@@ -1032,9 +1255,107 @@ class MangaNewsService:
         )
 
 
+    async def search_editions(
+        self,
+        *,
+        query: str,
+        mode: Literal['best', 'all'] = 'best',
+        limit: int = 10,
+        include_volumes: bool = False,
+    ) -> Envelope:
+        started = time.perf_counter()
+        search_response = await self.search(
+            query=query,
+            kind='series',
+            mode=mode,
+            limit=limit,
+            enrich=False,
+            include_editions=False,
+            prefer_main_series=False,
+            include_related=True,
+            include_books=True,
+        )
+        candidates = [
+            SearchResult.model_validate(item)
+            for item in (search_response.data or [])
+            if item.get('slug')
+        ]
+        async def load_groups(item: SearchResult):
+            try:
+                return await self.get_series_edition_groups(
+                    slug=item.slug or '',
+                    include_volumes=include_volumes,
+                )
+            except (ResourceNotFound, ParseError) as exc:
+                return exc
+
+        group_results = await asyncio.gather(*(load_groups(item) for item in candidates))
+        results: list[EditionSearchResult] = []
+        warnings = list(search_response.warnings)
+        successful_responses: list[Envelope] = []
+        failed_candidates = 0
+        for candidate, group_response in zip(candidates, group_results):
+            if isinstance(group_response, (ResourceNotFound, ParseError)):
+                failed_candidates += 1
+                warnings.append(
+                    f'Unable to load edition groups for {candidate.title} ({candidate.slug}): {group_response.detail}'
+                )
+                continue
+            successful_responses.append(group_response)
+            groups_data = SeriesEditionGroupsData.model_validate(group_response.data or {})
+            warnings.extend(group_response.warnings)
+            results.append(
+                EditionSearchResult(
+                    title=groups_data.title or candidate.title,
+                    slug=candidate.slug or groups_data.series_slug,
+                    score=candidate.score,
+                    source_url=groups_data.source_url,
+                    edition_groups=groups_data.groups,
+                )
+            )
+        data = EditionSearchData(query=clean_ws(query), mode=mode, results=results)
+        cached = (
+            search_response.cached
+            and failed_candidates == 0
+            and all(response.cached for response in successful_responses)
+        )
+        partial = (
+            search_response.partial
+            or failed_candidates > 0
+            or any(response.partial for response in successful_responses)
+        )
+        self._record_perf(
+            scope='service.search_editions',
+            event='edition_search_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            query=query,
+            mode=mode,
+            limit=limit,
+            include_volumes=include_volumes,
+            result_count=len(results),
+            failed_candidates=failed_candidates,
+            cached=cached,
+            partial=partial,
+        )
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=bool(results),
+            source='manga_news',
+            source_url=search_response.source_url,
+            cached=cached,
+            fetched_at=search_response.fetched_at,
+            cache_expires_at=search_response.cache_expires_at,
+            partial=partial,
+            warnings=warnings,
+            fingerprint=fingerprint_data(data.model_dump()),
+            data=data.model_dump(),
+        )
+
+
     async def _get_series_payload(self, *, slug: str | None = None, url: str | None = None):
         target_url = self._resolve_series_url(slug=slug, url=url)
-        cache_key = versioned_cache_key('series', target_url)
+        cache_key = parsed_detail_cache_key('series', target_url)
 
         async def loader():
             html_payload, *_ = await self._get_cached_html_payload(
@@ -1066,7 +1387,7 @@ class MangaNewsService:
 
     async def _get_volume_payload(self, *, series_slug: str | None = None, volume_slug: str | None = None, url: str | None = None):
         target_url = self._resolve_volume_url(series_slug=series_slug, volume_slug=volume_slug, url=url)
-        cache_key = versioned_cache_key('volume', target_url)
+        cache_key = parsed_detail_cache_key('volume', target_url)
 
         async def loader():
             html_payload, *_ = await self._get_cached_html_payload(
@@ -1153,6 +1474,7 @@ class MangaNewsService:
         )
         target_series_slug = series_slug or self._extract_series_slug_from_volume_url(payload.get('source_url') or url or '')
         parent_enrichment_ms = 0.0
+        data.pop('related', None)
         if resolved_include_parent_editions and target_series_slug:
             try:
                 parent_started = time.perf_counter()
@@ -1187,6 +1509,107 @@ class MangaNewsService:
         )
         return self._envelope({'data': projected, 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
 
+    async def get_volume_by_number(
+        self,
+        *,
+        series_slug: str,
+        number: int,
+        blocks: str | None = None,
+        fields: str | None = None,
+        include_raw_sections: bool = False,
+        include_parent_editions: bool | None = None,
+        include_special: bool = False,
+        edition_label: str | None = None,
+    ) -> Envelope:
+        started = time.perf_counter()
+        expected_key = edition_series_key(series_slug)
+        if edition_label:
+            editions_envelope = await self.get_series_edition_groups(
+                slug=series_slug,
+                include_volumes=True,
+            )
+            groups_data = SeriesEditionGroupsData.model_validate(editions_envelope.data or {})
+            selected_group = self._find_edition_group(groups_data, edition_label)
+            if selected_group is None:
+                raise ResourceNotFound(f'No VF edition group "{edition_label}" found for series {series_slug}.')
+            vf_items = [
+                item for item in selected_group.items
+                if edition_series_key(item.series_slug) == expected_key
+            ]
+        else:
+            editions_envelope = await self.get_series_editions(slug=series_slug, edition='vf')
+            editions_data = SeriesEditionsData.model_validate(editions_envelope.data or {})
+            vf_items = editions_data.vf.items if editions_data.vf else []
+            # Never resolve a numbered volume from a sidebar recommendation or
+            # another series, even when a stale editions cache contains it.
+            expected_names = {expected_key, edition_series_key(editions_data.title)}
+            expected_names.discard('')
+            vf_items = [item for item in vf_items if edition_series_key(item.series_slug) in expected_names]
+        candidates = [
+            item
+            for item in vf_items
+            if item.number_int == number
+            and item.volume_slug
+            and (edition_label or include_special or not item.is_special)
+        ]
+        if not candidates:
+            # Manga News gives some single-volume integrals a direct manga URL
+            # without /vol-1 and without an explicit number.
+            unnumbered = [
+                item for item in vf_items
+                if item.number_int is None and not item.volume_slug and item.url and not item.is_special
+            ]
+            if number == 1 and len(vf_items) == 1 and len(unnumbered) == 1:
+                selected = unnumbered[0]
+                volume_response = await self.get_volume(
+                    url=selected.url,
+                    blocks=blocks,
+                    fields=fields,
+                    include_raw_sections=include_raw_sections,
+                    include_parent_editions=include_parent_editions,
+                )
+                if isinstance(volume_response.data, dict) and not volume_response.data.get('number'):
+                    volume_response.data['number'] = '1'
+                    volume_response.warnings.append('Volume number 1 inferred from the sole VF edition item.')
+                return volume_response
+            suffix = f' in edition group "{edition_label}"' if edition_label else ''
+            raise ResourceNotFound(f'No VF volume number {number} found for series {series_slug}{suffix}.')
+        requested_slug = normalize_text(series_slug.replace('-', ' '))
+        selected = sorted(
+            candidates,
+            key=lambda item: (
+                normalize_text((item.series_slug or '').replace('-', ' ')) != requested_slug,
+                bool(item.is_special),
+                item.publication_date or '',
+                item.volume_slug or '',
+            ),
+        )[0]
+        volume_response = await self.get_volume(
+            series_slug=selected.series_slug or series_slug,
+            volume_slug=selected.volume_slug,
+            blocks=blocks,
+            fields=fields,
+            include_raw_sections=include_raw_sections,
+            include_parent_editions=include_parent_editions,
+        )
+        volume_response.cached = editions_envelope.cached and volume_response.cached
+        volume_response.partial = editions_envelope.partial or volume_response.partial
+        volume_response.warnings = list(editions_envelope.warnings) + list(volume_response.warnings)
+        self._record_perf(
+            scope='service.get_volume_by_number',
+            event='volume_by_number_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            series_slug=series_slug,
+            number=number,
+            resolved_series_slug=selected.series_slug,
+            resolved_volume_slug=selected.volume_slug,
+            include_special=include_special,
+            edition_label=edition_label,
+            cached=volume_response.cached,
+            partial=volume_response.partial,
+        )
+        return volume_response
+
     async def get_series_related(self, *, slug: str | None = None, url: str | None = None) -> Envelope:
         payload, entry, cached, partial, warnings = await self._get_series_payload(slug=slug, url=url)
         data = payload.get('data', {}) or {}
@@ -1196,6 +1619,124 @@ class MangaNewsService:
             source_url=payload.get('source_url'),
         )
         return self._envelope({'data': related_data.model_dump(), 'source_url': payload.get('source_url')}, entry, cached=cached, partial=partial, warnings=warnings)
+
+    async def get_release_state_by_series(
+        self,
+        *,
+        slug: str,
+        include_isbn: bool = False,
+        include_special: bool = False,
+        today: str | None = None,
+        edition_label: str | None = None,
+    ) -> Envelope:
+        started = time.perf_counter()
+        today_value = self._parse_iso_date(today, 'today') if today else now_utc().date()
+        series_payload, series_entry, series_cached, series_partial, series_warnings = await self._get_series_payload(slug=slug)
+        series_data = dict(series_payload.get('data', {}) or {})
+        series_data['source_url'] = series_payload.get('source_url')
+        if edition_label:
+            editions_envelope = await self.get_series_edition_groups(slug=slug, include_volumes=True)
+            groups_data = SeriesEditionGroupsData.model_validate(editions_envelope.data or {})
+            selected_group = self._find_edition_group(groups_data, edition_label)
+            if selected_group is None:
+                raise ResourceNotFound(f'No VF edition group "{edition_label}" found for series {slug}.')
+            editions_data = SeriesEditionsData(
+                title=groups_data.title,
+                series_slug=slug,
+                source_url=groups_data.source_url,
+                vf=SeriesEditionsBlock(
+                    edition='vf',
+                    source_url=groups_data.source_url,
+                    total=selected_group.volume_count,
+                    items=selected_group.items,
+                ),
+            )
+            status_text = {
+                'completed': 'Termine',
+                'ongoing': 'En cours',
+            }.get(selected_group.status)
+            series_data['vf'] = EditionStatus(
+                volumes=selected_group.total_volumes or selected_group.volume_count,
+                status=status_text,
+            ).model_dump()
+        else:
+            editions_envelope = await self.get_series_editions(slug=slug, edition='vf')
+            editions_data = SeriesEditionsData.model_validate(editions_envelope.data or {})
+        warnings = list(series_warnings) + list(editions_envelope.warnings)
+        release_state = self._build_release_state_data(
+            slug=slug,
+            series_data=series_data,
+            editions_data=editions_data,
+            include_special=include_special,
+            edition_label=edition_label,
+            today_value=today_value,
+            warnings=warnings,
+        )
+        if include_isbn:
+            for volume in [release_state.last_released, release_state.next_release]:
+                if volume is not None:
+                    await self._enrich_release_state_isbn(volume, warnings)
+        release_state.warnings = warnings
+        self._record_perf(
+            scope='service.get_release_state_by_series',
+            event='release_state_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            slug=slug,
+            include_isbn=include_isbn,
+            include_special=include_special,
+            edition_label=edition_label,
+            today=today_value.isoformat(),
+            cached=series_cached and editions_envelope.cached,
+            partial=series_partial or editions_envelope.partial,
+            status=release_state.status,
+            confidence=release_state.confidence,
+        )
+        return self._envelope(
+            {'data': release_state.model_dump(), 'source_url': series_payload.get('source_url')},
+            series_entry,
+            cached=series_cached and editions_envelope.cached,
+            partial=series_partial or editions_envelope.partial,
+            warnings=warnings,
+            found=True,
+        )
+
+    async def get_series_edition_groups(
+        self,
+        *,
+        slug: str,
+        include_volumes: bool = False,
+    ) -> Envelope:
+        started = time.perf_counter()
+        payload, entry, cached, partial, warnings = await self._get_series_edition_groups_payload(
+            series_slug=slug
+        )
+        data = SeriesEditionGroupsData.model_validate(payload.get('data', {}) or {})
+        if not include_volumes:
+            data = data.model_copy(deep=True)
+            for group in data.groups:
+                group.items = []
+        normalized_payload = {
+            'data': data.model_dump(),
+            'source_url': payload.get('source_url') or data.source_url,
+        }
+        self._record_perf(
+            scope='service.get_series_edition_groups',
+            event='series_edition_groups_perf',
+            duration_ms=(time.perf_counter() - started) * 1000,
+            series_slug=slug,
+            include_volumes=include_volumes,
+            group_count=len(data.groups),
+            cached=cached,
+            partial=partial,
+        )
+        return self._envelope(
+            normalized_payload,
+            entry,
+            cached=cached,
+            partial=partial,
+            warnings=warnings,
+            found=bool(data.groups),
+        )
 
     async def get_series_editions(self, *, slug: str | None = None, url: str | None = None, edition: Literal['all', 'vf', 'vo'] = 'all') -> Envelope:
         request_started = time.perf_counter()

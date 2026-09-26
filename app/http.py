@@ -29,6 +29,7 @@ class AsyncFetcher:
         *,
         max_retries: int = 2,
         backoff_seconds: float = 0.5,
+        max_concurrency: int = 6,
         log_json: bool = False,
         metrics: MetricsStore | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -36,6 +37,7 @@ class AsyncFetcher:
         self._log_json = log_json
         self._max_retries = max(0, max_retries)
         self._backoff_seconds = max(0.0, backoff_seconds)
+        self._request_semaphore = asyncio.Semaphore(max(1, int(max_concurrency)))
         self._metrics = metrics
         self._client = httpx.AsyncClient(
             timeout=timeout_seconds,
@@ -54,8 +56,11 @@ class AsyncFetcher:
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
             started = time.perf_counter()
+            queue_started = started
             try:
-                response = await self._client.get(url, params=params)
+                async with self._request_semaphore:
+                    queue_ms = round((time.perf_counter() - queue_started) * 1000, 2)
+                    response = await self._client.get(url, params=params)
             except httpx.HTTPError as exc:
                 duration_ms = round((time.perf_counter() - started) * 1000, 2)
                 last_exc = exc
@@ -71,7 +76,18 @@ class AsyncFetcher:
                     duration_ms=duration_ms,
                     reason=str(exc),
                     retrying=retrying,
+                    queue_ms=queue_ms,
                 )
+                if self._metrics is not None:
+                    self._metrics.record_operation(
+                        'upstream.fetch',
+                        duration_ms=duration_ms,
+                        event='upstream_fetch_error',
+                        url=url,
+                        attempt=attempt + 1,
+                        queue_ms=queue_ms,
+                        retrying=retrying,
+                    )
                 if retrying:
                     if self._metrics is not None:
                         self._metrics.increment('upstream_fetch_retries')
@@ -83,6 +99,17 @@ class AsyncFetcher:
 
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             retrying = response.status_code in RETRYABLE_STATUS_CODES and attempt < self._max_retries
+            if self._metrics is not None:
+                self._metrics.record_operation(
+                    'upstream.fetch',
+                    duration_ms=duration_ms,
+                    event='upstream_fetch',
+                    url=str(response.url),
+                    status_code=response.status_code,
+                    attempt=attempt + 1,
+                    queue_ms=queue_ms,
+                    retrying=retrying,
+                )
             if response.status_code == 404:
                 if self._metrics is not None:
                     self._metrics.increment('upstream_fetch_not_found')
@@ -96,6 +123,7 @@ class AsyncFetcher:
                     duration_ms=duration_ms,
                     attempt=attempt + 1,
                     max_attempts=self._max_retries + 1,
+                    queue_ms=queue_ms,
                 )
                 raise ResourceNotFound('Resource not found on Manga News.')
             if retrying:
@@ -111,6 +139,7 @@ class AsyncFetcher:
                     duration_ms=duration_ms,
                     attempt=attempt + 1,
                     max_attempts=self._max_retries + 1,
+                    queue_ms=queue_ms,
                 )
                 await asyncio.sleep(self._backoff_seconds * (2 ** attempt))
                 continue
@@ -127,6 +156,7 @@ class AsyncFetcher:
                     duration_ms=duration_ms,
                     attempt=attempt + 1,
                     max_attempts=self._max_retries + 1,
+                    queue_ms=queue_ms,
                 )
                 raise UpstreamError(f'Manga News returned HTTP {response.status_code}.')
             if not response.text.strip():
@@ -141,6 +171,7 @@ class AsyncFetcher:
                     duration_ms=duration_ms,
                     attempt=attempt + 1,
                     max_attempts=self._max_retries + 1,
+                    queue_ms=queue_ms,
                 )
                 raise UpstreamError('Manga News returned an empty response.')
             if self._metrics is not None:
@@ -155,6 +186,7 @@ class AsyncFetcher:
                 duration_ms=duration_ms,
                 attempt=attempt + 1,
                 max_attempts=self._max_retries + 1,
+                queue_ms=queue_ms,
             )
             return FetchResult(text=response.text, url=str(response.url))
 

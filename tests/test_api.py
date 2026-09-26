@@ -157,14 +157,76 @@ def test_openapi_exposes_series_editions_related_and_resolve_routes():
     assert response.status_code == 200
     payload = response.json()
     assert '/series/{slug}/editions' in payload['paths']
+    assert '/series/{slug}/release-state' in payload['paths']
     assert '/series/{slug}/related' in payload['paths']
     assert '/search/resolve' in payload['paths']
     assert '/health/runtime' in payload['paths']
     schemas = payload['components']['schemas']
     assert 'SeriesData' in schemas
     assert 'SeriesEditionsData' in schemas
+    assert 'ReleaseStateData' in schemas
     assert 'ResolveResponse' in schemas
     assert 'RuntimeObservabilityResponse' in schemas
+
+
+def test_series_release_state_route_forwards_params():
+    class DummyService:
+        async def get_release_state_by_series(self, **kwargs):
+            assert kwargs == {
+                'slug': 'One-piece-Edition-originale',
+                'include_isbn': True,
+                'include_special': True,
+                'today': '2026-06-18',
+                'edition_label': None,
+            }
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                'cached': False,
+                'fetched_at': '2026-06-18T10:00:00+00:00',
+                'cache_expires_at': '2026-06-19T10:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-release-state',
+                'data': {
+                    'series': {
+                        'title': 'One Piece',
+                        'slug': 'One-piece-Edition-originale',
+                        'publisher_fr': 'Glénat',
+                        'vf': {'volumes': 111, 'status': 'En cours'},
+                        'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                    },
+                    'last_released': {
+                        'title': 'One Piece Vol.110',
+                        'number': '110',
+                        'number_int': 110,
+                        'publication_date': '2026-04-02',
+                        'isbn_ean': '9782344067985',
+                        'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+                        'series_slug': 'One-Piece',
+                        'volume_slug': 'vol-110',
+                        'is_special': False,
+                        'is_one_shot': False,
+                        'edition_label': None,
+                    },
+                    'next_release': None,
+                    'status': 'FOUND_NO_UPCOMING',
+                    'confidence': 'high',
+                    'warnings': [],
+                },
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/series/One-piece-Edition-originale/release-state?include_isbn=true&include_special=true&today=2026-06-18')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['data']['series']['slug'] == 'One-piece-Edition-originale'
+    assert payload['data']['last_released']['isbn_ean'] == '9782344067985'
+    assert response.headers['X-Data-Fingerprint'] == 'fp-release-state'
 
 
 def test_search_endpoint_exposes_alternate_titles():
@@ -207,6 +269,87 @@ def test_search_endpoint_exposes_alternate_titles():
     assert payload['data'][0]['translated_title'] == 'Black Night Parade'
 
 
+def test_edition_group_routes_forward_compact_and_search_params():
+    class DummyService:
+        async def get_series_edition_groups(self, **kwargs):
+            assert kwargs == {'slug': 'Eden', 'include_volumes': False}
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/serie/editions/Eden',
+                'cached': True,
+                'fetched_at': '2026-07-29T10:00:00+00:00',
+                'cache_expires_at': '2026-07-30T10:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-eden-groups',
+                'data': {
+                    'title': 'Eden',
+                    'series_slug': 'Eden',
+                    'source_url': 'https://www.manga-news.com/index.php/serie/editions/Eden',
+                    'groups': [{
+                        'edition_label': 'perfect',
+                        'display_name': 'Edition Perfect',
+                        'raw_heading': 'Edition Perfect',
+                        'series_slug': 'Eden-Perfect-Edition',
+                        'volume_count': 9,
+                        'total_volumes': 9,
+                        'highest_volume_number': 9,
+                        'available_numbers': list(range(1, 10)),
+                        'status': 'completed',
+                        'status_source': 'inferred',
+                        'status_confidence': 'medium',
+                        'status_reason': 'Exact compiled-volume ratio.',
+                        'items': [],
+                    }],
+                },
+            }})()
+
+        async def search_editions(self, **kwargs):
+            assert kwargs == {
+                'query': 'eden',
+                'mode': 'best',
+                'limit': 3,
+                'include_volumes': True,
+            }
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/recherche/',
+                'cached': False,
+                'fetched_at': '2026-07-29T10:00:00+00:00',
+                'cache_expires_at': '2026-07-30T10:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-search-editions',
+                'data': {
+                    'query': 'eden',
+                    'mode': 'best',
+                    'results': [{
+                        'title': 'Eden',
+                        'slug': 'Eden',
+                        'score': 100,
+                        'source_url': 'https://www.manga-news.com/index.php/serie/editions/Eden',
+                        'edition_groups': [],
+                    }],
+                },
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        groups_response = client.get('/series/Eden/edition-groups')
+        search_response = client.get('/search/editions?q=eden&mode=best&limit=3&include_volumes=true')
+
+    assert groups_response.status_code == 200
+    assert groups_response.json()['data']['groups'][0]['volume_count'] == 9
+    assert search_response.status_code == 200
+    assert search_response.json()['data']['results'][0]['slug'] == 'Eden'
+
+
 def test_openapi_exposes_search_and_volume_edition_counters():
     with TestClient(app) as client:
         response = client.get('/openapi.json')
@@ -221,10 +364,32 @@ def test_openapi_exposes_search_and_volume_edition_counters():
     assert 'root_series_slug' in search_result
     assert 'vf' in volume_data
     assert 'vo' in volume_data
+    assert 'related' not in volume_data
+    assert '/search/editions' in payload['paths']
+    assert '/series/{slug}/edition-groups' in payload['paths']
+    assert 'EditionSearchResponse' in schemas
+    assert 'SeriesEditionGroupsResponse' in schemas
     assert payload['info']['description']
     assert payload['paths']['/search']['get']['description']
     assert payload['paths']['/search/resolve']['get']['description']
+    search_parameters = {
+        parameter['name']: parameter
+        for parameter in payload['paths']['/search']['get']['parameters']
+    }
+    assert search_parameters['mode']['schema']['default'] == 'all'
+    assert search_parameters['limit']['schema']['default'] == 50
     assert payload['paths']['/series/{slug}']['get']['description']
+    assert payload['paths']['/volume/{series_slug}/number/{number}']['get']['description']
+    volume_number_parameters = {
+        parameter['name']: parameter
+        for parameter in payload['paths']['/volume/{series_slug}/number/{number}']['get']['parameters']
+    }
+    assert volume_number_parameters['edition_label']['required'] is False
+    release_parameters = {
+        parameter['name']: parameter
+        for parameter in payload['paths']['/series/{slug}/release-state']['get']['parameters']
+    }
+    assert release_parameters['edition_label']['required'] is False
     assert payload['paths']['/volume/{series_slug}/{volume_slug}']['get']['description']
     assert payload['paths']['/planning']['get']['description']
 
@@ -320,6 +485,47 @@ def test_volume_route_forwards_include_parent_editions():
     assert response.status_code == 200
 
 
+def test_volume_by_number_route_forwards_lookup_params():
+    class DummyService:
+        async def get_volume_by_number(self, **kwargs):
+            assert kwargs == {
+                'series_slug': 'One-piece-Edition-originale',
+                'number': 110,
+                'blocks': 'release',
+                'fields': 'title,isbn_ean',
+                'include_raw_sections': True,
+                'include_parent_editions': False,
+                'include_special': True,
+                'edition_label': None,
+            }
+            return type('EnvelopeLike', (), {'model_dump': lambda self: {
+                'schema_version': '1.0',
+                'ok': True,
+                'found': True,
+                'source': 'manga_news',
+                'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+                'cached': False,
+                'fetched_at': '2026-04-20T12:00:00+00:00',
+                'cache_expires_at': '2026-04-20T18:00:00+00:00',
+                'partial': False,
+                'warnings': [],
+                'fingerprint': 'fp-volume-number',
+                'data': {
+                    'title': 'One Piece Vol.110',
+                    'number': '110',
+                    'isbn_ean': '9782344068762',
+                },
+            }})()
+
+    with TestClient(app) as client:
+        app.state.service = DummyService()
+        response = client.get('/volume/One-piece-Edition-originale/number/110?blocks=release&fields=title,isbn_ean&include_raw_sections=true&include_parent_editions=false&include_special=true')
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload['data']['number'] == '110'
+    assert response.headers['X-Data-Fingerprint'] == 'fp-volume-number'
+
+
 def test_request_id_header_round_trips():
     with TestClient(app) as client:
         response = client.get('/health', headers={'X-Request-Id': 'req-test-123'})
@@ -347,6 +553,8 @@ def test_health_runtime_endpoint_exposes_metrics_and_defaults():
 def test_search_route_preserves_none_when_optional_flags_omitted():
     class DummyService:
         async def search(self, **kwargs):
+            assert kwargs['mode'] == 'all'
+            assert kwargs['limit'] == 50
             assert kwargs['enrich'] is None
             assert kwargs['include_editions'] is None
             return type('EnvelopeLike', (), {'model_dump': lambda self: {
@@ -366,7 +574,7 @@ def test_search_route_preserves_none_when_optional_flags_omitted():
 
     with TestClient(app) as client:
         app.state.service = DummyService()
-        response = client.get('/search?q=one%20piece&kind=series&mode=all')
+        response = client.get('/search?q=one%20piece&kind=series')
     assert response.status_code == 200
 
 

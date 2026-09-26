@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Iterable
 from urllib.parse import urlparse
 
@@ -18,8 +18,11 @@ from app.models import (
     RelatedLinks,
     SearchResult,
     SeriesData,
+    SeriesEditionGroup,
+    SeriesEditionGroupsData,
     SeriesEditionItem,
     SeriesEditionsBlock,
+    SeriesReleaseVolume,
     SeriesSearchMetaData,
     SeriesStats,
     VolumeData,
@@ -84,6 +87,13 @@ GENERIC_ANCHOR_TEXTS = {
     'voir le produit', 'voir toutes les figurines', 'lire le dossier', 'partie 1', 'partie 2',
     'partie 3', 'mot de la fin', 's inscrire', 'connexion', 'j ai oublié mes identifiants !',
 }
+NORMALIZED_RAW_SECTION_HEADINGS = frozenset(normalize_text(heading) for heading in RAW_SECTION_HEADINGS)
+NORMALIZED_VALUE_LABELS = frozenset(
+    normalize_text(label)
+    for labels in VALUE_LABELS.values()
+    for label in labels
+)
+
 HEADING_CATEGORY_MAP = {
     'manga en relation': 'series',
     'serie en relation': 'series',
@@ -105,9 +115,58 @@ def _soup(html: str) -> BeautifulSoup:
     return BeautifulSoup(html, 'lxml')
 
 
+class _TextLines(list[str]):
+    normalized: list[str] | None = None
+    metadata: dict[str, str] | None = None
+
+
+def _value_after_dom_label(container_text: str, label_text: str) -> str | None:
+    canonical_label = clean_ws(clean_ws(label_text).rstrip(':'))
+    pattern = re.compile(
+        rf'^\s*{re.escape(canonical_label)}\s*:?\s*(?P<value>.+)$',
+        flags=re.IGNORECASE,
+    )
+    match = pattern.match(clean_ws(container_text))
+    return clean_ws(match.group('value')) if match else None
+
+
+def _extract_dom_metadata(soup: BeautifulSoup) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    for label_node in soup.find_all(['strong', 'dt', 'th']):
+        label_text = clean_ws(label_node.get_text(' ', strip=True))
+        normalized_label = normalize_text(label_text)
+        if normalized_label not in NORMALIZED_VALUE_LABELS or normalized_label in metadata:
+            continue
+
+        if label_node.name == 'dt':
+            value_node = label_node.find_next_sibling('dd')
+            value = clean_ws(value_node.get_text(' ', strip=True)) if value_node else None
+        else:
+            container = label_node.find_parent(['li', 'tr']) or label_node.parent
+            value = (
+                _value_after_dom_label(container.get_text(' ', strip=True), label_text)
+                if container is not None
+                else None
+            )
+
+        if value:
+            metadata[normalized_label] = value
+    return metadata
+
+
 def _lines(soup: BeautifulSoup) -> list[str]:
     raw_lines = soup.get_text('\n', strip=True).splitlines()
-    return [clean_ws(line) for line in raw_lines if clean_ws(line)]
+    lines = _TextLines(clean_ws(line) for line in raw_lines if clean_ws(line))
+    lines.metadata = _extract_dom_metadata(soup)
+    return lines
+
+
+def _normalized_lines(lines: list[str]) -> list[str]:
+    if isinstance(lines, _TextLines):
+        if lines.normalized is None:
+            lines.normalized = [normalize_text(line) for line in lines]
+        return lines.normalized
+    return [normalize_text(line) for line in lines]
 
 
 def _meta(soup: BeautifulSoup, *names: str) -> str | None:
@@ -118,63 +177,107 @@ def _meta(soup: BeautifulSoup, *names: str) -> str | None:
     return None
 
 
-def _extract_line_value(lines: list[str], labels: Iterable[str]) -> str | None:
-    for line in lines:
-        for label in labels:
-            normalized_label = normalize_text(label)
-            normalized_line = normalize_text(line)
-            if normalized_line.startswith(normalized_label):
-                if ':' in line:
-                    value = clean_ws(line.split(':', 1)[1])
-                else:
-                    value = clean_ws(re.sub(re.escape(label), '', line, flags=re.IGNORECASE))
-                return value or None
+def _extract_line_value(
+    lines: list[str],
+    labels: Iterable[str],
+    normalized_lines: list[str] | None = None,
+) -> str | None:
+    normalized_lines = normalized_lines or _normalized_lines(lines)
+    canonical_labels = tuple(dict.fromkeys(clean_ws(clean_ws(label).rstrip(':')) for label in labels))
+    normalized_labels = tuple(dict.fromkeys(normalize_text(label) for label in canonical_labels))
+
+    if isinstance(lines, _TextLines) and lines.metadata:
+        for normalized_label in normalized_labels:
+            value = lines.metadata.get(normalized_label)
+            if value:
+                return value
+
+    for line, normalized_line in zip(lines, normalized_lines):
+        for label, normalized_label in zip(canonical_labels, normalized_labels):
+            if ':' in line:
+                inline_label, inline_value = line.split(':', 1)
+                if normalize_text(inline_label) == normalized_label:
+                    return clean_ws(inline_value) or None
+            if normalized_line == normalized_label:
+                continue
+            if not normalized_line.startswith(f'{normalized_label} '):
+                continue
+            match = re.match(
+                rf'^\s*{re.escape(label)}(?:\s*:\s*|\s+)(?P<value>.+)$',
+                line,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                return clean_ws(match.group('value')) or None
     return None
 
 
-def _extract_number_after(lines: list[str], label: str) -> int | None:
-    for index, line in enumerate(lines):
-        if normalize_text(line) == normalize_text(label):
+def _is_value_label_line(line: str, normalized_line: str | None = None) -> bool:
+    normalized_line = normalized_line or normalize_text(line)
+    if normalized_line in NORMALIZED_VALUE_LABELS:
+        return True
+    return any(normalized_line.startswith(f'{label} ') for label in NORMALIZED_VALUE_LABELS)
+
+
+def _extract_number_after(
+    lines: list[str],
+    label: str,
+    normalized_lines: list[str] | None = None,
+) -> int | None:
+    normalized_lines = normalized_lines or _normalized_lines(lines)
+    normalized_label = normalize_text(label)
+    for index, (line, normalized_line) in enumerate(zip(lines, normalized_lines)):
+        if normalized_line == normalized_label:
             for offset in range(1, 3):
                 if index + offset >= len(lines):
                     break
                 match = re.search(r'(\d+)', lines[index + offset])
                 if match:
                     return int(match.group(1))
-        if normalize_text(label) in normalize_text(line):
+        if normalized_label in normalized_line:
             match = re.search(r'(\d+)', line)
             if match:
                 return int(match.group(1))
     return None
 
 
-def _extract_score_after(lines: list[str], label: str) -> float | None:
-    for index, line in enumerate(lines):
-        if normalize_text(line) == normalize_text(label):
+def _extract_score_after(
+    lines: list[str],
+    label: str,
+    normalized_lines: list[str] | None = None,
+) -> float | None:
+    normalized_lines = normalized_lines or _normalized_lines(lines)
+    normalized_label = normalize_text(label)
+    for index, (line, normalized_line) in enumerate(zip(lines, normalized_lines)):
+        if normalized_line == normalized_label:
             for offset in range(1, 3):
                 if index + offset >= len(lines):
                     break
                 match = re.search(r'(\d+(?:[\.,]\d+)?)\s*/\s*20', lines[index + offset])
                 if match:
                     return float(match.group(1).replace(',', '.'))
-        if normalize_text(label) in normalize_text(line):
+        if normalized_label in normalized_line:
             match = re.search(r'(\d+(?:[\.,]\d+)?)\s*/\s*20', line)
             if match:
                 return float(match.group(1).replace(',', '.'))
     return None
 
 
-def _extract_section(lines: list[str], heading: str) -> str | None:
+def _extract_section(
+    lines: list[str],
+    heading: str,
+    normalized_lines: list[str] | None = None,
+) -> str | None:
+    normalized_lines = normalized_lines or _normalized_lines(lines)
     normalized_heading = normalize_text(heading)
-    for index, line in enumerate(lines):
-        if normalize_text(line) != normalized_heading:
+    for index, normalized_line in enumerate(normalized_lines):
+        if normalized_line != normalized_heading:
             continue
         collected: list[str] = []
-        for candidate in lines[index + 1:]:
-            normalized_candidate = normalize_text(candidate)
-            if normalized_candidate in RAW_SECTION_HEADINGS and normalized_candidate != normalized_heading:
+        for candidate, normalized_candidate in zip(lines[index + 1:], normalized_lines[index + 1:]):
+            if normalized_candidate in NORMALIZED_RAW_SECTION_HEADINGS and normalized_candidate != normalized_heading:
                 break
-            if any(normalized_candidate.startswith(normalize_text(prefix)) for prefix_list in VALUE_LABELS.values() for prefix in prefix_list):
+            if _is_value_label_line(candidate, normalized_candidate):
                 break
             collected.append(candidate)
         text = clean_ws(' '.join(collected))
@@ -182,18 +285,20 @@ def _extract_section(lines: list[str], heading: str) -> str | None:
     return None
 
 
-def _extract_raw_sections(lines: list[str]) -> dict[str, list[str]]:
+def _extract_raw_sections(
+    lines: list[str],
+    normalized_lines: list[str] | None = None,
+) -> dict[str, list[str]]:
+    normalized_lines = normalized_lines or _normalized_lines(lines)
     sections: dict[str, list[str]] = {}
-    for index, line in enumerate(lines):
-        normalized_line = normalize_text(line)
-        if normalized_line not in RAW_SECTION_HEADINGS:
+    for index, normalized_line in enumerate(normalized_lines):
+        if normalized_line not in NORMALIZED_RAW_SECTION_HEADINGS:
             continue
         collected: list[str] = []
-        for candidate in lines[index + 1:]:
-            normalized_candidate = normalize_text(candidate)
-            if normalized_candidate in RAW_SECTION_HEADINGS and normalized_candidate != normalized_line:
+        for candidate, normalized_candidate in zip(lines[index + 1:], normalized_lines[index + 1:]):
+            if normalized_candidate in NORMALIZED_RAW_SECTION_HEADINGS and normalized_candidate != normalized_line:
                 break
-            if any(normalized_candidate.startswith(normalize_text(prefix)) for prefix_list in VALUE_LABELS.values() for prefix in prefix_list):
+            if _is_value_label_line(candidate, normalized_candidate):
                 break
             collected.append(candidate)
         key = slugify(normalized_line).replace('-', '_')
@@ -248,20 +353,81 @@ def _extract_vf_vo_from_numberblock(soup: BeautifulSoup) -> tuple[EditionStatus 
     return vf_status, vo_status
 
 
-def _extract_vf_vo(soup: BeautifulSoup, lines: list[str]) -> tuple[EditionStatus | None, EditionStatus | None, str | None, str | None]:
+def _extract_vf_vo(
+    soup: BeautifulSoup,
+    lines: list[str],
+    normalized_lines: list[str] | None = None,
+) -> tuple[EditionStatus | None, EditionStatus | None, str | None, str | None]:
+    normalized_lines = normalized_lines or _normalized_lines(lines)
     vf_status, vo_status = _extract_vf_vo_from_numberblock(soup)
     last_release = None
     next_release = None
-    for index, line in enumerate(lines):
+    for index, (line, normalized_line) in enumerate(zip(lines, normalized_lines)):
         if not vf_status:
             vf_status = _edition_status_from_text(line, 'VF')
         if not vo_status:
             vo_status = _edition_status_from_text(line, 'VO')
-        if normalize_text(line) == 'dernier paru' and index + 1 < len(lines):
+        if normalized_line == 'dernier paru' and index + 1 < len(lines):
             last_release = parse_french_date(lines[index + 1])
-        if normalize_text(line) in {'a paraitre', 'a paraître'} and index + 1 < len(lines):
+        if normalized_line in {'a paraitre', 'a paraître'} and index + 1 < len(lines):
             next_release = parse_french_date(lines[index + 1])
     return vf_status, vo_status, last_release, next_release
+
+
+def _extract_series_release_volume(
+    soup: BeautifulSoup,
+    element_id: str,
+    page_url: str,
+) -> SeriesReleaseVolume | None:
+    container = soup.find(id=element_id)
+    if container is None:
+        return None
+
+    base_url = _base_url_from_page(page_url)
+    for anchor in container.find_all('a', href=True):
+        source_url = ensure_absolute_url(base_url, anchor.get('href', ''))
+        if not source_url or '/index.php/manga/' not in source_url:
+            continue
+        parsed_path = [part for part in urlparse(source_url).path.split('/') if part]
+        if len(parsed_path) < 3 or parsed_path[:2] != ['index.php', 'manga']:
+            continue
+        series_slug = parsed_path[2]
+        volume_slug = parsed_path[3] if len(parsed_path) > 3 else None
+        image = anchor.find('img')
+        title = clean_ws(
+            anchor.get('title')
+            or anchor.get('aria-label')
+            or (image.get('alt') if image is not None else None)
+            or ''
+        )
+        number = _guess_volume_number(title, volume_slug)
+        publication_date = _extract_publication_date_from_text(
+            clean_ws(anchor.get_text(' ', strip=True))
+            or clean_ws(container.get_text(' ', strip=True))
+        )
+        if not number or not publication_date:
+            continue
+        if not title:
+            title = f'Vol.{number}'
+        edition_label = infer_volume_edition_label(title)
+        is_special, is_one_shot = infer_volume_flags(title)
+        cover_image = None
+        if image is not None and image.get('src'):
+            cover_image = ensure_absolute_url(base_url, image.get('src'))
+        return SeriesReleaseVolume(
+            title=title,
+            number=number,
+            number_int=parse_volume_number_int(number),
+            publication_date=publication_date,
+            source_url=source_url,
+            series_slug=series_slug,
+            volume_slug=volume_slug,
+            cover_image=cover_image,
+            is_special=is_special,
+            is_one_shot=is_one_shot,
+            edition_label=edition_label,
+        )
+    return None
 
 
 def _find_cover_image(soup: BeautifulSoup) -> str | None:
@@ -283,11 +449,7 @@ def _extract_page_title(soup: BeautifulSoup, lines: list[str], *, kind: str) -> 
 
     fallback = clean_ws(lines[0] if lines else '')
     normalized_fallback = normalize_text(fallback)
-    looks_like_value_line = any(
-        normalized_fallback.startswith(normalize_text(prefix))
-        for prefix_list in VALUE_LABELS.values()
-        for prefix in prefix_list
-    ) or ':' in fallback
+    looks_like_value_line = _is_value_label_line(fallback, normalized_fallback) or ':' in fallback
     if (
         fallback
         and normalized_fallback not in RAW_SECTION_HEADINGS
@@ -347,7 +509,7 @@ def _infer_link_kind(url: str, base_url: str) -> str | None:
             return 'anime'
         if 'drama' in path:
             return 'drama'
-        if '/index.php/dossier' in path or '/index.php/dossiers' in path:
+        if any(token in path for token in ['/index.php/dossier', '/index.php/dossiers', '/index.php/report', '/index.php/reports']):
             return 'dossiers'
         if '/index.php/univers/' in path:
             return 'univers'
@@ -369,7 +531,7 @@ def _extract_related_links(soup: BeautifulSoup, base_url: str, page_url: str) ->
         normalized_text = normalize_text(text)
         if not text or len(normalized_text) < 2 or normalized_text in GENERIC_ANCHOR_TEXTS:
             continue
-        category = _anchor_context_heading(anchor) or _infer_link_kind(url, base_url)
+        category = _infer_link_kind(url, base_url)
         if category is None:
             continue
         item = LinkItem(title=text, url=url, kind=category)
@@ -393,32 +555,36 @@ def _extract_related_links(soup: BeautifulSoup, base_url: str, page_url: str) ->
 def parse_series_page(html: str, page_url: str) -> SeriesData:
     soup = _soup(html)
     lines = _lines(soup)
+    normalized_lines = _normalized_lines(lines)
     title_clean = _extract_page_title(soup, lines, kind='series')
-    summary = _extract_section(lines, 'Résumé') or _meta(soup, 'description')
-    strengths = _extract_section(lines, 'Les points forts de la série')
-    illustration = _extract_line_value(lines, VALUE_LABELS['illustration'])
+    summary = _extract_section(lines, 'Résumé', normalized_lines) or _meta(soup, 'description')
+    strengths = _extract_section(lines, 'Les points forts de la série', normalized_lines)
+    illustration = _extract_line_value(lines, VALUE_LABELS['illustration'], normalized_lines)
 
-    title_vo = _extract_line_value(lines, VALUE_LABELS['title_vo'])
-    translated_title = _extract_line_value(lines, VALUE_LABELS['translated_title'])
-    authors_story = unique_list((_extract_line_value(lines, VALUE_LABELS['story']) or '').split(','))
-    authors_art = unique_list((_extract_line_value(lines, VALUE_LABELS['art']) or '').split(','))
-    translators = unique_list((_extract_line_value(lines, VALUE_LABELS['translator']) or '').split(','))
-    genres = unique_list((_extract_line_value(lines, VALUE_LABELS['genre']) or '').split(','))
+    title_vo = _extract_line_value(lines, VALUE_LABELS['title_vo'], normalized_lines)
+    translated_title = _extract_line_value(lines, VALUE_LABELS['translated_title'], normalized_lines)
+    authors_story = unique_list((_extract_line_value(lines, VALUE_LABELS['story'], normalized_lines) or '').split(','))
+    authors_art = unique_list((_extract_line_value(lines, VALUE_LABELS['art'], normalized_lines) or '').split(','))
+    translators = unique_list((_extract_line_value(lines, VALUE_LABELS['translator'], normalized_lines) or '').split(','))
+    genres = unique_list((_extract_line_value(lines, VALUE_LABELS['genre'], normalized_lines) or '').split(','))
     themes: list[str] = []
-    raw_sections = _extract_raw_sections(lines)
+    raw_sections = _extract_raw_sections(lines, normalized_lines)
     for value in raw_sections.get('themes', []) + raw_sections.get('thèmes', []):
         if normalize_text(value).startswith('serie '):
             value = value.split(' ', 1)[1]
         themes.extend(unique_list(value.split('   ')))
-    vf, vo, last_release_date, next_release_date = _extract_vf_vo(soup, lines)
+    vf, vo, last_release_date, next_release_date = _extract_vf_vo(soup, lines, normalized_lines)
+    last_release_volume = _extract_series_release_volume(soup, 'lastvol', page_url)
+    next_release_volume = _extract_series_release_volume(soup, 'nextvol', page_url)
     stats = SeriesStats(
-        likes=_extract_number_after(lines, "J'aime"),
-        in_collection=_extract_number_after(lines, 'Dans ma collection'),
-        in_wishlist=_extract_number_after(lines, "Dans ma liste d'achat"),
-        marketplace=_extract_number_after(lines, 'Achat/vente'),
-        editorial_score=_extract_score_after(lines, 'Rédaction'),
-        reader_score=_extract_score_after(lines, 'Lecteurs'),
+        likes=_extract_number_after(lines, "J'aime", normalized_lines),
+        in_collection=_extract_number_after(lines, 'Dans ma collection', normalized_lines),
+        in_wishlist=_extract_number_after(lines, "Dans ma liste d'achat", normalized_lines),
+        marketplace=_extract_number_after(lines, 'Achat/vente', normalized_lines),
+        editorial_score=_extract_score_after(lines, 'Rédaction', normalized_lines),
+        reader_score=_extract_score_after(lines, 'Lecteurs', normalized_lines),
     )
+    advisory_age = _extract_number_after(lines, 'Age conseillé', normalized_lines)
 
     return SeriesData(
         title=title_clean,
@@ -428,21 +594,23 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
         authors_story=authors_story,
         authors_art=authors_art,
         translators=translators,
-        publisher_fr=_extract_line_value(lines, VALUE_LABELS['publisher_fr']),
-        publisher_vo=_extract_line_value(lines, VALUE_LABELS['publisher_vo']),
-        collection=_extract_line_value(lines, VALUE_LABELS['collection']),
-        type=_extract_line_value(lines, VALUE_LABELS['type']),
+        publisher_fr=_extract_line_value(lines, VALUE_LABELS['publisher_fr'], normalized_lines),
+        publisher_vo=_extract_line_value(lines, VALUE_LABELS['publisher_vo'], normalized_lines),
+        collection=_extract_line_value(lines, VALUE_LABELS['collection'], normalized_lines),
+        type=_extract_line_value(lines, VALUE_LABELS['type'], normalized_lines),
         genres=genres,
-        prepublication=_extract_line_value(lines, VALUE_LABELS['prepublication']),
-        origin=_extract_line_value(lines, VALUE_LABELS['origin']),
+        prepublication=_extract_line_value(lines, VALUE_LABELS['prepublication'], normalized_lines),
+        origin=_extract_line_value(lines, VALUE_LABELS['origin'], normalized_lines),
         illustration=illustration,
         illustration_details=_parse_illustration_details(illustration),
-        advisory_age=_extract_number_after(lines, 'Age conseillé') and str(_extract_number_after(lines, 'Age conseillé')) + '+',
+        advisory_age=f'{advisory_age}+' if advisory_age is not None else None,
         cover_image=_find_cover_image(soup),
         vf=vf,
         vo=vo,
         last_release_date=last_release_date,
         next_release_date=next_release_date,
+        last_release_volume=last_release_volume,
+        next_release_volume=next_release_volume,
         stats=stats,
         themes=unique_list(themes),
         strengths=strengths,
@@ -455,9 +623,10 @@ def parse_series_page(html: str, page_url: str) -> SeriesData:
 def parse_series_search_meta_page(html: str, page_url: str) -> SeriesSearchMetaData:
     soup = _soup(html)
     lines = _lines(soup)
+    normalized_lines = _normalized_lines(lines)
     title_clean = _extract_page_title(soup, lines, kind='series')
-    vf, vo, _, _ = _extract_vf_vo(soup, lines)
-    source_type = _extract_line_value(lines, VALUE_LABELS['type'])
+    vf, vo, _, _ = _extract_vf_vo(soup, lines, normalized_lines)
+    source_type = _extract_line_value(lines, VALUE_LABELS['type'], normalized_lines)
     related = _extract_related_links(soup, _base_url_from_page(page_url), page_url)
     return SeriesSearchMetaData(
         title=title_clean,
@@ -480,11 +649,12 @@ def parse_series_search_meta_page(html: str, page_url: str) -> SeriesSearchMetaD
 def parse_volume_search_meta_page(html: str, page_url: str) -> VolumeSearchMetaData:
     soup = _soup(html)
     lines = _lines(soup)
+    normalized_lines = _normalized_lines(lines)
     title_clean = _extract_page_title(soup, lines, kind='volume')
     parsed_path = [part for part in urlparse(page_url).path.split('/') if part]
     number = extract_volume_number(title_clean, parsed_path[-1] if parsed_path else None)
-    volume_type = _extract_line_value(lines, VALUE_LABELS['type'])
-    collection = _extract_line_value(lines, VALUE_LABELS['collection'])
+    volume_type = _extract_line_value(lines, VALUE_LABELS['type'], normalized_lines)
+    collection = _extract_line_value(lines, VALUE_LABELS['collection'], normalized_lines)
     edition_label = infer_volume_edition_label(title_clean, collection, volume_type)
     is_special, is_one_shot = infer_volume_flags(title_clean, collection, volume_type)
 
@@ -511,19 +681,21 @@ def parse_volume_search_meta_page(html: str, page_url: str) -> VolumeSearchMetaD
 def parse_volume_page(html: str, page_url: str) -> VolumeData:
     soup = _soup(html)
     lines = _lines(soup)
+    normalized_lines = _normalized_lines(lines)
     title_clean = _extract_page_title(soup, lines, kind='volume')
     series_title = None
     parsed_path = [part for part in urlparse(page_url).path.split('/') if part]
     if 'manga' in parsed_path and len(parsed_path) >= 4:
         possible_series = parsed_path[2].replace('-', ' ')
         series_title = clean_ws(possible_series.title())
-    illustration = _extract_line_value(lines, VALUE_LABELS['illustration'])
+    illustration = _extract_line_value(lines, VALUE_LABELS['illustration'], normalized_lines)
 
     number = extract_volume_number(title_clean, parsed_path[-1] if parsed_path else None)
-    volume_type = _extract_line_value(lines, VALUE_LABELS['type'])
-    collection = _extract_line_value(lines, VALUE_LABELS['collection'])
+    volume_type = _extract_line_value(lines, VALUE_LABELS['type'], normalized_lines)
+    collection = _extract_line_value(lines, VALUE_LABELS['collection'], normalized_lines)
     edition_label = infer_volume_edition_label(title_clean, collection, volume_type)
     is_special, is_one_shot = infer_volume_flags(title_clean, collection, volume_type)
+    advisory_age = _extract_number_after(lines, 'Age conseillé', normalized_lines)
 
     return VolumeData(
         title=title_clean,
@@ -535,7 +707,7 @@ def parse_volume_page(html: str, page_url: str) -> VolumeData:
         is_one_shot=is_one_shot,
         title_vo=_extract_line_value(lines, VALUE_LABELS['title_vo']),
         translated_title=_extract_line_value(lines, VALUE_LABELS['translated_title']),
-        summary=_extract_section(lines, 'Résumé') or _meta(soup, 'description'),
+        summary=_extract_section(lines, 'Résumé', normalized_lines) or _meta(soup, 'description'),
         authors_story=unique_list((_extract_line_value(lines, VALUE_LABELS['story']) or '').split(',')),
         authors_art=unique_list((_extract_line_value(lines, VALUE_LABELS['art']) or '').split(',')),
         translators=unique_list((_extract_line_value(lines, VALUE_LABELS['translator']) or '').split(',')),
@@ -548,15 +720,14 @@ def parse_volume_page(html: str, page_url: str) -> VolumeData:
         origin=_extract_line_value(lines, VALUE_LABELS['origin']),
         illustration=illustration,
         illustration_details=_parse_illustration_details(illustration),
-        advisory_age=_extract_number_after(lines, 'Age conseillé') and str(_extract_number_after(lines, 'Age conseillé')) + '+',
+        advisory_age=f'{advisory_age}+' if advisory_age is not None else None,
         publication_date=parse_french_date(_extract_line_value(lines, VALUE_LABELS['publication_date'])),
         isbn_ean=_extract_line_value(lines, VALUE_LABELS['isbn_ean']),
         price_code=_extract_line_value(lines, VALUE_LABELS['price_code']),
         cover_image=_find_cover_image(soup),
-        editorial_score=_extract_score_after(lines, 'Rédaction'),
-        reader_score=_extract_score_after(lines, 'Lecteurs'),
-        related=_extract_related_links(soup, _base_url_from_page(page_url), page_url),
-        raw_sections=_extract_raw_sections(lines) or None,
+        editorial_score=_extract_score_after(lines, 'Rédaction', normalized_lines),
+        reader_score=_extract_score_after(lines, 'Lecteurs', normalized_lines),
+        raw_sections=_extract_raw_sections(lines, normalized_lines) or None,
         source_url=page_url,
     )
 
@@ -819,6 +990,28 @@ def _guess_volume_number(title: str, volume_slug: str | None) -> str | None:
     return extract_volume_number(title, volume_slug)
 
 
+def _edition_item_title(anchor, container_text: str, volume_slug: str | None) -> str | None:
+    candidates: list[str | None] = [
+        anchor.get_text(' ', strip=True),
+        anchor.get('title'),
+        anchor.get('aria-label'),
+    ]
+    image = anchor.find('img')
+    if image is not None:
+        candidates.extend([image.get('alt'), image.get('title')])
+    candidates.append(container_text)
+
+    for candidate in candidates:
+        cleaned = clean_ws(candidate)
+        if cleaned and normalize_text(cleaned) not in GENERIC_ANCHOR_TEXTS:
+            return cleaned
+
+    number = extract_volume_number(volume_slug)
+    if number:
+        return f'Vol.{number}'
+    return volume_slug
+
+
 
 def _extract_publication_date_from_text(text: str) -> str | None:
     match = re.search(r'(\d{2}/\d{2}/\d{4})', text)
@@ -837,11 +1030,51 @@ def _base_url_from_page(page_url: str) -> str:
 
 
 
+def edition_series_key(value: str | None) -> str:
+    """Compare an edition slug with its parent series without edition markers."""
+    normalized = normalize_text((value or '').replace('-', ' '))
+    suffix = r'(?:edition originale|edition perfect|perfect edition|integrale|collector|deluxe|ultimate|kanzenban|grand format|edition double|edition triple)'
+    while True:
+        stripped = re.sub(rf'\s+{suffix}$', '', normalized).strip()
+        if stripped == normalized:
+            return normalized
+        normalized = stripped
+
+
 def parse_series_editions_page(html: str, page_url: str, base_url: str, edition: str) -> SeriesEditionsBlock:
     soup = _soup(html)
     seen: set[str] = set()
     items: list[SeriesEditionItem] = []
-    for anchor in soup.find_all('a', href=True):
+    # The page also contains unrelated manga links (recommendations, rankings,
+    # sidebars). Only the volume cards belonging to an edition are authoritative.
+    edition_sections = []
+    for wrapper in soup.select('.boxedTitleWrapper'):
+        content = wrapper.find_next_sibling()
+        if content is not None and 'boxedContent' in (content.get('class') or []):
+            edition_sections.append(content)
+    if edition_sections:
+        anchors = [anchor for section in edition_sections for anchor in section.find_all('a', href=True)]
+    else:
+        anchors = [
+            anchor
+            for card in soup.select('.volume-card, .serieVolumesImgBlock, .vols')
+            for anchor in card.find_all('a', href=True)
+        ]
+        if not anchors:
+            # Legacy pages may not use card classes; retain their volume links
+            # only when the URL identifies the requested series itself.
+            page_slug = urlparse(page_url).path.rstrip('/').split('/')[-1]
+            expected_slug = edition_series_key(page_slug)
+            anchors = [
+                anchor for anchor in soup.find_all('a', href=True)
+                if '/index.php/manga/' in anchor.get('href', '')
+                and (
+                    edition == 'vo'
+                    or edition_series_key(anchor.get('href', '').split('/index.php/manga/', 1)[-1].split('/', 1)[0]) == expected_slug
+                )
+            ]
+    expected_slug = edition_series_key(urlparse(page_url).path.rstrip('/').split('/')[-1])
+    for anchor in anchors:
         href = anchor.get('href', '')
         url = ensure_absolute_url(base_url, href)
         if not url or url in seen:
@@ -850,16 +1083,18 @@ def parse_series_editions_page(html: str, page_url: str, base_url: str, edition:
             continue
         if any(excluded in url for excluded in ['/manga/news/', '/manga/critique/', '/manga/avis/', '/manga/extrait/']):
             continue
-        title = clean_ws(anchor.get_text(' ', strip=True))
-        if not title or normalize_text(title) in GENERIC_ANCHOR_TEXTS:
-            continue
         parsed_path = [part for part in urlparse(url).path.split('/') if part]
-        if len(parsed_path) < 4:
+        if len(parsed_path) < 3 or parsed_path[:2] != ['index.php', 'manga']:
             continue
-        series_slug = parsed_path[-2]
-        volume_slug = parsed_path[-1]
+        series_slug = parsed_path[2]
+        volume_slug = parsed_path[3] if len(parsed_path) > 3 else None
+        if edition == 'vf' and edition_series_key(series_slug) != expected_slug:
+            continue
         container = anchor.find_parent(['article', 'li', 'div', 'tr']) or anchor.parent
-        container_text = clean_ws(container.get_text(' ', strip=True)) if container else title
+        container_text = clean_ws(container.get_text(' ', strip=True)) if container else ''
+        title = _edition_item_title(anchor, container_text, volume_slug)
+        if not title:
+            continue
         publication_date = _extract_publication_date_from_text(container_text)
         cover_image = None
         if container:
@@ -889,3 +1124,166 @@ def parse_series_editions_page(html: str, page_url: str, base_url: str, edition:
         raise ParseError('Unable to parse the editions list.')
     items.sort(key=lambda item: (int(item.number) if item.number and item.number.isdigit() else 999999, normalize_text(item.title)))
     return SeriesEditionsBlock(edition='vf' if edition == 'vf' else 'vo', source_url=page_url, total=len(items), items=items)
+
+
+def _edition_group_label(raw_heading: str) -> tuple[str, str]:
+    normalized = normalize_text(raw_heading)
+    if normalized.startswith('volumes de la serie') or normalized == 'volumes':
+        return 'edition_originale', 'Edition originale'
+    inferred = infer_volume_edition_label(raw_heading)
+    if inferred != 'edition_originale':
+        return inferred, clean_ws(raw_heading)
+    fallback = slugify(normalized).replace('-', '_') or 'inconnue'
+    return f'edition_{fallback}', clean_ws(raw_heading)
+
+
+def _edition_group_explicit_status(text: str) -> tuple[str, str, str, str | None]:
+    normalized = normalize_text(text)
+    if re.search(r'\b(termine|terminee|complete|acheve|achevee)\b', normalized):
+        return 'completed', 'explicit', 'high', 'The edition section explicitly reports a completed status.'
+    if re.search(r'\b(en cours|ongoing)\b', normalized):
+        return 'ongoing', 'explicit', 'high', 'The edition section explicitly reports an ongoing status.'
+    return 'unknown', 'unknown', 'none', None
+
+
+def _edition_group_items(container, *, base_url: str, edition_label: str, series_slug: str) -> list[SeriesEditionItem]:
+    seen: set[str] = set()
+    items: list[SeriesEditionItem] = []
+    for anchor in container.find_all('a', href=True):
+        url = ensure_absolute_url(base_url, anchor.get('href', ''))
+        if not url or url in seen or '/index.php/manga/' not in url:
+            continue
+        if any(excluded in url for excluded in ['/manga/news/', '/manga/critique/', '/manga/avis/', '/manga/extrait/']):
+            continue
+        parsed_path = [part for part in urlparse(url).path.split('/') if part]
+        if len(parsed_path) < 3 or parsed_path[:2] != ['index.php', 'manga']:
+            continue
+        item_series_slug = parsed_path[2]
+        volume_slug = parsed_path[3] if len(parsed_path) > 3 else None
+        if edition_series_key(item_series_slug) != edition_series_key(series_slug):
+            continue
+        item_container = anchor.find_parent(['article', 'li', 'div', 'tr']) or anchor.parent
+        container_text = clean_ws(item_container.get_text(' ', strip=True)) if item_container else ''
+        title = _edition_item_title(anchor, container_text, volume_slug)
+        if not title:
+            continue
+        cover_image = None
+        if item_container:
+            image = item_container.find('img')
+            if image and image.get('src'):
+                cover_image = ensure_absolute_url(base_url, image['src'])
+        number = _guess_volume_number(title, volume_slug)
+        is_special, is_one_shot = infer_volume_flags(title)
+        seen.add(url)
+        items.append(
+            SeriesEditionItem(
+                title=title,
+                url=url,
+                series_slug=item_series_slug,
+                volume_slug=volume_slug,
+                number=number,
+                number_int=parse_volume_number_int(number),
+                edition_label=edition_label,
+                is_special=is_special,
+                is_one_shot=is_one_shot,
+                publication_date=_extract_publication_date_from_text(container_text),
+                cover_image=cover_image,
+            )
+        )
+    items.sort(key=lambda item: (item.number_int if item.number_int is not None else 999999, normalize_text(item.title)))
+    return items
+
+
+def _apply_edition_group_statuses(groups: list[SeriesEditionGroup], vf_status: EditionStatus | None) -> None:
+    original = next((group for group in groups if group.edition_label == 'edition_originale'), None)
+    if original and vf_status and vf_status.status:
+        status, source, confidence, reason = _edition_group_explicit_status(vf_status.status)
+        if status != 'unknown':
+            original.status = status
+            original.status_source = source
+            original.status_confidence = confidence
+            original.status_reason = f'Series metadata reports VF status "{vf_status.status}".'
+
+    consolidated_labels = {'perfect', 'deluxe', 'ultimate', 'kanzenban', 'double', 'triple', 'grand_format'}
+    if original and original.status == 'completed' and original.volume_count:
+        for group in groups:
+            if group.status != 'unknown' or group.edition_label not in consolidated_labels or not group.volume_count:
+                continue
+            ratio_label = None
+            if original.volume_count * 2 == group.volume_count * 3:
+                ratio_label = '3:2'
+            elif original.volume_count == group.volume_count * 2:
+                ratio_label = '2:1'
+            elif original.volume_count == group.volume_count * 3:
+                ratio_label = '3:1'
+            expected_ratio = '2:1' if group.edition_label == 'double' else '3:1' if group.edition_label == 'triple' else None
+            if ratio_label is None or (expected_ratio is not None and ratio_label != expected_ratio):
+                continue
+            group.status = 'completed'
+            group.status_source = 'inferred'
+            group.status_confidence = 'medium'
+            group.status_reason = (
+                f'The completed original edition has {original.volume_count} volumes and this compiled edition '
+                f'has {group.volume_count}, an exact {ratio_label} ratio.'
+            )
+
+    for group in groups:
+        if group.status == 'completed':
+            group.total_volumes = group.volume_count
+
+
+def parse_series_edition_groups_page(
+    html: str,
+    page_url: str,
+    base_url: str,
+    series_slug: str,
+) -> SeriesEditionGroupsData:
+    soup = _soup(html)
+    lines = _lines(soup)
+    vf_status, _, _, _ = _extract_vf_vo(soup, lines, _normalized_lines(lines))
+    groups: list[SeriesEditionGroup] = []
+
+    for wrapper in soup.select('.boxedTitleWrapper'):
+        heading = wrapper.find(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+        raw_heading = clean_ws(heading.get_text(' ', strip=True)) if heading else ''
+        if not raw_heading:
+            continue
+        content = wrapper.find_next_sibling()
+        if content is None or 'boxedContent' not in (content.get('class') or []):
+            continue
+        edition_label, display_name = _edition_group_label(raw_heading)
+        items = _edition_group_items(content, base_url=base_url, edition_label=edition_label, series_slug=series_slug)
+        if not items:
+            continue
+        slug_counts = Counter(item.series_slug for item in items if item.series_slug)
+        dominant_slug = slug_counts.most_common(1)[0][0] if slug_counts else None
+        available_numbers = sorted({item.number_int for item in items if item.number_int is not None})
+        status, status_source, status_confidence, status_reason = _edition_group_explicit_status(
+            content.get_text(' ', strip=True)
+        )
+        groups.append(
+            SeriesEditionGroup(
+                edition_label=edition_label,
+                display_name=display_name,
+                raw_heading=raw_heading,
+                series_slug=dominant_slug,
+                volume_count=len(items),
+                highest_volume_number=max(available_numbers) if available_numbers else None,
+                available_numbers=available_numbers,
+                status=status,
+                status_source=status_source,
+                status_confidence=status_confidence,
+                status_reason=status_reason,
+                items=items,
+            )
+        )
+
+    if not groups:
+        raise ParseError('Unable to parse edition groups from the editions page.')
+    _apply_edition_group_statuses(groups, vf_status)
+    return SeriesEditionGroupsData(
+        title=_extract_page_title(soup, lines, kind='series'),
+        series_slug=series_slug,
+        source_url=page_url,
+        groups=groups,
+    )

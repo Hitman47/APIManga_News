@@ -1,11 +1,18 @@
 import asyncio
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
 
 from app.cache import SQLiteCache
-from app.exceptions import ParseError
-from app.manga_news.service import MangaNewsService
+from app.exceptions import ParseError, ResourceNotFound
+from app.manga_news.service import (
+    CACHE_SCHEMA_VERSION,
+    MangaNewsService,
+    parsed_detail_cache_key,
+    versioned_cache_key,
+)
+from app.models import Envelope, SeriesEditionsData
 
 
 class DummySettings:
@@ -66,6 +73,89 @@ async def test_negative_cache_prevents_second_fetch_after_parse_error(tmp_path: 
     assert fetcher.calls == 1
     stats = service.cache.stats()
     assert stats['negative_cache']['totals']['entries'] == 1
+
+
+@pytest.mark.asyncio
+async def test_fresh_negative_cache_keeps_serving_usable_stale_payload(tmp_path: Path):
+    cache = SQLiteCache(tmp_path / 'cache.sqlite3')
+    series_url = 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale'
+    cache_key = parsed_detail_cache_key('series', series_url)
+    cache.set(
+        cache_key,
+        {
+            '_schema_version': CACHE_SCHEMA_VERSION,
+            'data': {'title': 'One Piece', 'source_url': series_url},
+            'source_url': series_url,
+        },
+        ttl_seconds=-1,
+        stale_grace_seconds=3600,
+        namespace='series',
+        resource_url=series_url,
+    )
+    cache.set_negative(
+        cache_key,
+        error_code='UPSTREAM_PARSE_ERROR',
+        detail='recent parser failure',
+        ttl_seconds=300,
+        namespace='series',
+        resource_url=series_url,
+    )
+    fetcher = CountingFetcher('<html></html>')
+    service = MangaNewsService(settings=DummySettings(tmp_path), fetcher=fetcher, cache=cache)
+
+    response = await service.get_series(slug='One-piece-Edition-originale')
+
+    assert response.cached is True
+    assert response.partial is True
+    assert response.data['title'] == 'One Piece'
+    assert 'negatively cached' in response.warnings[0]
+    assert fetcher.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_parser_cache_revision_reuses_fresh_html_without_upstream_fetch(tmp_path: Path):
+    cache = SQLiteCache(tmp_path / 'cache.sqlite3')
+    series_url = 'https://www.manga-news.com/index.php/serie/Blue-Giant-Momentum'
+    html = (Path(__file__).parent / 'fixtures' / 'series_blue_giant_momentum_current.html').read_text(encoding='utf-8')
+
+    cache.set(
+        versioned_cache_key('series', series_url),
+        {
+            '_schema_version': CACHE_SCHEMA_VERSION,
+            'data': {
+                'title': 'Blue Giant Momentum',
+                'type': None,
+                'genres': ['s Manga'],
+                'source_url': series_url,
+            },
+            'source_url': series_url,
+        },
+        ttl_seconds=3600,
+        stale_grace_seconds=3600,
+        namespace='series',
+        resource_url=series_url,
+    )
+    cache.set(
+        versioned_cache_key('page-html', series_url),
+        {
+            '_schema_version': CACHE_SCHEMA_VERSION,
+            'data': {'html': html},
+            'source_url': series_url,
+        },
+        ttl_seconds=3600,
+        stale_grace_seconds=3600,
+        namespace='series-html',
+        resource_url=series_url,
+    )
+    fetcher = CountingFetcher(html)
+    service = MangaNewsService(settings=DummySettings(tmp_path), fetcher=fetcher, cache=cache)
+
+    response = await service.get_series(slug='Blue-Giant-Momentum')
+
+    assert response.cached is False
+    assert response.data['type'] == 'Seinen'
+    assert response.data['genres'] == ['Drame', 'Tranche-de-vie']
+    assert fetcher.calls == 0
 
 
 @pytest.mark.asyncio
@@ -156,6 +246,264 @@ async def test_series_editions_reuses_series_cache_and_block_cache(tmp_path: Pat
 
 
 @pytest.mark.asyncio
+async def test_release_state_by_series_uses_vf_editions_and_optional_isbn(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    class DummyEntry:
+        fetched_at = datetime(2026, 6, 18, 10, 0, tzinfo=UTC)
+        expires_at = datetime(2026, 6, 19, 10, 0, tzinfo=UTC)
+
+    async def fake_get_series_payload(**kwargs):
+        assert kwargs == {'slug': 'One-piece-Edition-originale'}
+        return (
+            {
+                'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+                'data': {
+                    'title': 'One Piece',
+                    'publisher_fr': 'Glénat',
+                    'vf': {'volumes': 111, 'status': 'En cours'},
+                },
+            },
+            DummyEntry(),
+            True,
+            False,
+            [],
+        )
+
+    async def fake_get_series_editions(**kwargs):
+        assert kwargs == {'slug': 'One-piece-Edition-originale', 'edition': 'vf'}
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url='https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+            cached=True,
+            fetched_at='2026-06-18T10:00:00+00:00',
+            cache_expires_at='2026-06-19T10:00:00+00:00',
+            partial=False,
+            warnings=[],
+            fingerprint='fp-editions',
+            data={
+                'title': 'One Piece',
+                'series_slug': 'One-piece-Edition-originale',
+                'vf': {
+                    'edition': 'vf',
+                    'source_url': 'https://www.manga-news.com/index.php/serie/editions/One-piece-Edition-originale',
+                    'total': 4,
+                    'items': [
+                        {
+                            'title': 'One Piece Vol.109',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-109',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'vol-109',
+                            'number': '109',
+                            'number_int': 109,
+                            'publication_date': '2026-01-02',
+                            'is_special': False,
+                            'is_one_shot': False,
+                        },
+                        {
+                            'title': 'One Piece Vol.110',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'vol-110',
+                            'number': '110',
+                            'number_int': 110,
+                            'publication_date': '2026-04-02',
+                            'is_special': False,
+                            'is_one_shot': False,
+                        },
+                        {
+                            'title': 'One Piece Vol.111',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-111',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'vol-111',
+                            'number': '111',
+                            'number_int': 111,
+                            'publication_date': '2026-07-02',
+                            'is_special': False,
+                            'is_one_shot': False,
+                        },
+                        {
+                            'title': 'One Piece Special',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece/special',
+                            'series_slug': 'One-Piece',
+                            'volume_slug': 'special',
+                            'number': '999',
+                            'number_int': 999,
+                            'publication_date': '2026-06-01',
+                            'is_special': True,
+                            'is_one_shot': False,
+                        },
+                    ],
+                },
+                'vo': None,
+                'source_url': 'https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+            },
+        )
+
+    volume_calls = []
+
+    async def fake_get_volume(**kwargs):
+        volume_calls.append(kwargs)
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url=f"https://www.manga-news.com/index.php/manga/{kwargs['series_slug']}/{kwargs['volume_slug']}",
+            cached=True,
+            fetched_at='2026-06-18T10:00:00+00:00',
+            cache_expires_at='2026-06-19T10:00:00+00:00',
+            partial=False,
+            warnings=[],
+            fingerprint=f"fp-{kwargs['volume_slug']}",
+            data={'isbn_ean': f"9780000000{kwargs['volume_slug'][-3:]}"},
+        )
+
+    service._get_series_payload = fake_get_series_payload
+    service.get_series_editions = fake_get_series_editions
+    service.get_volume = fake_get_volume
+
+    response = await service.get_release_state_by_series(
+        slug='One-piece-Edition-originale',
+        include_isbn=True,
+        today='2026-06-18',
+    )
+
+    assert response.cached is True
+    assert response.partial is False
+    assert response.data['status'] == 'FOUND_CONFIRMED'
+    assert response.data['confidence'] == 'high'
+    assert response.data['last_released']['number'] == '110'
+    assert response.data['last_released']['isbn_ean'] == '9780000000110'
+    assert response.data['next_release']['number'] == '111'
+    assert response.data['next_release']['isbn_ean'] == '9780000000111'
+    assert [call['volume_slug'] for call in volume_calls] == ['vol-110', 'vol-111']
+    assert all(call['fields'] == 'isbn_ean' for call in volume_calls)
+    assert all(call['include_parent_editions'] is False for call in volume_calls)
+
+
+@pytest.mark.asyncio
+async def test_release_state_prefers_explicit_atom_series_cards_over_stale_vf_count(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    class DummyEntry:
+        fetched_at = datetime(2026, 7, 29, 8, 0, tzinfo=UTC)
+        expires_at = datetime(2026, 7, 30, 8, 0, tzinfo=UTC)
+
+    async def fake_get_series_payload(**kwargs):
+        assert kwargs == {'slug': 'Atom-The-Beginning'}
+        return (
+            {
+                'source_url': 'https://www.manga-news.com/index.php/serie/Atom-The-Beginning',
+                'data': {
+                    'title': 'Atom - The Beginning',
+                    'publisher_fr': 'Kana',
+                    'vf': {'volumes': 20, 'status': 'En cours'},
+                    'last_release_date': '2025-10-17',
+                    'next_release_date': '2026-10-02',
+                    'last_release_volume': {
+                        'title': 'Atom - The Beginning Vol.21',
+                        'number': '21',
+                        'number_int': 21,
+                        'publication_date': '2025-10-17',
+                        'source_url': 'https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-21',
+                        'series_slug': 'Atom-The-Beginning',
+                        'volume_slug': 'vol-21',
+                        'is_special': False,
+                        'is_one_shot': False,
+                    },
+                    'next_release_volume': {
+                        'title': 'Atom - The Beginning Vol.22',
+                        'number': '22',
+                        'number_int': 22,
+                        'publication_date': '2026-10-02',
+                        'source_url': 'https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-22',
+                        'series_slug': 'Atom-The-Beginning',
+                        'volume_slug': 'vol-22',
+                        'is_special': False,
+                        'is_one_shot': False,
+                    },
+                },
+            },
+            DummyEntry(),
+            False,
+            False,
+            [],
+        )
+
+    async def fake_get_series_editions(**kwargs):
+        assert kwargs == {'slug': 'Atom-The-Beginning', 'edition': 'vf'}
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url='https://www.manga-news.com/index.php/serie/editions/Atom-The-Beginning',
+            cached=False,
+            partial=False,
+            warnings=[],
+            data={
+                'title': 'Atom - The Beginning',
+                'series_slug': 'Atom-The-Beginning',
+                'vf': {
+                    'edition': 'vf',
+                    'source_url': 'https://www.manga-news.com/index.php/serie/editions/Atom-The-Beginning',
+                    'total': 2,
+                    'items': [
+                        {
+                            'title': 'Atom - The Beginning Vol.21',
+                            'url': 'https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-21',
+                            'series_slug': 'Atom-The-Beginning',
+                            'volume_slug': 'vol-21',
+                            'number': '21',
+                            'number_int': 21,
+                            'publication_date': None,
+                        },
+                        {
+                            'title': 'Atom - The Beginning Vol.22',
+                            'url': 'https://www.manga-news.com/index.php/manga/Atom-The-Beginning/vol-22',
+                            'series_slug': 'Atom-The-Beginning',
+                            'volume_slug': 'vol-22',
+                            'number': '22',
+                            'number_int': 22,
+                            'publication_date': None,
+                        },
+                    ],
+                },
+            },
+        )
+
+    service._get_series_payload = fake_get_series_payload
+    service.get_series_editions = fake_get_series_editions
+
+    response = await service.get_release_state_by_series(
+        slug='Atom-The-Beginning',
+        include_isbn=False,
+        today='2026-07-29',
+    )
+
+    assert response.data['series']['vf']['volumes'] == 20
+    assert response.data['status'] == 'FOUND_CONFIRMED'
+    assert response.data['confidence'] == 'high'
+    assert response.data['last_released']['number'] == '21'
+    assert response.data['last_released']['publication_date'] == '2025-10-17'
+    assert response.data['next_release']['number'] == '22'
+    assert response.data['next_release']['publication_date'] == '2026-10-02'
+    assert response.data['next_release']['volume_slug'] == 'vol-22'
+
+
+@pytest.mark.asyncio
 async def test_search_uses_settings_defaults_for_optional_flags(tmp_path: Path):
     class SearchDefaultsSettings(DummySettings):
         def __init__(self, tmp_path: Path):
@@ -187,6 +535,85 @@ async def test_search_uses_settings_defaults_for_optional_flags(tmp_path: Path):
     await service.search(query='one piece', kind='series', mode='all', limit=10)
 
     assert called == {'query': 'one piece', 'enrich': True, 'include_editions': False, 'load_search_metadata': True}
+
+
+@pytest.mark.asyncio
+async def test_search_best_enriches_only_one_candidate(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+    enriched_counts = []
+
+    async def fake_get_search_source_results(*, url: str, query: str):
+        from app.models import SearchResult
+
+        return [
+            SearchResult(
+                title=f'One Piece {index}',
+                url=f'https://example.test/series/{index}',
+                kind='series',
+                score=100 - index,
+                slug=f'One-Piece-{index}',
+            )
+            for index in range(12)
+        ]
+
+    async def fake_enrich(results, **kwargs):
+        enriched_counts.append(len(results))
+        return results
+
+    service._get_search_source_results = fake_get_search_source_results
+    service._enrich_search_results = fake_enrich
+
+    response = await service.search(
+        query='one piece',
+        kind='series',
+        mode='best',
+        limit=1,
+        enrich=True,
+        include_editions=True,
+    )
+
+    assert enriched_counts == [1]
+    assert len(response.data) == 1
+
+
+@pytest.mark.asyncio
+async def test_light_search_defaults_only_fetch_search_pages(tmp_path: Path):
+    class LightSearchSettings(DummySettings):
+        def __init__(self, path: Path):
+            super().__init__(path)
+            self.search_default_enrich = False
+            self.search_default_include_editions = False
+
+    base_url = 'https://www.manga-news.com'
+    query = 'one piece'
+    search_url = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q={query}'
+    search_url_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q={query}'
+    series_url = f'{base_url}/index.php/serie/One-piece-Edition-originale'
+
+    class MappingFetcher:
+        def __init__(self):
+            self.calls = []
+
+        async def get_text(self, url: str, params: dict | None = None):
+            self.calls.append(url)
+            html = f'<html><body><a href="{series_url}">One Piece</a></body></html>' if url == search_url else '<html></html>'
+            return DummyFetchResult(html, url)
+
+    fetcher = MappingFetcher()
+    service = MangaNewsService(
+        settings=LightSearchSettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    response = await service.search(query=query, kind='series', mode='best', limit=1)
+
+    assert response.found is True
+    assert fetcher.calls == [search_url, search_url_vo]
 
 
 @pytest.mark.asyncio
@@ -225,6 +652,457 @@ async def test_volume_uses_settings_default_include_parent_editions(tmp_path: Pa
     assert calls['series'] == 1
     assert payload.data['vf']['volumes'] == 1
     assert payload.data['vo']['volumes'] == 2
+
+
+@pytest.mark.asyncio
+async def test_volume_payload_drops_related_field(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    class DummyEntry:
+        fetched_at = datetime(2026, 6, 18, 10, 0, tzinfo=UTC)
+        expires_at = datetime(2026, 6, 19, 10, 0, tzinfo=UTC)
+
+    async def fake_get_volume_payload(**kwargs):
+        return (
+            {
+                'data': {
+                    'title': 'One Piece Vol.110',
+                    'number': '110',
+                    'related': {'external': [{'title': 'Acheter', 'url': 'https://example.test'}]},
+                },
+                'source_url': 'https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+            },
+            DummyEntry(),
+            True,
+            False,
+            [],
+        )
+
+    service._get_volume_payload = fake_get_volume_payload
+
+    payload = await service.get_volume(series_slug='One-Piece', volume_slug='vol-110')
+
+    assert payload.data['title'] == 'One Piece Vol.110'
+    assert 'related' not in payload.data
+
+
+@pytest.mark.asyncio
+async def test_get_volume_by_number_resolves_volume_slug_from_vf_editions(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_editions(**kwargs):
+        assert kwargs == {'slug': 'One-piece-Edition-originale', 'edition': 'vf'}
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url='https://www.manga-news.com/index.php/serie/One-piece-Edition-originale',
+            cached=True,
+            fetched_at='2026-06-18T10:00:00+00:00',
+            cache_expires_at='2026-06-19T10:00:00+00:00',
+            partial=False,
+            warnings=[],
+            fingerprint='fp-editions',
+            data={
+                'title': 'One Piece',
+                'series_slug': 'One-piece-Edition-originale',
+                'vf': {
+                    'edition': 'vf',
+                    'total': 2,
+                    'items': [
+                        {
+                            'title': 'One Piece Vol.110 Collector',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-Piece-Collector/vol-110',
+                            'series_slug': 'One-Piece-Collector',
+                            'volume_slug': 'vol-110-collector',
+                            'number': '110',
+                            'number_int': 110,
+                            'publication_date': '2026-04-02',
+                            'is_special': True,
+                        },
+                        {
+                            'title': 'One Piece Vol.110',
+                            'url': 'https://www.manga-news.com/index.php/manga/One-piece-Edition-originale/vol-110',
+                            'series_slug': 'One-piece-Edition-originale',
+                            'volume_slug': 'vol-110',
+                            'number': '110',
+                            'number_int': 110,
+                            'publication_date': '2026-04-02',
+                            'is_special': False,
+                        },
+                    ],
+                },
+                'vo': None,
+            },
+        )
+
+    volume_calls = []
+
+    async def fake_get_volume(**kwargs):
+        volume_calls.append(kwargs)
+        return Envelope(
+            schema_version='1.0',
+            ok=True,
+            found=True,
+            source='manga_news',
+            source_url='https://www.manga-news.com/index.php/manga/One-Piece/vol-110',
+            cached=True,
+            fetched_at='2026-06-18T10:00:00+00:00',
+            cache_expires_at='2026-06-19T10:00:00+00:00',
+            partial=False,
+            warnings=[],
+            fingerprint='fp-volume-110',
+            data={'title': 'One Piece Vol.110', 'number': '110'},
+        )
+
+    service.get_series_editions = fake_get_series_editions
+    service.get_volume = fake_get_volume
+
+    payload = await service.get_volume_by_number(
+        series_slug='One-piece-Edition-originale',
+        number=110,
+        fields='title,number',
+        include_parent_editions=False,
+    )
+
+    assert payload.data['number'] == '110'
+    assert volume_calls == [
+        {
+            'series_slug': 'One-piece-Edition-originale',
+            'volume_slug': 'vol-110',
+            'blocks': None,
+            'fields': 'title,number',
+            'include_raw_sections': False,
+            'include_parent_editions': False,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_volume_by_number_rejects_unrelated_cached_volume(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_editions(**kwargs):
+        return Envelope(data={
+            'title': 'Amo - Chasseuse de Dieux',
+            'series_slug': 'Amo-Chasseuse-de-Dieux',
+            'vf': {'edition': 'vf', 'total': 1, 'items': [{
+                'title': 'Vol.1 Baptism - Perfect Edition',
+                'url': 'https://www.manga-news.com/index.php/manga/Baptism-Perfect-Edition/vol-1',
+                'series_slug': 'Baptism-Perfect-Edition',
+                'volume_slug': 'vol-1',
+                'number': '1', 'number_int': 1,
+            }]},
+        })
+
+    async def unexpected_get_volume(**kwargs):
+        raise AssertionError('An unrelated volume must never be fetched.')
+
+    service.get_series_editions = fake_get_series_editions
+    service.get_volume = unexpected_get_volume
+    with pytest.raises(ResourceNotFound):
+        await service.get_volume_by_number(series_slug='Amo-Chasseuse-de-Dieux', number=1)
+
+
+@pytest.mark.asyncio
+async def test_get_volume_by_number_resolves_sole_unnumbered_integral(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_editions(**kwargs):
+        return Envelope(data={
+            'title': 'Amo - Chasseuse de Dieux',
+            'series_slug': 'Amo-Chasseuse-de-Dieux',
+            'vf': {'edition': 'vf', 'total': 1, 'items': [{
+                'title': 'Amo - Chasseuse de Dieux - Intégrale',
+                'url': 'https://www.manga-news.com/index.php/manga/Amo-Chasseuse-de-Dieux-Integrale',
+                'series_slug': 'Amo-Chasseuse-de-Dieux-Integrale',
+                'volume_slug': None, 'number': None, 'number_int': None,
+            }]},
+        })
+
+    async def fake_get_volume(**kwargs):
+        assert kwargs['url'].endswith('/Amo-Chasseuse-de-Dieux-Integrale')
+        return Envelope(data={'title': 'Amo - Chasseuse de Dieux - Intégrale', 'number': None})
+
+    service.get_series_editions = fake_get_series_editions
+    service.get_volume = fake_get_volume
+    payload = await service.get_volume_by_number(series_slug='Amo-Chasseuse-de-Dieux', number=1)
+    assert payload.data['number'] == '1'
+    assert any('inferred' in warning for warning in payload.warnings)
+
+
+@pytest.mark.asyncio
+async def test_get_series_edition_groups_reuses_full_cached_parse_for_compact_response(tmp_path: Path):
+    html = Path('tests/fixtures/series_eden_editions_current.html').read_text(encoding='utf-8')
+    fetcher = CountingFetcher(html)
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    compact = await service.get_series_edition_groups(slug='Eden')
+    full = await service.get_series_edition_groups(slug='Eden', include_volumes=True)
+
+    assert fetcher.calls == 1
+    assert compact.data['groups'][1]['volume_count'] == 9
+    assert compact.data['groups'][1]['items'] == []
+    assert len(full.data['groups'][1]['items']) == 9
+    assert full.cached is True
+
+
+@pytest.mark.asyncio
+async def test_get_volume_by_number_selects_requested_edition_group(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_edition_groups(**kwargs):
+        assert kwargs == {'slug': 'Eden', 'include_volumes': True}
+        return Envelope(
+            source_url='https://www.manga-news.com/index.php/serie/editions/Eden',
+            cached=True,
+            data={
+                'title': 'Eden',
+                'series_slug': 'Eden',
+                'groups': [{
+                    'edition_label': 'perfect',
+                    'display_name': 'Edition Perfect',
+                    'raw_heading': 'Edition Perfect',
+                    'series_slug': 'Eden-Perfect-Edition',
+                    'volume_count': 9,
+                    'items': [{
+                        'title': 'Eden - Perfect Edition Vol.1',
+                        'url': 'https://www.manga-news.com/index.php/manga/Eden-Perfect-Edition/vol-1',
+                        'series_slug': 'Eden-Perfect-Edition',
+                        'volume_slug': 'vol-1',
+                        'number': '1',
+                        'number_int': 1,
+                        'edition_label': 'perfect',
+                        'is_special': False,
+                    }],
+                }],
+            },
+        )
+
+    volume_calls = []
+
+    async def fake_get_volume(**kwargs):
+        volume_calls.append(kwargs)
+        return Envelope(cached=True, data={'title': 'Eden - Perfect Edition Vol.1', 'number': '1'})
+
+    service.get_series_edition_groups = fake_get_series_edition_groups
+    service.get_volume = fake_get_volume
+
+    payload = await service.get_volume_by_number(
+        series_slug='Eden',
+        number=1,
+        edition_label='perfect',
+        fields='title,number',
+    )
+
+    assert payload.data['title'] == 'Eden - Perfect Edition Vol.1'
+    assert volume_calls == [{
+        'series_slug': 'Eden-Perfect-Edition',
+        'volume_slug': 'vol-1',
+        'blocks': None,
+        'fields': 'title,number',
+        'include_raw_sections': False,
+        'include_parent_editions': None,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_get_volume_by_number_rejects_unrelated_requested_edition_group_item(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_get_series_edition_groups(**kwargs):
+        return Envelope(data={
+            'title': 'Amo - Chasseuse de Dieux',
+            'series_slug': 'Amo-Chasseuse-de-Dieux',
+            'groups': [{
+                'edition_label': 'perfect', 'display_name': 'Edition Perfect',
+                'raw_heading': 'Edition Perfect', 'series_slug': 'Baptism-Perfect-Edition',
+                'volume_count': 1, 'items': [{
+                    'title': 'Vol.1 Baptism - Perfect Edition',
+                    'url': 'https://www.manga-news.com/index.php/manga/Baptism-Perfect-Edition/vol-1',
+                    'series_slug': 'Baptism-Perfect-Edition', 'volume_slug': 'vol-1',
+                    'number': '1', 'number_int': 1, 'edition_label': 'perfect',
+                }],
+            }],
+        })
+
+    async def unexpected_get_volume(**kwargs):
+        raise AssertionError('An unrelated volume must never be fetched.')
+
+    service.get_series_edition_groups = fake_get_series_edition_groups
+    service.get_volume = unexpected_get_volume
+    with pytest.raises(ResourceNotFound):
+        await service.get_volume_by_number(
+            series_slug='Amo-Chasseuse-de-Dieux', number=1, edition_label='perfect',
+        )
+
+
+def test_release_state_edition_filter_does_not_let_original_volume_overwrite_selected_group(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+    editions = SeriesEditionsData.model_validate({
+        'title': 'Eden',
+        'series_slug': 'Eden',
+        'vf': {
+            'edition': 'vf',
+            'total': 1,
+            'items': [{
+                'title': 'Eden - Perfect Edition Vol.1',
+                'url': 'https://www.manga-news.com/index.php/manga/Eden-Perfect-Edition/vol-1',
+                'series_slug': 'Eden-Perfect-Edition',
+                'volume_slug': 'vol-1',
+                'number': '1',
+                'number_int': 1,
+                'edition_label': 'perfect',
+                'publication_date': '2026-01-02',
+            }],
+        },
+    })
+    series_data = {
+        'title': 'Eden',
+        'last_release_volume': {
+            'title': 'Eden Vol.1',
+            'source_url': 'https://www.manga-news.com/index.php/manga/Eden/vol-1',
+            'series_slug': 'Eden',
+            'volume_slug': 'vol-1',
+            'number': '1',
+            'number_int': 1,
+            'edition_label': 'edition_originale',
+            'publication_date': '1997-01-01',
+        },
+    }
+
+    result = service._build_release_state_data(
+        slug='Eden',
+        series_data=series_data,
+        editions_data=editions,
+        include_special=False,
+        edition_label='perfect',
+        today_value=date(2026, 7, 29),
+        warnings=[],
+    )
+
+    assert result.last_released is not None
+    assert result.last_released.series_slug == 'Eden-Perfect-Edition'
+    assert result.last_released.edition_label == 'perfect'
+
+
+@pytest.mark.asyncio
+async def test_search_editions_fetches_only_search_sources_and_best_edition_page(tmp_path: Path):
+    base_url = 'https://www.manga-news.com'
+    search_vf = f'{base_url}/index.php/recherche/?cat=manga-serie-vf&q=eden'
+    search_vo = f'{base_url}/index.php/recherche/?cat=manga-serie-vo&q=eden'
+    editions_url = f'{base_url}/index.php/serie/editions/Eden'
+
+    class MappingFetcher:
+        def __init__(self):
+            self.calls = []
+
+        async def get_text(self, url: str, params: dict | None = None):
+            self.calls.append(url)
+            if url == search_vf:
+                return DummyFetchResult(
+                    '<html><body><a href="/index.php/serie/Eden">Eden</a></body></html>',
+                    url,
+                )
+            if url == search_vo:
+                return DummyFetchResult('<html><body></body></html>', url)
+            if url == editions_url:
+                html = Path('tests/fixtures/series_eden_editions_current.html').read_text(encoding='utf-8')
+                return DummyFetchResult(html, url)
+            raise AssertionError(f'Unexpected URL: {url}')
+
+    fetcher = MappingFetcher()
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=fetcher,
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    payload = await service.search_editions(query='eden', mode='best', limit=1)
+
+    assert fetcher.calls == [search_vf, search_vo, editions_url]
+    assert payload.data['results'][0]['slug'] == 'Eden'
+    assert payload.data['results'][0]['edition_groups'][1]['volume_count'] == 9
+    assert payload.data['results'][0]['edition_groups'][1]['items'] == []
+
+
+@pytest.mark.asyncio
+async def test_search_editions_keeps_valid_candidates_when_one_group_page_cannot_be_parsed(tmp_path: Path):
+    service = MangaNewsService(
+        settings=DummySettings(tmp_path),
+        fetcher=CountingFetcher('<html></html>'),
+        cache=SQLiteCache(tmp_path / 'cache.sqlite3'),
+    )
+
+    async def fake_search(**kwargs):
+        return Envelope(
+            cached=True,
+            data=[
+                {'title': 'Eden', 'url': 'https://example.test/Eden', 'kind': 'series', 'score': 100, 'slug': 'Eden'},
+                {'title': 'Unknown', 'url': 'https://example.test/Unknown', 'kind': 'series', 'score': 80, 'slug': 'Unknown'},
+            ],
+        )
+
+    async def fake_groups(*, slug: str, include_volumes: bool):
+        if slug == 'Unknown':
+            raise ParseError('No sectioned edition block.')
+        return Envelope(
+            cached=True,
+            data={
+                'title': 'Eden',
+                'series_slug': 'Eden',
+                'groups': [{
+                    'edition_label': 'edition_originale',
+                    'display_name': 'Edition originale',
+                    'raw_heading': 'Les volumes de la serie',
+                    'series_slug': 'Eden',
+                    'volume_count': 18,
+                }],
+            },
+        )
+
+    service.search = fake_search
+    service.get_series_edition_groups = fake_groups
+
+    payload = await service.search_editions(query='eden', mode='all', limit=2)
+
+    assert payload.partial is True
+    assert payload.cached is False
+    assert [item['slug'] for item in payload.data['results']] == ['Eden']
+    assert 'Unknown' in payload.warnings[0]
 
 
 

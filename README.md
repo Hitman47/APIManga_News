@@ -33,6 +33,7 @@ Fonctions utiles déjà en place :
 - titres alternatifs `title_vo` et `translated_title` sur les fiches détaillées **et** dans les résultats de recherche quand l'enrichissement réussit ;
 - compteurs d'éditions `vf` / `vo` sur les fiches série, sur les fiches volume enrichies depuis la série parente, et dans les résultats de recherche enrichis ;
 - normalisation volume : `number`, `number_int`, `edition_label`, `is_special`, `is_one_shot` sur les fiches volume, le planning, les éditions de série, et les résultats de recherche enrichis ;
+- extraction DOM des métadonnées de fiches avec compatibilité pour l’ancien HTML en ligne ;
 - projections légères via `blocks`, `fields` et `include_raw_sections` sur les routes détail série / volume ;
 - cache SQLite persistant avec stale cache et negative cache ;
 - ETag / `If-None-Match` / `304 Not Modified` ;
@@ -59,6 +60,8 @@ Pour un humain ou une IA, l'ordre utile est :
 5. [`docs/USE_CASES_AND_RECIPES.md`](docs/USE_CASES_AND_RECIPES.md) ;
 6. [`docs/DEPLOYMENT_AND_OPERATIONS.md`](docs/DEPLOYMENT_AND_OPERATIONS.md) si tu déploies ;
 7. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) si tu veux comprendre les choix internes.
+8. [`docs/METADATA_PARSING.md`](docs/METADATA_PARSING.md) pour le fonctionnement complet du parseur de fiches.
+9. [`docs/METADATA_PARSER_DIFF_2026-07-22.md`](docs/METADATA_PARSER_DIFF_2026-07-22.md) pour le diff de la correction `type` / `genres`.
 
 ## Démarrage rapide
 
@@ -247,6 +250,36 @@ curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
   --data-urlencode "fields=title,vf.volumes,next_release_date"
 ```
 
+La route `GET /series/{slug}/release-state` associe les dates aux volumes a
+partir des liens explicites des cartes `#lastvol` et `#nextvol` de la fiche
+serie, puis complete avec la page editions VF. Elle ne deduit jamais un numero
+avec `vf.volumes + 1`. Si Manga News publie seulement une date sans lien de
+volume exploitable, la reponse reste partielle et `next_release` vaut `null`.
+
+## Groupes d'editions
+
+`GET /series/{slug}/edition-groups` distingue l'edition originale, les editions
+Perfect, Deluxe et les autres sections publiees par Manga-News. La route expose
+separement le nombre de tomes listes, le total final quand il est defendable,
+le statut et sa provenance.
+
+```bash
+curl --get "http://localhost:8017/series/Eden/edition-groups"
+curl --get "http://localhost:8017/search/editions" \
+  --data-urlencode "q=eden" \
+  --data-urlencode "mode=best"
+curl --get "http://localhost:8017/volume/Eden/number/1" \
+  --data-urlencode "edition_label=perfect"
+```
+
+Sans `edition_label`, les routes volume par numero et `release-state`
+conservent leur comportement historique. Voir
+[`docs/EDITION_GROUPS.md`](docs/EDITION_GROUPS.md) et le
+[`diff fonctionnel`](docs/EDITION_GROUPS_DIFF_2026-07-29.md).
+
+Exemple Atom : le lien `/manga/Atom-The-Beginning/vol-22` associe explicitement
+le tome 22 a la date `2026-10-02`, meme si le compteur VF affiche encore 20.
+
 Exemple sur un volume :
 
 ```bash
@@ -265,6 +298,7 @@ Les exemples les plus utiles pour démarrer sont :
 - [`docs/examples/series_one_piece.json`](docs/examples/series_one_piece.json)
 - [`docs/examples/volume_one_piece_110.json`](docs/examples/volume_one_piece_110.json)
 - [`docs/examples/planning_example.json`](docs/examples/planning_example.json)
+- [`docs/examples/edition_groups_eden.json`](docs/examples/edition_groups_eden.json)
 - [`docs/examples/error_upstream_parse.json`](docs/examples/error_upstream_parse.json)
 
 ## Validation locale

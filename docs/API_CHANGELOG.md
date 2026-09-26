@@ -1,3 +1,49 @@
+## 2026-09-26 - isolation des editions et integrales sans numero
+
+- Les listes VF et les groupes d'editions ignorent les liens vers d'autres series
+  presents dans les recommandations et les cartes parasites.
+- Les integrales liees directement par `/index.php/manga/{slug}` sont conservees
+  meme sans segment `/vol-1`.
+- La recherche du tome 1 accepte un unique article VF sans numero explicite ;
+  aucun numero n'est deduit lorsque plusieurs articles sont listes.
+- La resolution par numero verifie encore l'appartenance a la serie demandee,
+  avec ou sans `edition_label`. Le cache parse precedent est invalide sans
+  supprimer les autres donnees SQLite.
+
+## 2026-07-29 - groupes d'editions VF
+
+- Correction de FullMetal Alchemist Perfect : le ratio compile exact 3:2
+  (`27 / 18`) produit desormais `completed/inferred` avec confiance `medium`.
+- Invalidation ciblee du cache des groupes d'editions pour appliquer la regle
+  immediatement apres mise a jour.
+- Ajout de `GET /series/{slug}/edition-groups` et `GET /search/editions`.
+- Ajout de `edition_label` facultatif sur la recherche de volume par numero et
+  sur le calcul dernier/prochain tome.
+- Separation entre tomes listes, total final, statut et provenance du statut.
+- Parsing par sections pour exclure les recommandations presentes sur la page.
+- Contrats historiques inchanges lorsque les nouveaux parametres sont absents.
+- Documentation complete : [`EDITION_GROUPS.md`](EDITION_GROUPS.md).
+- Diff de cette livraison :
+  [`EDITION_GROUPS_DIFF_2026-07-29.md`](EDITION_GROUPS_DIFF_2026-07-29.md).
+
+## 2026-07-22 — parsing DOM des métadonnées de fiches
+
+- Lecture prioritaire des libellés structurés et de leurs valeurs dans le DOM Manga-News actuel.
+- Correction de `type=null` lorsque le libellé et sa valeur sont dans des nœuds distincts.
+- Correction de la collision entre le champ `Genre` et le texte de navigation `Genres Manga`.
+- Conservation du fallback compatible avec l’ancien HTML en ligne et des valeurs non latines.
+- Invalidation ciblée des résultats parsés tout en conservant le HTML frais et les caches indépendants.
+- Contrat public et schéma OpenAPI inchangés.
+- Documentation complète : [`METADATA_PARSING.md`](METADATA_PARSING.md).
+- Diff de cette livraison : [`METADATA_PARSER_DIFF_2026-07-22.md`](METADATA_PARSER_DIFF_2026-07-22.md).
+
+## 2026-06-18 — route volume par numéro et payload volume allégé
+
+- Invalidation des anciens caches métier pour forcer la relecture des pages éditions VF après correction des liens de volumes sans texte.
+- Ajout de `GET /volume/{series_slug}/number/{number}` pour charger un tome VF depuis le slug série et le numéro de tome.
+- Retrait de `related` des fiches volume exposées par l'API ; les liens liés restent disponibles sur les fiches série.
+- Documentation et exemples volume alignés avec le nouveau contrat.
+
 ## 2026-04-22 — clarification documentaire de la recherche
 
 - Documentation détaillée de la sémantique réelle de `/search` et `/search/resolve` : pages source interrogées, enrichissement détaillé, coût relatif et cas d'usage.

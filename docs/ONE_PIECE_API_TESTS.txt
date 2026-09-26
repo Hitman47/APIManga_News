@@ -136,7 +136,16 @@ Exemples :
 - docs/examples/volume_one_piece_91.json
 - docs/examples/volume_one_piece_110.json
 
-10) News globales
+10) Fiche volume par numéro
+---------------------------
+curl "http://localhost:8017/volume/One-piece-Edition-originale/number/110?fields=title,number,publication_date,isbn_ean"
+
+Attendu :
+- data.number == "110"
+- source_url pointe vers la fiche volume résolue
+- pas de champ data.related
+
+11) News globales
 -----------------
 curl "http://localhost:8017/news/global?limit=5"
 
@@ -147,14 +156,14 @@ Attendu :
 Exemple :
 - docs/examples/news_global_one_piece_sample.json
 
-11) News de série
+12) News de série
 -----------------
 curl "http://localhost:8017/news/series/One-piece-Edition-originale?limit=10"
 
 Attendu :
 - liste de news liées à la série si Manga News en propose
 
-12) News de volume
+13) News de volume
 ------------------
 curl "http://localhost:8017/news/volume/One-Piece/vol-110?limit=10"
 
@@ -163,7 +172,7 @@ curl --get "http://localhost:8017/news/volume/by-url" \
   --data-urlencode "url=https://www.manga-news.com/index.php/manga/One-Piece/vol-110" \
   --data-urlencode "limit=10"
 
-13) Planning VF filtré
+14) Planning VF filtré
 ----------------------
 curl --get "http://localhost:8017/planning" \
   --data-urlencode "section=manga-vf" \
@@ -185,7 +194,7 @@ Exemples :
 - docs/examples/planning_example.json
 - docs/examples/planning_manga_vf_april_2026.json
 
-14) Test ETag / 304
+15) Test ETag / 304
 -------------------
 - faire une requête sur /series/One-piece-Edition-originale
 - récupérer l'ETag
@@ -195,11 +204,11 @@ Attendu :
 - HTTP 304
 - corps vide
 
-15) Validation doc + contrat
+16) Validation doc + contrat
 ----------------------------
 python scripts/validate_contract_and_docs.py
 
-16) Validation test suite
+17) Validation test suite
 -------------------------
 pytest
 
@@ -209,7 +218,7 @@ But du scénario :
 - vérifier que la doc suffit à démarrer ;
 - vérifier qu'aucune hypothèse de `/v1` ou d'endpoint admin ne traîne encore.
 
-10) Vérification manuelle du cas Dogs
+18) Vérification manuelle du cas Dogs
 ------------------------------------
 curl --get "http://localhost:8017/search" \
   --data-urlencode "q=Dogs: Bullets & Carnage" \

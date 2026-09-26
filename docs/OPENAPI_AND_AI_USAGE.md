@@ -51,6 +51,11 @@ Elle peut supposer que :
 2. lire `series_slug` et `volume_slug`
 3. `GET /volume/{series_slug}/{volume_slug}`
 
+### Cas B bis — trouver un volume depuis une série et un numéro
+1. lire ou résoudre le slug série
+2. appeler `GET /volume/{series_slug}/number/{number}`
+3. ne pas supposer que le slug volume est toujours `vol-<number>`
+
 ### Cas C — interface légère
 - utiliser `fields=` ou `blocks=` sur les routes détail ;
 - ne demander le payload complet qu'en second temps.

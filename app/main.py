@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import Depends, FastAPI, Header, Path as ApiPath, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 
@@ -19,15 +19,18 @@ from app.logging_utils import get_request_id, reset_request_id, set_request_id
 from app.manga_news.service import MangaNewsService
 from app.metrics import MetricsStore
 from app.models import (
+    EditionSearchResponse,
     HealthResponse,
     NewsResponse,
     PlanningResponse,
     ResolveResponse,
     RuntimeObservabilityResponse,
     SearchResponse,
+    SeriesEditionGroupsResponse,
     SeriesEditionsResponse,
     SeriesRelatedResponse,
     SeriesResponse,
+    ReleaseStateResponse,
     VolumeResponse,
 )
 
@@ -55,6 +58,7 @@ async def lifespan(app: FastAPI):
         settings.request_timeout_seconds,
         max_retries=settings.request_max_retries,
         backoff_seconds=settings.request_backoff_seconds,
+        max_concurrency=settings.request_max_concurrency,
         log_json=settings.log_format == 'json',
         metrics=metrics,
     )
@@ -267,7 +271,7 @@ PLANNING_RESPONSE_EXAMPLE = {
 
 app = FastAPI(
     title='Manga News Private API',
-    version='0.2.0',
+    version='0.3.0',
     description=APP_DESCRIPTION,
     openapi_tags=TAGS_METADATA,
     docs_url=get_settings().docs_url,
@@ -402,6 +406,7 @@ async def health_runtime(
             'search_enrichment_concurrency': settings.search_enrichment_concurrency,
             'request_max_retries': settings.request_max_retries,
             'request_backoff_seconds': settings.request_backoff_seconds,
+            'request_max_concurrency': settings.request_max_concurrency,
             'sqlite_busy_timeout_ms': settings.sqlite_busy_timeout_ms,
             'cache_memory_entries': settings.cache_memory_entries,
         },
@@ -432,8 +437,8 @@ async def search(
     request: Request,
     q: str = Query(..., min_length=1, description='Requête libre, par exemple `one piece` ou `Dogs: Bullets & Carnage`.'),
     kind: Literal['series', 'volume', 'all'] = Query(default='all', description='Limiter la recherche aux séries, aux volumes, ou aux deux.'),
-    mode: Literal['best', 'all'] = Query(default='best', description='`best` garde les meilleurs candidats après tri ; `all` renvoie tous les candidats retenus.'),
-    limit: int = Query(default=10, ge=1, le=50, description='Nombre maximum de résultats renvoyés.'),
+    mode: Literal['best', 'all'] = Query(default='all', description='`all` renvoie par défaut tous les candidats retenus ; `best` limite la réponse au meilleur candidat.'),
+    limit: int = Query(default=50, ge=1, le=50, description='Nombre maximum de résultats renvoyés. La valeur par défaut couvre une recherche de franchise complète.'),
     enrich: bool | None = Query(default=None, description='`true` pour enrichir avec les titres alternatifs et métadonnées volume ; `null` applique `SEARCH_DEFAULT_ENRICH`.'),
     include_editions: bool | None = Query(default=None, description='`true` pour hydrater les compteurs `vf` / `vo` ; `null` applique `SEARCH_DEFAULT_INCLUDE_EDITIONS`.'),
     prefer_main_series: bool | None = Query(default=None, description='`true` pour renforcer la priorité donnée à la série mère quand la requête vise une franchise ; `null` applique `SEARCH_DEFAULT_PREFER_MAIN_SERIES`.'),
@@ -455,6 +460,34 @@ async def search(
         include_books=include_books,
         media_kinds=media_kinds,
         exclude_media_kinds=exclude_media_kinds,
+    )
+    return _build_envelope_response(payload.model_dump(), request)
+
+
+@app.get(
+    '/search/editions',
+    dependencies=[Depends(auth_dependency)],
+    response_model=EditionSearchResponse,
+    tags=['Search'],
+    summary='Search series and list their edition groups',
+    description=(
+        'Recherche des series, puis analyse chaque page Editions VF par section. '
+        'Cette route est additive et ne change pas le contrat de `/search`.'
+    ),
+)
+async def search_editions(
+    request: Request,
+    q: str = Query(..., min_length=1, description='Titre de serie a rechercher.'),
+    mode: Literal['best', 'all'] = Query(default='best', description='`best` pour la meilleure serie, `all` pour plusieurs candidates.'),
+    limit: int = Query(default=10, ge=1, le=50, description='Nombre maximal de series a analyser.'),
+    include_volumes: bool = Query(default=False, description='Inclure les fiches legeres de tous les tomes dans chaque groupe.'),
+    service: MangaNewsService = Depends(get_service),
+):
+    payload = await service.search_editions(
+        query=q,
+        mode=mode,
+        limit=limit,
+        include_volumes=include_volumes,
     )
     return _build_envelope_response(payload.model_dump(), request)
 
@@ -537,9 +570,60 @@ async def get_series_related(request: Request, slug: str, service: MangaNewsServ
     return _build_envelope_response(payload.model_dump(), request)
 
 
+@app.get(
+    '/series/{slug}/edition-groups',
+    dependencies=[Depends(auth_dependency)],
+    response_model=SeriesEditionGroupsResponse,
+    tags=['Series'],
+    summary='List distinct VF edition groups for a series',
+    description=(
+        'Regroupe les tomes par section de la page Editions VF. Le nombre de tomes listes, le total certain, '
+        'le statut et la provenance du statut sont exposes separement.'
+    ),
+)
+async def get_series_edition_groups(
+    request: Request,
+    slug: str,
+    include_volumes: bool = Query(default=False, description='Inclure les tomes de chaque edition; `false` garde une reponse compacte.'),
+    service: MangaNewsService = Depends(get_service),
+):
+    payload = await service.get_series_edition_groups(slug=slug, include_volumes=include_volumes)
+    return _build_envelope_response(payload.model_dump(), request)
+
+
 @app.get('/series/by-url/related', dependencies=[Depends(auth_dependency)], response_model=SeriesRelatedResponse, tags=['Series'], summary='Get related links from a direct series URL', description='Même comportement que `/series/{slug}/related`, mais en partant d’une URL directe Manga-News.')
 async def get_series_related_by_url(request: Request, url: str = Query(...), service: MangaNewsService = Depends(get_service)):
     payload = await service.get_series_related(url=url)
+    return _build_envelope_response(payload.model_dump(), request)
+
+
+@app.get(
+    '/series/{slug}/release-state',
+    dependencies=[Depends(auth_dependency)],
+    response_model=ReleaseStateResponse,
+    tags=['Series'],
+    summary='Get latest and next VF manga volume releases',
+    description=(
+        'Calcule le dernier tome VF déjà sorti et le prochain tome VF annoncé pour une série Manga-News. '
+        'Le calcul s’appuie sur la liste des éditions VF et ne charge les fiches volume que si `include_isbn=true`.'
+    ),
+)
+async def get_series_release_state(
+    request: Request,
+    slug: str,
+    edition_label: str | None = Query(default=None, description='Filtrer sur un groupe d edition, par exemple `perfect`; absent, le comportement historique est conserve.'),
+    include_isbn: bool = Query(default=False, description='Charger uniquement les fiches des tomes dernier/prochain pour ajouter `isbn_ean`.'),
+    include_special: bool = Query(default=False, description='Inclure collectors, coffrets et éditions spéciales dans le calcul.'),
+    today: str | None = Query(default=None, description='Date ISO optionnelle utilisée comme référence, par exemple `2026-06-18`.'),
+    service: MangaNewsService = Depends(get_service),
+):
+    payload = await service.get_release_state_by_series(
+        slug=slug,
+        include_isbn=include_isbn,
+        include_special=include_special,
+        today=today,
+        edition_label=edition_label,
+    )
     return _build_envelope_response(payload.model_dump(), request)
 
 
@@ -562,6 +646,43 @@ async def get_series_editions_by_url(
     service: MangaNewsService = Depends(get_service),
 ):
     payload = await service.get_series_editions(url=url, edition=edition)
+    return _build_envelope_response(payload.model_dump(), request)
+
+
+@app.get(
+    '/volume/{series_slug}/number/{number}',
+    dependencies=[Depends(auth_dependency)],
+    response_model=VolumeResponse,
+    tags=['Volume'],
+    summary='Get a volume payload by series slug and volume number',
+    description=(
+        'Retrouve le volume VF correspondant à un numéro de tome depuis la page éditions de la série, '
+        'puis renvoie la même fiche volume que `/volume/{series_slug}/{volume_slug}`.'
+    ),
+    responses={200: {'description': 'Volume envelope.', 'content': {'application/json': {'example': VOLUME_RESPONSE_EXAMPLE}}}},
+)
+async def get_volume_by_number(
+    request: Request,
+    series_slug: str,
+    edition_label: str | None = Query(default=None, description='Selectionner un groupe d edition, par exemple `perfect`; absent, la resolution historique est conservee.'),
+    number: int = ApiPath(..., ge=1, description='Numéro entier du tome VF à retrouver.'),
+    blocks: str | None = Query(default=None, description='Liste de blocs séparés par des virgules, par exemple `release,scores`.'),
+    fields: str | None = Query(default=None, description='Liste de chemins de champs séparés par des virgules, par exemple `publication_date,isbn_ean`.'),
+    include_raw_sections: bool = Query(default=False, description='Inclure les sections brutes extraites de la page HTML.'),
+    include_parent_editions: bool | None = Query(default=None, description='`true` pour hydrater `vf` / `vo` depuis la série parente ; `null` applique `VOLUME_DEFAULT_INCLUDE_PARENT_EDITIONS`.'),
+    include_special: bool = Query(default=False, description='Inclure les volumes spéciaux si un numéro identique existe.'),
+    service: MangaNewsService = Depends(get_service),
+):
+    payload = await service.get_volume_by_number(
+        series_slug=series_slug,
+        number=number,
+        blocks=blocks,
+        fields=fields,
+        include_raw_sections=include_raw_sections,
+        include_parent_editions=include_parent_editions,
+        include_special=include_special,
+        edition_label=edition_label,
+    )
     return _build_envelope_response(payload.model_dump(), request)
 
 

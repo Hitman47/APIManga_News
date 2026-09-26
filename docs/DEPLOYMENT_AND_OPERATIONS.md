@@ -207,10 +207,10 @@ Puis lire `data[0].vf.volumes`. C'est aujourd'hui le meilleur compromis vitesse 
 
 ## 11. Cache et mises à jour de parseur
 
-Quand un parseur change (par exemple pour mieux lire `#numberblock`), il faut redémarrer l'API.
-Les clés de cache métier intègrent une version interne afin d'éviter la réutilisation silencieuse d'anciens payloads incompatibles.
+Quand un parseur change, il faut redémarrer l'API avec la nouvelle image.
+Les JSON dépendants du parseur intègrent une révision dédiée afin d'éviter la réutilisation silencieuse d'anciens payloads. Le HTML source encore frais conserve sa clé et peut être reparsé sans nouvel appel Manga-News.
 
-En cas de doute lors d'un déploiement, tu peux aussi supprimer le fichier SQLite de cache pour repartir d'un état vierge.
+En cas de doute lors d'un déploiement, tu peux toujours supprimer le fichier SQLite pour repartir d'un état vierge, mais ce n'est pas nécessaire pour la correction `type` / `genres` du 2026-07-22.
 
 
 ## Note de cache importante

@@ -291,6 +291,17 @@ curl --get "http://localhost:8017/series/One-piece-Edition-originale" \
   --data-urlencode "fields=cover_image"
 ```
 
+Exemple de métadonnées éditoriales avec la structure Manga-News actuelle :
+
+```bash
+curl --get "http://localhost:8017/series/Blue-Giant-Momentum" \
+  --data-urlencode "fields=title,type,genres"
+```
+
+La valeur attendue dans `data` est `type="Seinen"` avec `genres=["Drame", "Tranche-de-vie"]`. Le parseur lit les libellés structurés dans le DOM et n’assimile plus `Genres Manga` au champ `Genre`.
+
+Le fonctionnement complet et les règles de compatibilité sont décrits dans [`METADATA_PARSING.md`](METADATA_PARSING.md).
+
 ---
 
 ### 6.6 `GET /series/{slug}/related`
@@ -339,17 +350,119 @@ Chaque item d'édition expose notamment :
 - `publication_date`
 - `cover_image`
 
+#### Groupes d'editions : `GET /series/{slug}/edition-groups`
+
+Cette route additive regroupe les tomes VF selon les sections de la page
+Manga-News. Elle expose `volume_count`, `total_volumes`,
+`highest_volume_number`, `available_numbers`, puis un statut qualifie par
+`status_source`, `status_confidence` et `status_reason`.
+
+```bash
+curl --get "http://localhost:8017/series/Eden/edition-groups"
+curl --get "http://localhost:8017/search/editions" \
+  --data-urlencode "q=eden" \
+  --data-urlencode "mode=best"
+```
+
+`include_volumes=true` remplit les items; `false` reste la valeur compacte par
+defaut. Pour cibler ensuite un tome de l'edition Perfect :
+
+```bash
+curl --get "http://localhost:8017/volume/Eden/number/1" \
+  --data-urlencode "edition_label=perfect"
+```
+
+Sans `edition_label`, le comportement historique des routes existantes reste
+inchange. Le contrat detaille et les limites d'inference sont documentes dans
+[`EDITION_GROUPS.md`](EDITION_GROUPS.md).
+
+#### Sorties VF : `GET /series/{slug}/release-state`
+
+Usage : obtenir directement le dernier tome VF sorti et le prochain tome VF
+annonce pour une serie deja identifiee.
+
+Exemple :
+
+```bash
+curl --get "http://localhost:8017/series/One-piece-Edition-originale/release-state" \
+  --data-urlencode "today=2026-06-18"
+```
+
+Parametres :
+- `today` : date de reference optionnelle au format `YYYY-MM-DD` ;
+- `include_special` : inclut les volumes detectes comme speciaux ;
+- `include_isbn` : relit uniquement les fiches volume du dernier/prochain tome
+  pour remplir `isbn_ean` ;
+- `edition_label` : filtre facultatif sur un groupe, par exemple `perfect`.
+
+Structure principale :
+- `data.series` : serie source ;
+- `data.last_released` : dernier volume VF date au plus tard a `today` ;
+- `data.next_release` : premier volume VF date apres `today` ;
+- `data.status` : `FOUND_CONFIRMED`, `FOUND_NO_UPCOMING`,
+  `FOUND_NO_RELEASED`, `FOUND_EMPTY_EDITIONS` ou `FOUND_PARTIAL` ;
+- `data.confidence` : `high`, `medium`, `low` ou `none`.
+
+Ordre de resolution :
+
+1. cartes explicites `#lastvol` et `#nextvol` de la fiche serie ;
+2. liste des editions VF ;
+3. date seule sans lien de volume, exposee comme resultat partiel.
+
+Les cartes de la fiche serie contiennent le lien du volume, par exemple
+`/manga/Atom-The-Beginning/vol-22`, ainsi que sa date. Ce lien est prioritaire
+car il associe explicitement le numero et la date. Le compteur `vf.volumes`
+n'est jamais utilise pour inventer le numero suivant.
+
+Par defaut, la route ne relit pas les fiches volume. Elle reutilise la fiche
+serie et la page editions VF pour limiter les appels upstream. Une date sans
+numero explicite ne produit jamais de `data.next_release` applicable.
+
+Exemple de regression Atom attendu avec `today=2026-07-29` :
+
+```json
+{
+  "last_released": {
+    "number": "21",
+    "publication_date": "2025-10-17",
+    "volume_slug": "vol-21"
+  },
+  "next_release": {
+    "number": "22",
+    "publication_date": "2026-10-02",
+    "volume_slug": "vol-22"
+  },
+  "status": "FOUND_CONFIRMED",
+  "confidence": "high"
+}
+```
+
 ---
 
 ### 6.10 `GET /volume/{series_slug}/{volume_slug}`
-### 6.11 `GET /volume/by-url`
+### 6.11 `GET /volume/{series_slug}/number/{number}`
+### 6.12 `GET /volume/by-url`
 
 Usage : fiche détaillée d'un volume.
+
+La route par numéro utilise la page éditions VF de la série pour retrouver le
+vrai `volume_slug`, puis renvoie la même fiche volume que la route historique.
+Elle est utile quand tu connais `One-piece-Edition-originale` et `110`, mais pas
+forcément `vol-110`.
+
+Les candidats d'une autre série sont écartés, y compris avec `edition_label`.
+Si la page VF ne liste qu'une seule intégrale sans numéro et avec un lien direct
+`/index.php/manga/{slug}`, elle peut être résolue comme tome 1 ; cette inférence
+est signalée dans `warnings`. Aucun numéro n'est déduit s'il y a plusieurs tomes.
 
 Paramètres communs :
 - `blocks`
 - `fields`
 - `include_raw_sections`
+- `include_parent_editions`
+
+Paramètre spécifique à la route par numéro :
+- `include_special` : inclut les volumes spéciaux si un numéro identique existe.
 
 #### Blocs volume disponibles
 - `identity`
@@ -358,7 +471,6 @@ Paramètres communs :
 - `presentation`
 - `release`
 - `scores`
-- `related`
 - `raw` / `raw_sections`
 
 #### Champs métier importants de la fiche volume
@@ -391,10 +503,9 @@ Paramètres communs :
 - `cover_image`
 - `editorial_score`
 - `reader_score`
-- `related`
 - `raw_sections` si demandé
 
-Exemple :
+Exemple par slug volume :
 
 ```bash
 curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
@@ -402,9 +513,19 @@ curl --get "http://localhost:8017/volume/One-Piece/vol-110" \
   --data-urlencode "fields=cover_image"
 ```
 
+Exemple par numéro de tome :
+
+```bash
+curl --get "http://localhost:8017/volume/One-piece-Edition-originale/number/110" \
+  --data-urlencode "fields=title,number,publication_date,isbn_ean"
+```
+
+Important : `related` n'est pas exposé sur les fiches volume. Ce champ reste
+utile sur les fiches série, mais il alourdissait inutilement les volumes.
+
 ---
 
-### 6.12 `GET /news/global`
+### 6.13 `GET /news/global`
 
 Usage : flux RSS global Manga News, normalisé en JSON.
 
@@ -421,7 +542,7 @@ Chaque item expose :
 
 ---
 
-### 6.13 `GET /news/series/{slug}`
+### 6.14 `GET /news/series/{slug}`
 
 Usage : news liées à une série.
 
@@ -430,8 +551,8 @@ Paramètre :
 
 ---
 
-### 6.14 `GET /news/volume/{series_slug}/{volume_slug}`
-### 6.15 `GET /news/volume/by-url`
+### 6.15 `GET /news/volume/{series_slug}/{volume_slug}`
+### 6.16 `GET /news/volume/by-url`
 
 Usage : news liées à un volume.
 
@@ -442,7 +563,7 @@ Le endpoint `by-url` est utile quand tu n'as qu'une URL Manga News complète.
 
 ---
 
-### 6.16 `GET /planning`
+### 6.17 `GET /planning`
 
 Usage : récupérer une page de planning VF ou VO, puis filtrer localement.
 
@@ -491,6 +612,10 @@ Chaque item du planning expose notamment :
 2. récupérer `series_slug` et `volume_slug`
 3. `GET /volume/{series_slug}/{volume_slug}`
 
+### 7.2 bis À partir d'une série et d'un numéro de tome
+1. récupérer le slug série, par exemple via `/search/resolve?q=<titre>&kind=series`
+2. appeler `GET /volume/{series_slug}/number/{number}`
+
 ### 7.3 UI légère
 - utilise `fields=` ou `blocks=` pour éviter les payloads complets ;
 - stocke `fingerprint` et `ETag` ;
@@ -521,4 +646,4 @@ Tu peux donner ces règles à un agent consommateur :
 
 ## Note de cache importante
 
-Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Quand le parseur évolue (par exemple pour mieux remonter `vf` / `vo`), l'application ignore automatiquement les anciennes entrées de cache incompatibles grâce à une version interne de schéma de cache. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données. Supprimer le fichier SQLite de cache reste la méthode la plus radicale si vous voulez repartir d'un cache totalement vierge.
+Les réponses `series`, `volume`, `search` et `search/resolve` dépendent d'un cache SQLite local. Les résultats dépendants du parseur utilisent une révision dédiée : après une évolution, les anciens JSON sont ignorés tandis que le HTML encore frais peut être reparsé localement. Après déploiement, un simple redémarrage de l'API suffit normalement à voir les nouvelles données sans vider les caches d'actualités ou de planning. Supprimer le fichier SQLite reste possible, mais n'est pas nécessaire pour la correction du 2026-07-22.
