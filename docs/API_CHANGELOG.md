@@ -1,3 +1,15 @@
+## 2026-09-26 - isolation des editions et integrales sans numero
+
+- Les listes VF et les groupes d'editions ignorent les liens vers d'autres series
+  presents dans les recommandations et les cartes parasites.
+- Les integrales liees directement par `/index.php/manga/{slug}` sont conservees
+  meme sans segment `/vol-1`.
+- La recherche du tome 1 accepte un unique article VF sans numero explicite ;
+  aucun numero n'est deduit lorsque plusieurs articles sont listes.
+- La resolution par numero verifie encore l'appartenance a la serie demandee,
+  avec ou sans `edition_label`. Le cache parse precedent est invalide sans
+  supprimer les autres donnees SQLite.
+
 ## 2026-07-29 - groupes d'editions VF
 
 - Correction de FullMetal Alchemist Perfect : le ratio compile exact 3:2

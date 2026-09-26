@@ -389,10 +389,10 @@ def _extract_series_release_volume(
         if not source_url or '/index.php/manga/' not in source_url:
             continue
         parsed_path = [part for part in urlparse(source_url).path.split('/') if part]
-        if len(parsed_path) < 4:
+        if len(parsed_path) < 3 or parsed_path[:2] != ['index.php', 'manga']:
             continue
-        series_slug = parsed_path[-2]
-        volume_slug = parsed_path[-1]
+        series_slug = parsed_path[2]
+        volume_slug = parsed_path[3] if len(parsed_path) > 3 else None
         image = anchor.find('img')
         title = clean_ws(
             anchor.get('title')
@@ -1030,11 +1030,51 @@ def _base_url_from_page(page_url: str) -> str:
 
 
 
+def edition_series_key(value: str | None) -> str:
+    """Compare an edition slug with its parent series without edition markers."""
+    normalized = normalize_text((value or '').replace('-', ' '))
+    suffix = r'(?:edition originale|edition perfect|perfect edition|integrale|collector|deluxe|ultimate|kanzenban|grand format|edition double|edition triple)'
+    while True:
+        stripped = re.sub(rf'\s+{suffix}$', '', normalized).strip()
+        if stripped == normalized:
+            return normalized
+        normalized = stripped
+
+
 def parse_series_editions_page(html: str, page_url: str, base_url: str, edition: str) -> SeriesEditionsBlock:
     soup = _soup(html)
     seen: set[str] = set()
     items: list[SeriesEditionItem] = []
-    for anchor in soup.find_all('a', href=True):
+    # The page also contains unrelated manga links (recommendations, rankings,
+    # sidebars). Only the volume cards belonging to an edition are authoritative.
+    edition_sections = []
+    for wrapper in soup.select('.boxedTitleWrapper'):
+        content = wrapper.find_next_sibling()
+        if content is not None and 'boxedContent' in (content.get('class') or []):
+            edition_sections.append(content)
+    if edition_sections:
+        anchors = [anchor for section in edition_sections for anchor in section.find_all('a', href=True)]
+    else:
+        anchors = [
+            anchor
+            for card in soup.select('.volume-card, .serieVolumesImgBlock, .vols')
+            for anchor in card.find_all('a', href=True)
+        ]
+        if not anchors:
+            # Legacy pages may not use card classes; retain their volume links
+            # only when the URL identifies the requested series itself.
+            page_slug = urlparse(page_url).path.rstrip('/').split('/')[-1]
+            expected_slug = edition_series_key(page_slug)
+            anchors = [
+                anchor for anchor in soup.find_all('a', href=True)
+                if '/index.php/manga/' in anchor.get('href', '')
+                and (
+                    edition == 'vo'
+                    or edition_series_key(anchor.get('href', '').split('/index.php/manga/', 1)[-1].split('/', 1)[0]) == expected_slug
+                )
+            ]
+    expected_slug = edition_series_key(urlparse(page_url).path.rstrip('/').split('/')[-1])
+    for anchor in anchors:
         href = anchor.get('href', '')
         url = ensure_absolute_url(base_url, href)
         if not url or url in seen:
@@ -1044,10 +1084,12 @@ def parse_series_editions_page(html: str, page_url: str, base_url: str, edition:
         if any(excluded in url for excluded in ['/manga/news/', '/manga/critique/', '/manga/avis/', '/manga/extrait/']):
             continue
         parsed_path = [part for part in urlparse(url).path.split('/') if part]
-        if len(parsed_path) < 4:
+        if len(parsed_path) < 3 or parsed_path[:2] != ['index.php', 'manga']:
             continue
-        series_slug = parsed_path[-2]
-        volume_slug = parsed_path[-1]
+        series_slug = parsed_path[2]
+        volume_slug = parsed_path[3] if len(parsed_path) > 3 else None
+        if edition == 'vf' and edition_series_key(series_slug) != expected_slug:
+            continue
         container = anchor.find_parent(['article', 'li', 'div', 'tr']) or anchor.parent
         container_text = clean_ws(container.get_text(' ', strip=True)) if container else ''
         title = _edition_item_title(anchor, container_text, volume_slug)
@@ -1104,7 +1146,7 @@ def _edition_group_explicit_status(text: str) -> tuple[str, str, str, str | None
     return 'unknown', 'unknown', 'none', None
 
 
-def _edition_group_items(container, *, base_url: str, edition_label: str) -> list[SeriesEditionItem]:
+def _edition_group_items(container, *, base_url: str, edition_label: str, series_slug: str) -> list[SeriesEditionItem]:
     seen: set[str] = set()
     items: list[SeriesEditionItem] = []
     for anchor in container.find_all('a', href=True):
@@ -1114,10 +1156,12 @@ def _edition_group_items(container, *, base_url: str, edition_label: str) -> lis
         if any(excluded in url for excluded in ['/manga/news/', '/manga/critique/', '/manga/avis/', '/manga/extrait/']):
             continue
         parsed_path = [part for part in urlparse(url).path.split('/') if part]
-        if len(parsed_path) < 4:
+        if len(parsed_path) < 3 or parsed_path[:2] != ['index.php', 'manga']:
             continue
-        series_slug = parsed_path[-2]
-        volume_slug = parsed_path[-1]
+        item_series_slug = parsed_path[2]
+        volume_slug = parsed_path[3] if len(parsed_path) > 3 else None
+        if edition_series_key(item_series_slug) != edition_series_key(series_slug):
+            continue
         item_container = anchor.find_parent(['article', 'li', 'div', 'tr']) or anchor.parent
         container_text = clean_ws(item_container.get_text(' ', strip=True)) if item_container else ''
         title = _edition_item_title(anchor, container_text, volume_slug)
@@ -1135,7 +1179,7 @@ def _edition_group_items(container, *, base_url: str, edition_label: str) -> lis
             SeriesEditionItem(
                 title=title,
                 url=url,
-                series_slug=series_slug,
+                series_slug=item_series_slug,
                 volume_slug=volume_slug,
                 number=number,
                 number_int=parse_volume_number_int(number),
@@ -1208,7 +1252,7 @@ def parse_series_edition_groups_page(
         if content is None or 'boxedContent' not in (content.get('class') or []):
             continue
         edition_label, display_name = _edition_group_label(raw_heading)
-        items = _edition_group_items(content, base_url=base_url, edition_label=edition_label)
+        items = _edition_group_items(content, base_url=base_url, edition_label=edition_label, series_slug=series_slug)
         if not items:
             continue
         slug_counts = Counter(item.series_slug for item in items if item.series_slug)

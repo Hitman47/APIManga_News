@@ -450,6 +450,11 @@ vrai `volume_slug`, puis renvoie la même fiche volume que la route historique.
 Elle est utile quand tu connais `One-piece-Edition-originale` et `110`, mais pas
 forcément `vol-110`.
 
+Les candidats d'une autre série sont écartés, y compris avec `edition_label`.
+Si la page VF ne liste qu'une seule intégrale sans numéro et avec un lien direct
+`/index.php/manga/{slug}`, elle peut être résolue comme tome 1 ; cette inférence
+est signalée dans `warnings`. Aucun numéro n'est déduit s'il y a plusieurs tomes.
+
 Paramètres communs :
 - `blocks`
 - `fields`

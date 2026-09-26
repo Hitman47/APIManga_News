@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from copy import deepcopy
 from datetime import date
@@ -42,6 +43,7 @@ from app.models import (
     VolumeSearchMetaData,
 )
 from app.manga_news.parsers import (
+    edition_series_key,
     parse_news_page,
     parse_planning_page,
     parse_search_page,
@@ -71,7 +73,7 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
-CACHE_SCHEMA_VERSION = '2026-07-29-v2-series-release-cards-1'
+CACHE_SCHEMA_VERSION = '2026-09-26-scoped-series-editions-2'
 DETAIL_PARSER_CACHE_VERSION = '2026-07-22-dom-metadata-1'
 
 SERIES_BLOCKS = {
@@ -1520,6 +1522,7 @@ class MangaNewsService:
         edition_label: str | None = None,
     ) -> Envelope:
         started = time.perf_counter()
+        expected_key = edition_series_key(series_slug)
         if edition_label:
             editions_envelope = await self.get_series_edition_groups(
                 slug=series_slug,
@@ -1529,11 +1532,19 @@ class MangaNewsService:
             selected_group = self._find_edition_group(groups_data, edition_label)
             if selected_group is None:
                 raise ResourceNotFound(f'No VF edition group "{edition_label}" found for series {series_slug}.')
-            vf_items = selected_group.items
+            vf_items = [
+                item for item in selected_group.items
+                if edition_series_key(item.series_slug) == expected_key
+            ]
         else:
             editions_envelope = await self.get_series_editions(slug=series_slug, edition='vf')
             editions_data = SeriesEditionsData.model_validate(editions_envelope.data or {})
             vf_items = editions_data.vf.items if editions_data.vf else []
+            # Never resolve a numbered volume from a sidebar recommendation or
+            # another series, even when a stale editions cache contains it.
+            expected_names = {expected_key, edition_series_key(editions_data.title)}
+            expected_names.discard('')
+            vf_items = [item for item in vf_items if edition_series_key(item.series_slug) in expected_names]
         candidates = [
             item
             for item in vf_items
@@ -1542,6 +1553,25 @@ class MangaNewsService:
             and (edition_label or include_special or not item.is_special)
         ]
         if not candidates:
+            # Manga News gives some single-volume integrals a direct manga URL
+            # without /vol-1 and without an explicit number.
+            unnumbered = [
+                item for item in vf_items
+                if item.number_int is None and not item.volume_slug and item.url and not item.is_special
+            ]
+            if number == 1 and len(vf_items) == 1 and len(unnumbered) == 1:
+                selected = unnumbered[0]
+                volume_response = await self.get_volume(
+                    url=selected.url,
+                    blocks=blocks,
+                    fields=fields,
+                    include_raw_sections=include_raw_sections,
+                    include_parent_editions=include_parent_editions,
+                )
+                if isinstance(volume_response.data, dict) and not volume_response.data.get('number'):
+                    volume_response.data['number'] = '1'
+                    volume_response.warnings.append('Volume number 1 inferred from the sole VF edition item.')
+                return volume_response
             suffix = f' in edition group "{edition_label}"' if edition_label else ''
             raise ResourceNotFound(f'No VF volume number {number} found for series {series_slug}{suffix}.')
         requested_slug = normalize_text(series_slug.replace('-', ' '))
